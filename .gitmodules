@@ -1,0 +1,6 @@
+[submodule "claude-code"]
+	path = claude-code
+	url = https://github.com/Kuberwastaken/claude-code.git
+[submodule "opencode"]
+	path = opencode
+	url = https://github.com/anomalyco/opencode.git
