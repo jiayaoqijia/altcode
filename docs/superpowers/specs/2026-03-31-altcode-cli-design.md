@@ -477,21 +477,37 @@ Tools start executing as soon as their `tool_use` block completes in the stream 
 func (e *Engine) processStream(ctx context.Context, stream <-chan StreamEvent, out chan<- Event) []ToolCall {
     var toolCalls []ToolCall
     var pendingTool *ToolCallBuilder
+    eagerResults := &sync.Map{} // toolCallID -> *Result (for eager-executed tools)
 
     for event := range stream {
         switch event.Type {
         case StreamToolCallEnd:
             call := pendingTool.Build()
             toolCalls = append(toolCalls, call)
-            // Start execution immediately if concurrent-safe
+            // Start execution immediately if concurrent-safe (eager)
             if call.Tool.IsConcurrencySafe() {
-                go e.execToolAsync(ctx, call, out)
+                call.Eager = true
+                go func(c ToolCall) {
+                    r := c.Tool.Execute(ctx, c.Input)
+                    eagerResults.Store(c.ID, r)
+                    out <- Event{Type: EventToolResult, ToolResult: r}
+                }(call)
             }
         // ... text deltas, thinking deltas forwarded to out
         }
     }
+
+    // Attach eager results so dispatchTools skips already-executed tools
+    for i := range toolCalls {
+        if v, ok := eagerResults.Load(toolCalls[i].ID); ok {
+            toolCalls[i].EagerResult = v.(*Result)
+        }
+    }
     return toolCalls
 }
+
+// dispatchTools checks EagerResult before executing:
+// if call.EagerResult != nil { use it } else { execute now }
 ```
 
 ### Subagent System
@@ -561,17 +577,40 @@ Priority: CLI flags > session > project (`.altcode/rules.json`) > user (`~/.conf
 ### Default Allow Rules
 
 ```go
-var DefaultAllowRules = []Rule{
+var DefaultRules = []Rule{
+    // Deny: external directory writes (outside project root)
+    {Tool: "edit", Pattern: "!projectroot/**", Action: Deny},
+    {Tool: "write", Pattern: "!projectroot/**", Action: Deny},
+
+    // Allow: read-only operations
     {Tool: "read", Pattern: "*", Action: Allow},
     {Tool: "glob", Pattern: "*", Action: Allow},
     {Tool: "grep", Pattern: "*", Action: Allow},
     {Tool: "ls", Pattern: "*", Action: Allow},
     {Tool: "fetch", Pattern: "*", Action: Allow},
+
+    // Allow: safe git commands
     {Tool: "bash", Pattern: "git status", Action: Allow},
     {Tool: "bash", Pattern: "git diff *", Action: Allow},
     {Tool: "bash", Pattern: "git log *", Action: Allow},
 }
+// "!projectroot/**" is a magic pattern: matches paths outside the detected project root.
 ```
+
+### Interactive Rule Persistence ("Remember This Decision")
+
+When the user is prompted for permission in `default` mode, they choose from:
+
+| Key | Action | Persistence |
+|---|---|---|
+| `y` | Allow this once | Session only |
+| `n` | Deny this once | Session only |
+| `a` | Always allow this pattern | Saved to project `.altcode/rules.json` |
+| `!` | Always allow this tool (any args) | Saved to project `.altcode/rules.json` |
+
+On `a`, the tool's `PermissionPattern()` output is persisted as an allow rule. On `!`, a wildcard rule `<tool>:*` is persisted. Session-scoped decisions are stored in-memory and cleared on exit.
+
+Slash command `/allow <pattern>` and `/deny <pattern>` allow manual rule creation mid-session (persisted to project config).
 
 ### Doom Loop Detection
 
@@ -651,6 +690,34 @@ type Theme struct {
 - Lipgloss style caching (immutable value types)
 - Lazy markdown re-render (only changed messages)
 
+### Streaming Markdown Strategy
+
+Custom incremental renderer (not glamour, which requires complete input):
+- Parse markdown tokens incrementally as text deltas arrive
+- Code blocks use `alecthomas/chroma` for syntax highlighting
+- Incomplete fenced blocks render with a "streaming..." indicator
+- Only re-render the last (active) message on each delta; completed messages cached as rendered strings
+- Prototype this component first — it is the highest-risk TUI element
+
+### Event Channel Backpressure
+
+The `Event` channel (capacity 64) uses a drop-oldest policy for non-critical events (`TextDelta`) when the consumer is slow. Critical events (`ToolResult`, `PermissionRequest`, `Error`, `Done`) are never dropped — they block until consumed. For remote SDK clients over HTTP, the SSE writer maintains a 256-entry ring buffer; if the client falls behind, intermediate text deltas are coalesced.
+
+### Model-Aware Tool Selection
+
+The tool registry accepts a `ModelCapabilities` struct when resolving tools:
+
+```go
+type ModelCapabilities struct {
+    SupportsToolUse   bool
+    SupportsThinking  bool
+    MaxOutputTokens   int
+    ContextWindow     int
+}
+```
+
+Tools can declare minimum requirements. Models with weak tool-use (small local models) get a reduced tool set. Future: `apply_patch` tool for models that handle unified diffs better than search-and-replace.
+
 ---
 
 ## 8. Storage
@@ -695,7 +762,7 @@ CREATE TABLE permission (
 PRAGMA journal_mode = WAL;
 PRAGMA synchronous = NORMAL;
 PRAGMA busy_timeout = 5000;
-PRAGMA cache_size = -64000;
+PRAGMA cache_size = -8000;   -- 8MB (tuned for <20MB idle memory target)
 ```
 
 ---
@@ -909,6 +976,18 @@ t=???   MCP tools arrive (background, lazy)
 ```
 
 Target: prompt visible in <50ms.
+
+### Graceful Shutdown
+
+On `SIGINT`/`SIGTERM`:
+1. Cancel the root `context.Context` (stops agent loop, provider stream, tool execution)
+2. Wait up to 5s for in-flight tool executions to complete (drain via `sync.WaitGroup`)
+3. Flush pending session writes to SQLite
+4. Send `SIGTERM` to MCP subprocess children, wait 2s, then `SIGKILL`
+5. Close SQLite connection (WAL checkpoint)
+6. Exit
+
+The TUI captures `SIGINT` (Ctrl+C) first — single press cancels current generation, double press within 500ms exits the app.
 
 ---
 
