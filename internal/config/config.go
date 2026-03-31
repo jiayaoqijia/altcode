@@ -1,0 +1,128 @@
+package config
+
+import (
+	"encoding/json"
+	"os"
+	"regexp"
+	"strings"
+)
+
+const DefaultModel = "anthropic/claude-sonnet-4-20250514"
+
+// Config holds the full application configuration.
+type Config struct {
+	Model      string                       `json:"model"`
+	Provider   map[string]ProviderConfig    `json:"provider"`
+	Permission []PermissionRule             `json:"permission"`
+	MCP        map[string]MCPServerConfig   `json:"mcp"`
+	Theme      string                       `json:"theme"`
+	Agent      map[string]AgentConfig       `json:"agent"`
+	Hooks      map[string][]HookConfig      `json:"hooks"`
+}
+
+// ProviderConfig holds API credentials for a model provider.
+type ProviderConfig struct {
+	APIKey  string `json:"apiKey"`
+	BaseURL string `json:"baseURL"`
+}
+
+// PermissionRule controls which tools are allowed or denied.
+type PermissionRule struct {
+	Tool    string `json:"tool"`
+	Pattern string `json:"pattern"`
+	Action  string `json:"action"`
+}
+
+// MCPServerConfig describes an MCP server endpoint.
+type MCPServerConfig struct {
+	Command   string            `json:"command"`
+	Args      []string          `json:"args"`
+	Env       map[string]string `json:"env"`
+	URL       string            `json:"url"`
+	Transport string            `json:"transport"`
+}
+
+// AgentConfig describes a named sub-agent's behaviour.
+type AgentConfig struct {
+	Model string   `json:"model"`
+	Tools []string `json:"tools"`
+}
+
+// HookConfig attaches a shell command to a tool event.
+type HookConfig struct {
+	Tool    string `json:"tool"`
+	Command string `json:"command"`
+}
+
+// Default returns a Config populated with sensible defaults.
+func Default() *Config {
+	return &Config{
+		Model:      DefaultModel,
+		Provider:   make(map[string]ProviderConfig),
+		Permission: []PermissionRule{},
+		MCP:        make(map[string]MCPServerConfig),
+		Theme:      "default",
+		Agent:      make(map[string]AgentConfig),
+		Hooks:      make(map[string][]HookConfig),
+	}
+}
+
+// LoadFile reads a JSONC config file, strips comments, expands env vars,
+// and merges the result on top of the defaults.
+func LoadFile(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+
+	stripped := stripJSONComments(string(data))
+	expanded := ExpandEnv(stripped)
+
+	cfg := Default()
+	if err := json.Unmarshal([]byte(expanded), cfg); err != nil {
+		return nil, err
+	}
+	return cfg, nil
+}
+
+// ExpandEnv replaces $VAR_NAME patterns with values from the environment.
+// Variables that are not set are left as an empty string.
+func ExpandEnv(s string) string {
+	re := regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
+	return re.ReplaceAllStringFunc(s, func(match string) string {
+		name := match[1:] // strip leading '$'
+		if val, ok := os.LookupEnv(name); ok {
+			return val
+		}
+		return ""
+	})
+}
+
+// stripJSONComments removes // line comments from a JSON string.
+// This is intentionally naive: it does not handle comments inside string
+// values, which is acceptable for typical config files.
+func stripJSONComments(s string) string {
+	lines := strings.Split(s, "\n")
+	for i, line := range lines {
+		if idx := indexLineComment(line); idx >= 0 {
+			lines[i] = line[:idx]
+		}
+	}
+	return strings.Join(lines, "\n")
+}
+
+// indexLineComment returns the byte index of the first // comment that is
+// not inside a double-quoted string, or -1 if none is found.
+func indexLineComment(line string) int {
+	inString := false
+	for i := 0; i < len(line)-1; i++ {
+		ch := line[i]
+		if ch == '"' && (i == 0 || line[i-1] != '\\') {
+			inString = !inString
+		}
+		if !inString && ch == '/' && line[i+1] == '/' {
+			return i
+		}
+	}
+	return -1
+}
