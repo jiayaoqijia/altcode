@@ -1,0 +1,48 @@
+{
+  "mcpServers": {
+    "go-language-server": {
+      "type": "stdio",
+      "command": "go",
+      "args": [
+        "run",
+        "github.com/isaacphi/mcp-language-server@latest",
+        "-workspace",
+        "./",
+        "-lsp",
+        "go",
+        "--",
+        "run",
+        "golang.org/x/tools/gopls@latest"
+      ],
+      "env": {}
+    },
+    "typescript-language-server": {
+      "type": "stdio",
+      "command": "go",
+      "args": [
+        "run",
+        "github.com/isaacphi/mcp-language-server@latest",
+        "-workspace",
+        "./",
+        "-lsp",
+        "pnpx",
+        "--",
+        "typescript-language-server",
+        "--stdio"
+      ],
+      "env": {}
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"],
+      "env": {}
+    },
+    "chrome-devtools": {
+      "type": "stdio",
+      "command": "npx",
+      "args": ["-y", "chrome-devtools-mcp@latest"],
+      "env": {}
+    }
+  }
+}

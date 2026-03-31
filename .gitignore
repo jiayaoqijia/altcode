@@ -1,0 +1,101 @@
+# Dependencies
+node_modules/
+vendor/
+.venv/
+venv/
+__pycache__/
+*.pyc
+
+# Build artifacts
+dist/
+build/
+out/
+target/
+*.o
+*.so
+*.dylib
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# Secrets & credentials — NEVER commit these
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.p8
+*.der
+*.crt
+*.cer
+credentials.json
+service-account*.json
+*-credentials.json
+*-key.json
+*.secret
+*.secrets
+secrets/
+.secrets/
+.credentials/
+token.json
+tokens.json
+oauth2.keys.json
+gcp-key.json
+firebase-adminsdk*.json
+*_rsa
+*_rsa.pub
+*_ed25519
+*_ecdsa
+id_rsa
+id_ed25519
+.ssh/
+*.gpg
+*.asc
+.netrc
+.npmrc
+.pypirc
+.docker/config.json
+kubeconfig
+.kube/config
+
+# Testing & coverage
+coverage/
+.nyc_output/
+*.lcov
+htmlcov/
+
+# Logs
+*.log
+logs/
+
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Package managers
+.pnpm-store/
+.yarn/
+*.tgz
+
+# AI agent files (local only)
+.claude/settings.local.json
+AGENTS.local.md
+PLAN.md
+.local/
