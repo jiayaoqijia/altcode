@@ -85,7 +85,7 @@ type anthropicRequest struct {
 
 type anthropicMessage struct {
 	Role    string `json:"role"`
-	Content string `json:"content"`
+	Content any    `json:"content"` // string or []ContentPart
 }
 
 type anthropicSystem struct {
@@ -97,7 +97,7 @@ type anthropicSystem struct {
 func buildAnthropicRequest(req *Request) ([]byte, error) {
 	msgs := make([]anthropicMessage, len(req.Messages))
 	for i, m := range req.Messages {
-		msgs[i] = anthropicMessage{Role: m.Role, Content: m.Content}
+		msgs[i] = toAnthropicMessage(m)
 	}
 	system := make([]anthropicSystem, len(req.System))
 	for i, s := range req.System {
@@ -123,6 +123,13 @@ func buildAnthropicRequest(req *Request) ([]byte, error) {
 		ar.Tools = req.Tools
 	}
 	return json.Marshal(ar)
+}
+
+func toAnthropicMessage(m Message) anthropicMessage {
+	if len(m.Parts) > 0 {
+		return anthropicMessage{Role: m.Role, Content: m.Parts}
+	}
+	return anthropicMessage{Role: m.Role, Content: m.Content}
 }
 
 // processSSE reads SSE events from body and sends StreamEvents to ch.
