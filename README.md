@@ -6,14 +6,19 @@ A minimal, blazing-fast Go CLI/TUI for AI-assisted coding.
 
 ## Features
 
-- **Multi-turn agent loop** — model calls tools, gets results, continues until done
+- **Multi-turn agent loop** — model calls tools, gets results, continues until done (50-iteration cap)
+- **Multi-provider** — Anthropic, OpenAI/Codex, Ollama, LMStudio, any OpenAI-compatible API
 - **7 built-in tools** — read, glob, grep, ls, bash, edit, write
-- **Concurrent tool dispatch** — read-only tools run in parallel
-- **Permission system** — 4 modes (default/auto/bypass/plan) with glob rules and doom loop detection
-- **SQLite session persistence** — conversations survive between invocations
+- **MCP client** — connect to external tool servers via JSON-RPC 2.0 over stdio
+- **Hooks system** — PreToolUse/PostToolUse/Stop hooks with command handlers (Claude Code compatible)
+- **Slash commands** — markdown files with frontmatter, `!backtick` expansion, `$ARGUMENTS`
+- **Plugin system** — discover and load plugins with commands, hooks, and MCP configs
+- **Exec mode** — `altcode "prompt"` for headless use, `--json` for JSONL events
+- **Session persistence** — SQLite storage with `--last` resume and `sessions` subcommand
+- **Permission system** — 4 modes with glob rules, doom loop detection
 - **Streaming TUI** — Bubbletea-based with markdown rendering, themes, status bar
-- **Context compaction** — budget-based truncation and microcompaction
-- **Anthropic provider** — SSE streaming with retry and exponential backoff
+- **Claude Code compatible** — loads CLAUDE.md instructions, plugins, hooks, and commands natively
+- **Rich system prompt** — behavioral instructions borrowed from Claude Code's prompt engineering
 
 ## Quickstart
 
@@ -27,6 +32,20 @@ export ANTHROPIC_API_KEY=sk-...
 
 # Or with model override
 ./dist/altcode --model anthropic/claude-sonnet-4-20250514
+
+# Use with OpenAI/Codex
+export OPENAI_API_KEY=sk-...
+./dist/altcode --model openai/gpt-4
+
+# Use with local Ollama
+./dist/altcode --model ollama/llama3
+
+# Exec mode (headless)
+./dist/altcode "explain this error"
+./dist/altcode --json "list files"  # JSONL output
+
+# Resume last session
+./dist/altcode --last
 ```
 
 ## Architecture
@@ -41,7 +60,11 @@ internal/
 ├── store/           SQLite storage (sessions + messages)
 ├── config/          JSONC config with env expansion + instruction cascade
 ├── compact/         Context compaction (budget + microcompact)
-├── hooks/           Hook system (planned)
+├── hooks/           Hook system (PreToolUse/PostToolUse/Stop)
+├── mcp/             MCP client (JSON-RPC 2.0 over stdio)
+├── command/         Slash commands (markdown with frontmatter)
+├── plugin/          Plugin discovery and loading
+├── exec/            Headless execution mode
 ├── tui/             Bubbletea TUI (markdown, header, status, palette)
 ├── sysctl/          System prompt assembly
 └── event/           Event types for engine ↔ TUI communication
@@ -77,12 +100,13 @@ Instruction files loaded in cascade order:
 
 ## Roadmap
 
-See `docs/plans/` for detailed gap analyses and implementation plans:
+All core phases complete. See `docs/plans/` for gap analyses.
 
 - **Phase A** (complete): ContentPart messages, agent loop, session persistence
-- **Phase B** (planned): Exec mode, session resume
-- **Phase C** (planned): Hooks, slash commands, plugins
-- **Phase D** (planned): Multi-provider (OpenAI, Ollama), MCP client
+- **Phase B** (complete): Exec mode, session resume
+- **Phase C** (complete): Hooks, slash commands, plugins
+- **Phase D** (complete): Multi-provider (OpenAI, Ollama, LMStudio), MCP client
+- **Phase E** (planned): Subagent system, skill loading, output capping, sandbox
 
 ## Development
 
