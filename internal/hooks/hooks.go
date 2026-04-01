@@ -9,11 +9,15 @@ import (
 type Event string
 
 const (
-	PreToolUse   Event = "PreToolUse"
-	PostToolUse  Event = "PostToolUse"
-	Stop         Event = "Stop"
-	SessionStart Event = "SessionStart"
-	SessionEnd   Event = "SessionEnd"
+	PreToolUse       Event = "PreToolUse"
+	PostToolUse      Event = "PostToolUse"
+	Stop             Event = "Stop"
+	SessionStart     Event = "SessionStart"
+	SessionEnd       Event = "SessionEnd"
+	UserPromptSubmit Event = "UserPromptSubmit"
+	SubagentStop     Event = "SubagentStop"
+	PreCompact       Event = "PreCompact"
+	Notification     Event = "Notification"
 )
 
 // MatcherConfig pairs a tool name matcher with hook entries.

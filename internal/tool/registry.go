@@ -32,6 +32,18 @@ func (r *Registry) All() []Tool {
 	return tools
 }
 
+// Subset returns a new Registry containing only the named tools.
+// Tools not found in the source registry are silently skipped.
+func (r *Registry) Subset(names []string) *Registry {
+	sub := NewRegistry()
+	for _, name := range names {
+		if t, ok := r.tools[name]; ok {
+			sub.Register(t)
+		}
+	}
+	return sub
+}
+
 // Schemas returns JSON schemas for every registered tool.
 func (r *Registry) Schemas() []Schema {
 	schemas := make([]Schema, 0, len(r.tools))

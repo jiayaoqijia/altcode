@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 
+	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/hooks"
@@ -40,6 +41,7 @@ type Engine struct {
 	model        string
 	messages     []provider.Message
 	instructions []config.Instruction
+	totalTokens  int // running token count
 }
 
 // New creates an Engine from the given parameters.
@@ -110,9 +112,62 @@ func (e *Engine) SessionID() string {
 	return e.sessionID
 }
 
-// Registry returns the engine's tool registry for external tool registration.
+// Registry returns the engine's tool registry.
 func (e *Engine) Registry() *tool.Registry {
 	return e.tools
+}
+
+// ProviderInstance returns the engine's provider.
+func (e *Engine) ProviderInstance() provider.Provider {
+	return e.provider
+}
+
+// Config returns the engine's configuration.
+func (e *Engine) Config() *config.Config {
+	return e.cfg
+}
+
+// NewWithRegistry creates an Engine with an externally-provided tool registry.
+// Used by the subagent system to create restricted child engines.
+func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, error) {
+	cfg := params.Config
+	_, modelName := parseModel(cfg.Model)
+
+	p, err := createProvider(parseModelProvider(cfg.Model), cfg)
+	if err != nil {
+		return nil, err
+	}
+
+	perm := params.Perm
+	if perm == nil {
+		perm = permission.NewEvaluator(permission.ModeBypass, "", nil)
+	}
+	hooksRunner := params.Hooks
+	if hooksRunner == nil {
+		hooksRunner = hooks.NewRunner(nil)
+	}
+	msgs := params.Messages
+	if msgs == nil {
+		msgs = []provider.Message{}
+	}
+
+	return &Engine{
+		cfg:          cfg,
+		provider:     p,
+		tools:        registry,
+		perm:         perm,
+		hooks:        hooksRunner,
+		store:        params.Store,
+		sessionID:    params.SessionID,
+		model:        modelName,
+		messages:     msgs,
+		instructions: params.Instructions,
+	}, nil
+}
+
+func parseModelProvider(model string) string {
+	name, _ := parseModel(model)
+	return name
 }
 
 func (e *Engine) persistMessage(role string, msg provider.Message) {
@@ -131,6 +186,8 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		Event:     hooks.SessionStart,
 		SessionID: e.sessionID,
 	})
+
+	input = e.fireUserPromptSubmit(ctx, input)
 
 	userMsg := provider.TextMessage("user", input)
 	e.messages = append(e.messages, userMsg)
@@ -168,6 +225,7 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		e.appendAssistantWithTools(turn)
 		results := e.dispatchTools(ctx, turn.ToolCalls, out)
 		e.appendToolResults(turn.ToolCalls, results)
+		e.maybeCompact(ctx)
 	}
 }
 
@@ -360,6 +418,30 @@ func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool
 		}
 		e.messages = append(e.messages, provider.ToolResultMessage(parts))
 	}
+}
+
+func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string {
+	results, _ := e.hooks.Fire(ctx, hooks.UserPromptSubmit, hooks.Input{
+		Event:     hooks.UserPromptSubmit,
+		SessionID: e.sessionID,
+	})
+	for _, r := range results {
+		if r.Message != "" {
+			input = r.Message + "\n\n" + input
+		}
+	}
+	return input
+}
+
+func (e *Engine) maybeCompact(ctx context.Context) {
+	if len(e.messages) < 100 {
+		return
+	}
+	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
+		Event: hooks.PreCompact, SessionID: e.sessionID,
+	})
+	mc := compact.NewMicrocompactor(20)
+	e.messages = mc.Apply(e.messages)
 }
 
 func (e *Engine) fireStopHooks(ctx context.Context) string {
