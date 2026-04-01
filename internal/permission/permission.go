@@ -46,7 +46,10 @@ type callRecord struct {
 
 // NewEvaluator creates an Evaluator with the given mode and rules.
 func NewEvaluator(mode Mode, projectRoot string, rules []Rule) *Evaluator {
-	allRules := append(DefaultRules(), rules...)
+	defaults := DefaultRules()
+	allRules := make([]Rule, 0, len(defaults)+len(rules))
+	allRules = append(allRules, defaults...)
+	allRules = append(allRules, rules...)
 	return &Evaluator{
 		mode:        mode,
 		projectRoot: projectRoot,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const (
@@ -31,7 +32,7 @@ func NewAnthropic(cfg AnthropicConfig) Provider {
 	if cfg.BaseURL == "" {
 		cfg.BaseURL = defaultAnthropicBase
 	}
-	return &anthropicProvider{cfg: cfg, client: &http.Client{}}
+	return &anthropicProvider{cfg: cfg, client: &http.Client{Timeout: 5 * time.Minute}}
 }
 
 func (a *anthropicProvider) Name() string { return "anthropic" }

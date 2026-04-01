@@ -36,8 +36,9 @@ func (c *BudgetCompactor) Apply(messages []provider.Message) []provider.Message 
 			break
 		}
 		if result[i].Role == "tool" && len(result[i].Content) > 100 {
-			freed := len(result[i].Content) - 50
-			result[i].Content = "[result truncated — exceeded budget]"
+			replacement := "[result truncated — exceeded budget]"
+			freed := len(result[i].Content) - len(replacement)
+			result[i].Content = replacement
 			totalSize -= freed
 		}
 	}
