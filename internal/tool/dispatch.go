@@ -7,6 +7,13 @@ import (
 
 // PartitionByConcurrency groups calls into batches where concurrent-safe
 // calls are batched together and non-safe calls form single-item batches.
+func isConcurrencySafe(c Call) bool {
+	if c.Tool == nil || c.EagerResult != nil {
+		return false // nil tools and eager results run sequentially
+	}
+	return c.Tool.IsConcurrencySafe()
+}
+
 func PartitionByConcurrency(calls []Call) [][]Call {
 	if len(calls) == 0 {
 		return nil
@@ -14,10 +21,10 @@ func PartitionByConcurrency(calls []Call) [][]Call {
 
 	var batches [][]Call
 	current := []Call{calls[0]}
-	currentSafe := calls[0].Tool.IsConcurrencySafe()
+	currentSafe := isConcurrencySafe(calls[0])
 
 	for _, call := range calls[1:] {
-		safe := call.Tool.IsConcurrencySafe()
+		safe := isConcurrencySafe(call)
 		if safe && currentSafe {
 			current = append(current, call)
 		} else {
@@ -36,7 +43,7 @@ func Dispatch(ctx context.Context, calls []Call) []Result {
 	var results []Result
 
 	for _, batch := range batches {
-		if len(batch) == 1 || !batch[0].Tool.IsConcurrencySafe() {
+		if len(batch) == 1 || !isConcurrencySafe(batch[0]) {
 			for _, call := range batch {
 				if call.EagerResult != nil {
 					results = append(results, *call.EagerResult)

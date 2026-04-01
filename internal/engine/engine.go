@@ -120,6 +120,8 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 	e.messages = append(e.messages, userMsg)
 	e.persistMessage("user", userMsg)
 
+	defer func() { out <- event.Event{Type: event.Done} }()
+
 	for i := 0; i < maxIterations; i++ {
 		if ctx.Err() != nil {
 			out <- event.Event{Type: event.ErrorEvent, Error: ctx.Err().Error()}
@@ -138,15 +140,13 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 			assistMsg := provider.TextMessage("assistant", turn.Text)
 			e.messages = append(e.messages, assistMsg)
 			e.persistMessage("assistant", assistMsg)
-			break
+			return
 		}
 
 		e.appendAssistantWithTools(turn)
 		results := e.dispatchTools(ctx, turn.ToolCalls, out)
 		e.appendToolResults(turn.ToolCalls, results)
 	}
-
-	out <- event.Event{Type: event.Done}
 }
 
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
