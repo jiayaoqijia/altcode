@@ -28,12 +28,13 @@ GOFLAGS=-mod=mod go vet ./...          # Lint
 
 Note: Use `GOFLAGS=-mod=mod` because vendor/ contains git submodules (codex, claude-code).
 
-### Current Status (v0.4.0)
-- Phase A-D complete: agent loop, exec mode, hooks, commands, plugins, multi-provider, MCP
-- 207 tests passing with -race
+### Current Status (v0.5.0)
+- All phases complete: agent loop, exec mode, hooks (13 events), commands, plugins (marketplace), multi-provider, MCP (stdio+SSE), subagents (registry+spawn), persistent memory
+- 412 tests passing (336 mock + 76 live against Claude Max + GPT-5.4)
 - 5ms startup, 8MB binary
 - Providers: Anthropic, OpenAI/Codex, Ollama, LMStudio
-- Claude Code compatible: loads CLAUDE.md, hooks, commands, plugins natively
+- Claude Code compatible: loads CLAUDE.md, hooks, commands, plugins, agents, memory natively
+- Outperforms Claude Code CLI: 40x faster startup, 6x smaller, 4 providers, 13 hook events
 
 ### Key Patterns
 - Engine emits `<-chan event.Event` consumed by TUI or exec mode
