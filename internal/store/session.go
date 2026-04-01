@@ -79,6 +79,20 @@ func (db *DB) ListSessions() ([]*Session, error) {
 	return sessions, rows.Err()
 }
 
+// LatestSession returns the most recently updated session for a project.
+func (db *DB) LatestSession(projectID string) (*Session, error) {
+	row := db.sql.QueryRow(
+		`SELECT id, project_id, title, model, created_at, updated_at, summary
+		 FROM session WHERE project_id = ? ORDER BY updated_at DESC LIMIT 1`,
+		projectID,
+	)
+	s, err := scanSession(row)
+	if err != nil {
+		return nil, fmt.Errorf("store: no sessions for project %q", projectID)
+	}
+	return s, nil
+}
+
 // UpdateSessionTitle updates the title and bumps updated_at.
 func (db *DB) UpdateSessionTitle(id, title string) error {
 	now := time.Now().UnixMilli()

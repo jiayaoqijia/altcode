@@ -1,8 +1,11 @@
 package store
 
 import (
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/altcode-ai/altcode/internal/provider"
 )
 
 // Message represents a single chat message in a session.
@@ -61,6 +64,19 @@ func (db *DB) ListMessages(sessionID string) ([]*Message, error) {
 		msgs = append(msgs, m)
 	}
 	return msgs, rows.Err()
+}
+
+// ToProviderMessages converts stored messages to provider.Message format.
+func ToProviderMessages(msgs []*Message) []provider.Message {
+	result := make([]provider.Message, 0, len(msgs))
+	for _, m := range msgs {
+		var pm provider.Message
+		if err := json.Unmarshal(m.Content, &pm); err != nil {
+			pm = provider.Message{Role: m.Role, Content: string(m.Content)}
+		}
+		result = append(result, pm)
+	}
+	return result
 }
 
 func scanMessage(s scanner) (*Message, error) {

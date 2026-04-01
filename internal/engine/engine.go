@@ -2,12 +2,14 @@ package engine
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tool"
 )
 
@@ -15,19 +17,23 @@ const maxIterations = 50
 
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
-	Config   *config.Config
-	Perm     *permission.Evaluator // nil = allow all
-	Messages []provider.Message    // pre-loaded for session resume
+	Config    *config.Config
+	Perm      *permission.Evaluator // nil = allow all
+	Store     *store.DB             // nil = no persistence
+	SessionID string                // empty = new session
+	Messages  []provider.Message    // pre-loaded for session resume
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
 type Engine struct {
-	cfg      *config.Config
-	provider provider.Provider
-	tools    *tool.Registry
-	perm     *permission.Evaluator
-	model    string
-	messages []provider.Message
+	cfg       *config.Config
+	provider  provider.Provider
+	tools     *tool.Registry
+	perm      *permission.Evaluator
+	store     *store.DB
+	sessionID string
+	model     string
+	messages  []provider.Message
 }
 
 // New creates an Engine from the given parameters.
@@ -67,12 +73,14 @@ func New(params EngineParams) (*Engine, error) {
 	}
 
 	return &Engine{
-		cfg:      cfg,
-		provider: p,
-		tools:    registry,
-		perm:     perm,
-		model:    modelName,
-		messages: msgs,
+		cfg:       cfg,
+		provider:  p,
+		tools:     registry,
+		perm:      perm,
+		store:     params.Store,
+		sessionID: params.SessionID,
+		model:     modelName,
+		messages:  msgs,
 	}, nil
 }
 
@@ -91,8 +99,26 @@ func (e *Engine) Messages() []provider.Message {
 	return e.messages
 }
 
+// SessionID returns the current session ID.
+func (e *Engine) SessionID() string {
+	return e.sessionID
+}
+
+func (e *Engine) persistMessage(role string, msg provider.Message) {
+	if e.store == nil || e.sessionID == "" {
+		return
+	}
+	data, err := json.Marshal(msg)
+	if err != nil {
+		return
+	}
+	e.store.AddMessage(e.sessionID, role, data, e.model, 0, 0)
+}
+
 func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event) {
-	e.messages = append(e.messages, provider.TextMessage("user", input))
+	userMsg := provider.TextMessage("user", input)
+	e.messages = append(e.messages, userMsg)
+	e.persistMessage("user", userMsg)
 
 	for i := 0; i < maxIterations; i++ {
 		if ctx.Err() != nil {
@@ -109,7 +135,9 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		turn := collectTurn(stream, out)
 
 		if len(turn.ToolCalls) == 0 {
-			e.messages = append(e.messages, provider.TextMessage("assistant", turn.Text))
+			assistMsg := provider.TextMessage("assistant", turn.Text)
+			e.messages = append(e.messages, assistMsg)
+			e.persistMessage("assistant", assistMsg)
 			break
 		}
 
