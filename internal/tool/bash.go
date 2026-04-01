@@ -10,6 +10,15 @@ import (
 	"time"
 )
 
+const maxOutputBytes = 512 * 1024 // 512KB
+
+func truncateOutput(s string) string {
+	if len(s) > maxOutputBytes {
+		return s[:maxOutputBytes] + "\n[output truncated — exceeded 512KB]"
+	}
+	return s
+}
+
 type bashTool struct{}
 
 // NewBashTool creates a tool that executes bash commands.
@@ -68,6 +77,8 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 		}
 		output += stderr.String()
 	}
+
+	output = truncateOutput(output)
 
 	exitCode := 0
 	if err != nil {

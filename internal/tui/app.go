@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/charmbracelet/bubbles/textarea"
@@ -20,6 +21,7 @@ type streamDoneMsg struct{}
 type App struct {
 	engine   *engine.Engine
 	theme    Theme
+	commands map[string]*command.Command
 	input    textarea.Model
 	viewport viewport.Model
 	width    int
@@ -34,17 +36,23 @@ type App struct {
 }
 
 // New creates a new App backed by the given engine and theme.
-func New(eng *engine.Engine, theme Theme) *App {
+func New(eng *engine.Engine, theme Theme, cmds ...*command.Command) *App {
 	ti := textarea.New()
 	ti.Placeholder = "Ask anything... (Ctrl+D to submit, Esc to quit)"
 	ti.Focus()
 	ti.SetHeight(3)
 	ti.ShowLineNumbers = false
 
+	cmdMap := make(map[string]*command.Command, len(cmds))
+	for _, c := range cmds {
+		cmdMap[c.Name] = c
+	}
+
 	return &App{
-		engine: eng,
-		theme:  theme,
-		input:  ti,
+		engine:   eng,
+		theme:    theme,
+		commands: cmdMap,
+		input:    ti,
 	}
 }
 
@@ -166,6 +174,8 @@ func (a *App) submit() tea.Cmd {
 	a.messages = append(a.messages, fmt.Sprintf("> %s", text))
 	a.streaming = ""
 	a.busy = true
+
+	text = a.expandSlashCommand(text)
 	a.updateViewport()
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -173,6 +183,27 @@ func (a *App) submit() tea.Cmd {
 	a.events = a.engine.Run(ctx, text)
 
 	return a.waitForEvent()
+}
+
+func (a *App) expandSlashCommand(text string) string {
+	if !strings.HasPrefix(text, "/") {
+		return text
+	}
+	parts := strings.SplitN(text, " ", 2)
+	name := strings.TrimPrefix(parts[0], "/")
+	args := ""
+	if len(parts) > 1 {
+		args = parts[1]
+	}
+	cmd, ok := a.commands[name]
+	if !ok {
+		return text
+	}
+	expanded, err := cmd.Expand(args)
+	if err != nil {
+		return text
+	}
+	return expanded
 }
 
 func (a *App) waitForEvent() tea.Cmd {

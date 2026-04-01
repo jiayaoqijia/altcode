@@ -8,9 +8,11 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/exec"
+	"github.com/altcode-ai/altcode/internal/mcp"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -105,11 +107,39 @@ func runTUI(params engine.EngineParams) error {
 		return fmt.Errorf("create engine: %w", err)
 	}
 
+	mcpCleanup := connectMCP(params.Config, eng)
+	defer mcpCleanup()
+
+	cmds := discoverCommands()
+
 	theme := tui.GetTheme(params.Config.Theme)
-	app := tui.New(eng, theme)
+	app := tui.New(eng, theme, cmds...)
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
+}
+
+func connectMCP(cfg *config.Config, eng *engine.Engine) func() {
+	if len(cfg.MCP) == 0 {
+		return func() {}
+	}
+	ctx := context.Background()
+	mgr := mcp.NewManager(ctx, cfg.MCP)
+	mgr.RegisterAll(ctx, eng.Registry())
+	return mgr.Close
+}
+
+func discoverCommands() []*command.Command {
+	wd, _ := os.Getwd()
+	projectRoot := config.DetectProjectRoot(wd)
+	home, _ := os.UserHomeDir()
+
+	dirs := []string{
+		filepath.Join(home, ".claude", "commands"),
+		filepath.Join(projectRoot, ".claude", "commands"),
+	}
+	cmds, _ := command.Discover(dirs...)
+	return cmds
 }
 
 func loadSession(db *store.DB, params *engine.EngineParams, last bool, sessionID string) error {

@@ -110,6 +110,11 @@ func (e *Engine) SessionID() string {
 	return e.sessionID
 }
 
+// Registry returns the engine's tool registry for external tool registration.
+func (e *Engine) Registry() *tool.Registry {
+	return e.tools
+}
+
 func (e *Engine) persistMessage(role string, msg provider.Message) {
 	if e.store == nil || e.sessionID == "" {
 		return
@@ -122,6 +127,11 @@ func (e *Engine) persistMessage(role string, msg provider.Message) {
 }
 
 func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event) {
+	e.hooks.Fire(ctx, hooks.SessionStart, hooks.Input{
+		Event:     hooks.SessionStart,
+		SessionID: e.sessionID,
+	})
+
 	userMsg := provider.TextMessage("user", input)
 	e.messages = append(e.messages, userMsg)
 	e.persistMessage("user", userMsg)
@@ -269,7 +279,25 @@ func (e *Engine) dispatchTools(
 		}
 	}
 
+	// Fire PostToolUse hooks
+	e.firePostToolUseHooks(ctx, toolCalls, results)
+
 	return results
+}
+
+func (e *Engine) firePostToolUseHooks(
+	ctx context.Context,
+	toolCalls []collectedToolCall,
+	results []tool.Result,
+) {
+	for i, tc := range toolCalls {
+		e.hooks.Fire(ctx, hooks.PostToolUse, hooks.Input{
+			Event:      hooks.PostToolUse,
+			ToolName:   tc.Name,
+			ToolInput:  tc.Input,
+			ToolOutput: results[i].Output,
+		})
+	}
 }
 
 func (e *Engine) checkPermission(t tool.Tool, tc collectedToolCall) permission.ActionType {
