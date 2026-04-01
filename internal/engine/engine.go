@@ -9,6 +9,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/hooks"
+	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/store"
@@ -27,6 +28,7 @@ type EngineParams struct {
 	Messages     []provider.Message     // pre-loaded for session resume
 	Hooks        *hooks.Runner          // nil = no hooks
 	Instructions []config.Instruction   // loaded from CLAUDE.md etc.
+	Memory       *memory.Store          // nil = no persistent memory
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -36,6 +38,7 @@ type Engine struct {
 	tools        *tool.Registry
 	perm         *permission.Evaluator
 	hooks        *hooks.Runner
+	mem          *memory.Store
 	store        *store.DB
 	sessionID    string
 	model        string
@@ -84,6 +87,7 @@ func New(params EngineParams) (*Engine, error) {
 		tools:        registry,
 		perm:         perm,
 		hooks:        hooksRunner,
+		mem:          params.Memory,
 		store:        params.Store,
 		sessionID:    params.SessionID,
 		model:        modelName,
@@ -157,6 +161,7 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		tools:        registry,
 		perm:         perm,
 		hooks:        hooksRunner,
+		mem:          params.Memory,
 		store:        params.Store,
 		sessionID:    params.SessionID,
 		model:        modelName,
@@ -232,6 +237,16 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
 	env := sysctl.DetectEnv()
 	system := sysctl.BuildSystemPrompt(e.cfg, e.tools, e.instructions, env)
+
+	// Inject persistent memories into system prompt
+	if e.mem != nil {
+		if memCtx := e.mem.ForContext(25 * 1024); memCtx != "" {
+			system = append(system, provider.SystemSection{
+				Content:      memCtx,
+				CacheControl: &provider.CacheControl{Type: "ephemeral"},
+			})
+		}
+	}
 
 	req := &provider.Request{
 		Model:    e.model,

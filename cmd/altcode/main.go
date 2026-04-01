@@ -13,6 +13,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/exec"
 	"github.com/altcode-ai/altcode/internal/mcp"
+	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -79,7 +80,14 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 	projectRoot := config.DetectProjectRoot(wd)
 	instructions, _ := config.LoadInstructions(projectRoot)
 
-	params := engine.EngineParams{Config: cfg, Instructions: instructions}
+	// Load persistent memory (check both altcode and Claude Code dirs)
+	memDir := memory.DefaultDir(projectRoot)
+	if _, err := os.Stat(memDir); os.IsNotExist(err) {
+		memDir = memory.ClaudeCodeDir(projectRoot)
+	}
+	memStore := memory.NewStore(memDir)
+
+	params := engine.EngineParams{Config: cfg, Instructions: instructions, Memory: memStore}
 	if err := loadSession(db, &params, last, sessionID); err != nil {
 		return err
 	}
