@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"strings"
 
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
@@ -50,6 +51,22 @@ func resolveModel(cfg *config.Config, model string) {
 	switch model {
 	case "", "inherit":
 		// keep parent model
+	case "sonnet", "opus", "haiku":
+		// Claude Code agents use short names like "sonnet", "opus", "haiku".
+		// When running with a non-Anthropic provider, keep the parent model
+		// to avoid provider mismatch. Only override if already on Anthropic.
+		if strings.HasPrefix(cfg.Model, "anthropic/") || !strings.Contains(cfg.Model, "/") {
+			// Anthropic provider — resolve short name
+			switch model {
+			case "sonnet":
+				cfg.Model = "anthropic/claude-sonnet-4-20250514"
+			case "opus":
+				cfg.Model = "anthropic/claude-opus-4-6-20250514"
+			case "haiku":
+				cfg.Model = "anthropic/claude-haiku-4-5-20251001"
+			}
+		}
+		// Non-Anthropic (OpenAI/Ollama) — keep parent model
 	default:
 		cfg.Model = model
 	}
