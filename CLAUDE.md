@@ -1,3 +1,47 @@
+# Altcode Project Guide
+
+## Project: altcode CLI
+
+A Go CLI/TUI for AI-assisted coding. Architecture:
+
+```
+cmd/altcode/main.go         → Cobra CLI entry point
+internal/engine/             → Agent loop (tool dispatch, session persistence)
+internal/provider/           → Provider interface + Anthropic SSE streaming
+internal/tool/               → Tool interface, registry, concurrent dispatch
+internal/permission/         → Permission evaluator (4 modes, doom loop)
+internal/store/              → SQLite sessions + messages
+internal/config/             → JSONC config, env expansion, instruction cascade
+internal/compact/            → Context compaction (budget + micro)
+internal/tui/                → Bubbletea TUI
+internal/event/              → Event types (engine ↔ TUI)
+internal/hooks/              → Hook system (planned)
+internal/sysctl/             → System prompt assembly
+```
+
+### Build & Test
+```bash
+make build                   # Build to dist/altcode
+GOFLAGS=-mod=mod go test ./... -race   # Run all tests (114+)
+GOFLAGS=-mod=mod go vet ./...          # Lint
+```
+
+Note: Use `GOFLAGS=-mod=mod` because vendor/ contains git submodules (codex, claude-code).
+
+### Current Status (v0.2.0)
+- Phase A complete: ContentPart messages, agent loop with tool dispatch, session persistence
+- 114+ tests passing with -race
+- 5ms startup, 8MB binary
+
+### Key Patterns
+- Engine emits `<-chan event.Event` consumed by TUI or exec mode
+- Tool dispatch respects concurrency (read tools parallel, write tools sequential)
+- Messages use ContentPart for tool_use/tool_result blocks
+- Permission evaluator checks before every tool execution
+- Session messages persisted as JSON in SQLite
+
+---
+
 # Project Development Guide
 
 ## Startup: sync skills from gstack
