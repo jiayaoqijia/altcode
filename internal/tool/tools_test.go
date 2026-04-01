@@ -1,0 +1,145 @@
+package tool_test
+
+import (
+	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/altcode-ai/altcode/internal/tool"
+)
+
+func setupTestDir(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n"), 0o644)
+	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\nThis is a test."), 0o644)
+	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
+	os.WriteFile(filepath.Join(dir, "sub", "data.txt"), []byte("line1\nline2\nline3\n"), 0o644)
+	return dir
+}
+
+func TestReadTool(t *testing.T) {
+	dir := setupTestDir(t)
+	rt := tool.NewReadTool()
+
+	input, _ := json.Marshal(map[string]any{"file_path": filepath.Join(dir, "hello.go")})
+	result, err := rt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Output == "" {
+		t.Fatal("Expected non-empty output")
+	}
+	if result.Title == "" {
+		t.Fatal("Expected non-empty title")
+	}
+}
+
+func TestReadToolWithLineRange(t *testing.T) {
+	dir := setupTestDir(t)
+	rt := tool.NewReadTool()
+
+	input, _ := json.Marshal(map[string]any{
+		"file_path": filepath.Join(dir, "sub", "data.txt"),
+		"offset":    1,
+		"limit":     2,
+	})
+	result, err := rt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	t.Logf("Output: %s", result.Output)
+}
+
+func TestGlobTool(t *testing.T) {
+	dir := setupTestDir(t)
+	gt := tool.NewGlobTool()
+
+	input, _ := json.Marshal(map[string]any{"pattern": "*.go", "path": dir})
+	result, err := gt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Output == "" {
+		t.Fatal("Expected matches")
+	}
+	t.Logf("Glob output: %s", result.Output)
+}
+
+func TestLsTool(t *testing.T) {
+	dir := setupTestDir(t)
+	lt := tool.NewLsTool()
+
+	input, _ := json.Marshal(map[string]any{"path": dir})
+	result, err := lt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Output == "" {
+		t.Fatal("Expected directory listing")
+	}
+	t.Logf("Ls output: %s", result.Output)
+}
+
+func TestBashTool(t *testing.T) {
+	bt := tool.NewBashTool()
+	input, _ := json.Marshal(map[string]any{"command": "echo hello"})
+	result, err := bt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Output, "hello") {
+		t.Fatalf("Expected output to contain 'hello', got %q", result.Output)
+	}
+}
+
+func TestEditTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "test.txt")
+	os.WriteFile(path, []byte("hello world\nfoo bar\n"), 0o644)
+
+	et := tool.NewEditTool()
+	input, _ := json.Marshal(map[string]any{
+		"file_path":  path,
+		"old_string": "hello world",
+		"new_string": "hello altcode",
+	})
+	result, err := et.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("Tool error: %v", result.Error)
+	}
+
+	data, _ := os.ReadFile(path)
+	if !strings.Contains(string(data), "hello altcode") {
+		t.Fatalf("Expected 'hello altcode', got %q", string(data))
+	}
+}
+
+func TestWriteTool(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "new.txt")
+
+	wt := tool.NewWriteTool()
+	input, _ := json.Marshal(map[string]any{
+		"file_path": path,
+		"content":   "brand new file\n",
+	})
+	result, err := wt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("Tool error: %v", result.Error)
+	}
+
+	data, _ := os.ReadFile(path)
+	if string(data) != "brand new file\n" {
+		t.Fatalf("Expected 'brand new file\\n', got %q", string(data))
+	}
+}

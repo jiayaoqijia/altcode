@@ -7,12 +7,14 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/altcode-ai/altcode/internal/tool"
 )
 
 // Engine orchestrates conversation turns between the user and an AI provider.
 type Engine struct {
 	cfg      *config.Config
 	provider provider.Provider
+	tools    *tool.Registry
 	model    string
 	messages []provider.Message
 }
@@ -33,9 +35,19 @@ func New(cfg *config.Config) (*Engine, error) {
 		return nil, fmt.Errorf("unsupported provider: %s", providerName)
 	}
 
+	registry := tool.NewRegistry()
+	registry.Register(tool.NewReadTool())
+	registry.Register(tool.NewGlobTool())
+	registry.Register(tool.NewGrepTool())
+	registry.Register(tool.NewLsTool())
+	registry.Register(tool.NewBashTool())
+	registry.Register(tool.NewEditTool())
+	registry.Register(tool.NewWriteTool())
+
 	return &Engine{
 		cfg:      cfg,
 		provider: p,
+		tools:    registry,
 		model:    modelName,
 	}, nil
 }
@@ -61,6 +73,7 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		System: []provider.SystemSection{
 			{Content: "You are a helpful coding assistant. Be concise."},
 		},
+		Tools:     e.toolSchemas(),
 		MaxTokens: 4096,
 	}
 
@@ -97,6 +110,18 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		Role: "assistant", Content: fullText,
 	})
 	out <- event.Event{Type: event.Done}
+}
+
+func (e *Engine) toolSchemas() []provider.ToolSchema {
+	var schemas []provider.ToolSchema
+	for _, t := range e.tools.All() {
+		schemas = append(schemas, provider.ToolSchema{
+			Name:        t.Name(),
+			Description: t.Description(),
+			InputSchema: t.Parameters(),
+		})
+	}
+	return schemas
 }
 
 func parseModel(model string) (providerName, modelName string) {
