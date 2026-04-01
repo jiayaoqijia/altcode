@@ -2,9 +2,11 @@ package plugin
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 
+	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
 )
@@ -14,10 +16,10 @@ type Manifest struct {
 	Name        string `json:"name"`
 	Version     string `json:"version,omitempty"`
 	Description string `json:"description,omitempty"`
-	Commands    string `json:"commands,omitempty"`    // relative path to commands dir
-	Hooks       string `json:"hooks,omitempty"`       // relative path to hooks.json
-	Agents      string `json:"agents,omitempty"`      // relative path to agents dir
-	MCPServers  string `json:"mcpServers,omitempty"`  // relative path to .mcp.json
+	Commands    string `json:"commands,omitempty"`
+	Hooks       string `json:"hooks,omitempty"`
+	Agents      string `json:"agents,omitempty"`
+	MCPServers  string `json:"mcpServers,omitempty"`
 }
 
 // Plugin is a loaded plugin with its resolved components.
@@ -25,19 +27,27 @@ type Plugin struct {
 	Manifest Manifest
 	Dir      string
 	Commands []*command.Command
+	Agents   []*agent.Agent
 	Hooks    map[string][]config.HookMatcherConfig
 }
 
-// loadManifest reads plugin.json from the given directory.
+// loadManifest reads plugin.json from .altcode-plugin/ or .claude-plugin/.
 func loadManifest(pluginDir string) (*Manifest, error) {
-	path := filepath.Join(pluginDir, ".altcode-plugin", "plugin.json")
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
+	// Support both altcode and Claude Code plugin directories
+	paths := []string{
+		filepath.Join(pluginDir, ".altcode-plugin", "plugin.json"),
+		filepath.Join(pluginDir, ".claude-plugin", "plugin.json"),
 	}
-	var m Manifest
-	if err := json.Unmarshal(data, &m); err != nil {
-		return nil, err
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var m Manifest
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, err
+		}
+		return &m, nil
 	}
-	return &m, nil
+	return nil, fmt.Errorf("plugin.json not found in %s", pluginDir)
 }

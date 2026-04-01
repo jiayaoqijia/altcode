@@ -5,12 +5,12 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
 )
 
 // Discover finds plugins in the given directories.
-// Each subdirectory containing .altcode-plugin/plugin.json is a plugin.
 func Discover(dirs ...string) ([]*Plugin, error) {
 	var plugins []*Plugin
 	for _, dir := range dirs {
@@ -27,19 +27,16 @@ func discoverInDir(dir string) ([]*Plugin, error) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
 	}
-
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
 	}
-
 	var plugins []*Plugin
 	for _, e := range entries {
 		if !e.IsDir() {
 			continue
 		}
-		pluginDir := filepath.Join(dir, e.Name())
-		p, err := Load(pluginDir)
+		p, err := Load(filepath.Join(dir, e.Name()))
 		if err != nil {
 			continue
 		}
@@ -62,6 +59,7 @@ func Load(pluginDir string) (*Plugin, error) {
 	}
 
 	p.Commands, _ = loadCommands(pluginDir, manifest)
+	p.Agents, _ = loadAgents(pluginDir, manifest)
 	loadHooks(pluginDir, manifest, p.Hooks)
 
 	return p, nil
@@ -75,6 +73,14 @@ func loadCommands(pluginDir string, m *Manifest) ([]*command.Command, error) {
 	return command.Discover(cmdDir)
 }
 
+func loadAgents(pluginDir string, m *Manifest) ([]*agent.Agent, error) {
+	agentDir := filepath.Join(pluginDir, "agents")
+	if m.Agents != "" {
+		agentDir = filepath.Join(pluginDir, m.Agents)
+	}
+	return agent.Discover(agentDir)
+}
+
 func loadHooks(pluginDir string, m *Manifest, out map[string][]config.HookMatcherConfig) {
 	hookFile := filepath.Join(pluginDir, "hooks", "hooks.json")
 	if m.Hooks != "" {
@@ -86,7 +92,6 @@ func loadHooks(pluginDir string, m *Manifest, out map[string][]config.HookMatche
 		return
 	}
 
-	// Plugin hooks.json has wrapper: {"hooks": {...}}
 	var wrapper struct {
 		Hooks map[string][]config.HookMatcherConfig `json:"hooks"`
 	}
