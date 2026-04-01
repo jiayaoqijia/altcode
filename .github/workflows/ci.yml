@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build
+        run: GOFLAGS=-mod=mod go build ./...
+
+      - name: Test
+        run: GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=120s
+
+      - name: Vet
+        run: GOFLAGS=-mod=mod go vet ./...
+
+      - name: Binary size check
+        run: |
+          GOFLAGS=-mod=mod go build -ldflags="-s -w" -o /tmp/altcode ./cmd/altcode
+          SIZE=$(stat -c%s /tmp/altcode)
+          echo "Binary size: $((SIZE / 1024 / 1024))MB"
+          if [ "$SIZE" -gt 20971520 ]; then
+            echo "FAIL: Binary exceeds 20MB"
+            exit 1
+          fi
