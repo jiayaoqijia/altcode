@@ -36,32 +36,78 @@ altcode is a **multi-provider** alternative to Claude Code CLI that runs the **s
 - **Claude Code compatible** — loads CLAUDE.md, plugins, hooks, commands, agents, and memory natively
 - **Rich system prompt** — behavioral instructions borrowed from Claude Code's prompt engineering
 
-## Quickstart
+## Install
 
+**From source (recommended):**
 ```bash
-make build
-
-# Anthropic
-export ANTHROPIC_API_KEY=sk-ant-...
-./dist/altcode
-
-# OpenAI / Codex
-export OPENAI_API_KEY=sk-...
-./dist/altcode --model openai/gpt-4
-
-# Local Ollama
-./dist/altcode --model ollama/llama3
-
-# Exec mode
-./dist/altcode "explain this error"
-./dist/altcode --json "list files"
-
-# Resume last session
-./dist/altcode --last
-
-# List sessions
-./dist/altcode sessions
+curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash
 ```
+
+**Manual build:**
+```bash
+git clone https://github.com/jiayaoqijia/altcode.git
+cd altcode
+make build
+sudo cp dist/altcode /usr/local/bin/
+```
+
+**Go install:**
+```bash
+go install github.com/altcode-ai/altcode/cmd/altcode@latest
+```
+
+**Requirements:** Go 1.23+ (for building from source)
+
+## Get Started
+
+1. Set your API key:
+
+    **Anthropic (Claude):**
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    ```
+
+    **OpenAI / Codex:**
+    ```bash
+    export OPENAI_API_KEY=sk-...
+    ```
+
+    **Local models (no key needed):**
+    ```bash
+    # Ollama (install from https://ollama.ai)
+    ollama serve &
+    ```
+
+2. Run altcode:
+
+    ```bash
+    # Interactive TUI
+    altcode
+
+    # With model override
+    altcode --model openai/gpt-4
+    altcode --model ollama/llama3
+
+    # Headless (for scripts/CI)
+    altcode "explain this error"
+    altcode --json "list files"
+
+    # Resume previous session
+    altcode --last
+
+    # List sessions
+    altcode sessions
+    ```
+
+3. (Optional) Install Claude Code plugins:
+
+    ```bash
+    # Clone Claude Code plugins into your project
+    git clone https://github.com/anthropics/claude-code.git /tmp/claude-code
+    cp -r /tmp/claude-code/plugins ~/.config/altcode/plugins/
+    ```
+
+    Plugins are auto-discovered from `~/.config/altcode/plugins/` and `.altcode/plugins/`.
 
 ## Architecture
 
