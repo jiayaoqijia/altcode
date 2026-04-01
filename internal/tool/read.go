@@ -14,7 +14,9 @@ type readTool struct{}
 func NewReadTool() Tool { return &readTool{} }
 
 func (t *readTool) Name() string                                  { return "read" }
-func (t *readTool) Description() string                           { return "Read a file's contents. Supports line offset and limit." }
+func (t *readTool) Description() string {
+	return "Read a file from the local filesystem. You MUST read a file before editing it. Use offset and limit for large files to read specific portions."
+}
 func (t *readTool) IsConcurrencySafe() bool                       { return true }
 func (t *readTool) IsReadOnly() bool                              { return true }
 func (t *readTool) PermissionPattern(input json.RawMessage) string {

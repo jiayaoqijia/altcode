@@ -11,6 +11,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/altcode-ai/altcode/internal/sysctl"
 	"github.com/altcode-ai/altcode/internal/tool"
 )
 
@@ -18,25 +19,27 @@ const maxIterations = 50
 
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
-	Config    *config.Config
-	Perm      *permission.Evaluator // nil = allow all
-	Store     *store.DB             // nil = no persistence
-	SessionID string                // empty = new session
-	Messages  []provider.Message    // pre-loaded for session resume
-	Hooks     *hooks.Runner         // nil = no hooks
+	Config       *config.Config
+	Perm         *permission.Evaluator  // nil = allow all
+	Store        *store.DB              // nil = no persistence
+	SessionID    string                 // empty = new session
+	Messages     []provider.Message     // pre-loaded for session resume
+	Hooks        *hooks.Runner          // nil = no hooks
+	Instructions []config.Instruction   // loaded from CLAUDE.md etc.
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
 type Engine struct {
-	cfg       *config.Config
-	provider  provider.Provider
-	tools     *tool.Registry
-	perm      *permission.Evaluator
-	hooks     *hooks.Runner
-	store     *store.DB
-	sessionID string
-	model     string
-	messages  []provider.Message
+	cfg          *config.Config
+	provider     provider.Provider
+	tools        *tool.Registry
+	perm         *permission.Evaluator
+	hooks        *hooks.Runner
+	store        *store.DB
+	sessionID    string
+	model        string
+	messages     []provider.Message
+	instructions []config.Instruction
 }
 
 // New creates an Engine from the given parameters.
@@ -81,15 +84,16 @@ func New(params EngineParams) (*Engine, error) {
 	}
 
 	return &Engine{
-		cfg:       cfg,
-		provider:  p,
-		tools:     registry,
-		perm:      perm,
-		hooks:     hooksRunner,
-		store:     params.Store,
-		sessionID: params.SessionID,
-		model:     modelName,
-		messages:  msgs,
+		cfg:          cfg,
+		provider:     p,
+		tools:        registry,
+		perm:         perm,
+		hooks:        hooksRunner,
+		store:        params.Store,
+		sessionID:    params.SessionID,
+		model:        modelName,
+		messages:     msgs,
+		instructions: params.Instructions,
 	}, nil
 }
 
@@ -165,13 +169,14 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 }
 
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
+	env := sysctl.DetectEnv()
+	system := sysctl.BuildSystemPrompt(e.cfg, e.tools, e.instructions, env)
+
 	req := &provider.Request{
 		Model:    e.model,
 		Messages: e.messages,
-		System: []provider.SystemSection{
-			{Content: "You are a helpful coding assistant. Be concise."},
-		},
-		Tools:     e.toolSchemas(),
+		System:   system,
+		Tools:    e.toolSchemas(),
 		MaxTokens: 4096,
 	}
 	return e.provider.Stream(ctx, req)

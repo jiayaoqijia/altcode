@@ -14,7 +14,9 @@ type lsTool struct{}
 func NewLsTool() Tool { return &lsTool{} }
 
 func (t *lsTool) Name() string                               { return "ls" }
-func (t *lsTool) Description() string                        { return "List directory contents." }
+func (t *lsTool) Description() string {
+	return "List directory contents with file sizes and types. Use to understand project structure before diving into specific files."
+}
 func (t *lsTool) IsConcurrencySafe() bool                    { return true }
 func (t *lsTool) IsReadOnly() bool                           { return true }
 func (t *lsTool) PermissionPattern(_ json.RawMessage) string { return "ls:*" }

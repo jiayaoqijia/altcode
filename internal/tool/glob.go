@@ -16,7 +16,9 @@ type globTool struct{}
 func NewGlobTool() Tool { return &globTool{} }
 
 func (t *globTool) Name() string                                  { return "glob" }
-func (t *globTool) Description() string                           { return "Find files matching a glob pattern." }
+func (t *globTool) Description() string {
+	return "Find files by name pattern. Use this to locate files before creating new ones — check if similar files already exist. Supports patterns like *.go or *.ts."
+}
 func (t *globTool) IsConcurrencySafe() bool                       { return true }
 func (t *globTool) IsReadOnly() bool                              { return true }
 func (t *globTool) PermissionPattern(_ json.RawMessage) string    { return "glob:*" }

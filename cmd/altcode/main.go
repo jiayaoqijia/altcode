@@ -73,7 +73,11 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 		}
 	}()
 
-	params := engine.EngineParams{Config: cfg}
+	wd, _ := os.Getwd()
+	projectRoot := config.DetectProjectRoot(wd)
+	instructions, _ := config.LoadInstructions(projectRoot)
+
+	params := engine.EngineParams{Config: cfg, Instructions: instructions}
 	if err := loadSession(db, &params, last, sessionID); err != nil {
 		return err
 	}

@@ -16,7 +16,9 @@ type bashTool struct{}
 func NewBashTool() Tool { return &bashTool{} }
 
 func (t *bashTool) Name() string               { return "bash" }
-func (t *bashTool) Description() string         { return "Execute a bash command and return its output." }
+func (t *bashTool) Description() string {
+	return "Execute a bash command. Use for builds, tests, git, and commands without dedicated tools. Do NOT use for file reading (use read), searching (use grep), or file listing (use ls). Prefer short, targeted commands."
+}
 func (t *bashTool) IsConcurrencySafe() bool     { return false }
 func (t *bashTool) IsReadOnly() bool            { return false }
 func (t *bashTool) PermissionPattern(input json.RawMessage) string {

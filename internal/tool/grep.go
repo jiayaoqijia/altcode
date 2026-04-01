@@ -14,7 +14,9 @@ type grepTool struct{}
 func NewGrepTool() Tool { return &grepTool{} }
 
 func (t *grepTool) Name() string                               { return "grep" }
-func (t *grepTool) Description() string                        { return "Search file contents using ripgrep. Falls back to grep." }
+func (t *grepTool) Description() string {
+	return "Search file contents using regex patterns. Use this instead of bash grep — it's faster and provides better output. Results capped at 200 lines."
+}
 func (t *grepTool) IsConcurrencySafe() bool                    { return true }
 func (t *grepTool) IsReadOnly() bool                           { return true }
 func (t *grepTool) PermissionPattern(_ json.RawMessage) string { return "grep:*" }

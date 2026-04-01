@@ -14,7 +14,9 @@ type editTool struct{}
 func NewEditTool() Tool { return &editTool{} }
 
 func (t *editTool) Name() string               { return "edit" }
-func (t *editTool) Description() string         { return "Perform exact string replacement in a file." }
+func (t *editTool) Description() string {
+	return "Perform exact string replacement in a file. You MUST read the file first. Provide enough surrounding context in old_string to make the match unique. The edit will FAIL if old_string matches multiple locations."
+}
 func (t *editTool) IsConcurrencySafe() bool     { return false }
 func (t *editTool) IsReadOnly() bool            { return false }
 func (t *editTool) PermissionPattern(input json.RawMessage) string {

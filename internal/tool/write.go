@@ -14,7 +14,9 @@ type writeTool struct{}
 func NewWriteTool() Tool { return &writeTool{} }
 
 func (t *writeTool) Name() string               { return "write" }
-func (t *writeTool) Description() string         { return "Write content to a file, creating it if necessary." }
+func (t *writeTool) Description() string {
+	return "Write content to a file, creating directories if needed. Prefer the edit tool for modifying existing files — use write only for new files or complete rewrites."
+}
 func (t *writeTool) IsConcurrencySafe() bool     { return false }
 func (t *writeTool) IsReadOnly() bool            { return false }
 func (t *writeTool) PermissionPattern(input json.RawMessage) string {
