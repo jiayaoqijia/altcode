@@ -4,3 +4,6 @@
 [submodule "opencode"]
 	path = opencode
 	url = https://github.com/anomalyco/opencode.git
+[submodule "vendor/codex"]
+	path = vendor/codex
+	url = https://github.com/openai/codex.git
