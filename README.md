@@ -60,22 +60,20 @@ go install github.com/altcode-ai/altcode/cmd/altcode@latest
 
 ## Get Started
 
-1. Set your API key:
+1. **Zero configuration** — altcode auto-detects your existing subscriptions:
 
-    **Anthropic (Claude):**
-    ```bash
-    export ANTHROPIC_API_KEY=sk-ant-...
-    ```
+    | If you have... | altcode uses it automatically |
+    |----------------|------------------------------|
+    | Claude Code CLI (`~/.claude/.credentials.json`) | Claude subscription (Max/Pro) |
+    | Codex CLI (`~/.codex/auth.json`) | Codex subscription + relay URL |
+    | `ANTHROPIC_API_KEY` env var | Anthropic API key |
+    | `OPENAI_API_KEY` env var | OpenAI API key |
 
-    **OpenAI / Codex:**
-    ```bash
-    export OPENAI_API_KEY=sk-...
-    ```
+    **No setup needed if you already use Claude Code or Codex CLI.**
 
-    **Local models (no key needed):**
+    For local models (no key needed):
     ```bash
-    # Ollama (install from https://ollama.ai)
-    ollama serve &
+    ollama serve &  # install from https://ollama.ai
     ```
 
 2. Run altcode:

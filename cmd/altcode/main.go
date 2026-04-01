@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/altcode-ai/altcode/internal/auth"
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
@@ -241,6 +242,10 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 			cfg.Provider["openai"] = config.ProviderConfig{APIKey: key}
 		}
 	}
+
+	// Auto-detect credentials from Claude Code and Codex CLI installs
+	auth.LoadFromCLIs(cfg)
+
 	return cfg
 }
 
