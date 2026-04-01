@@ -198,6 +198,11 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 			cfg.Provider["anthropic"] = config.ProviderConfig{APIKey: key}
 		}
 	}
+	if key := os.Getenv("OPENAI_API_KEY"); key != "" {
+		if p, ok := cfg.Provider["openai"]; !ok || p.APIKey == "" {
+			cfg.Provider["openai"] = config.ProviderConfig{APIKey: key}
+		}
+	}
 	return cfg
 }
 

@@ -47,16 +47,9 @@ func New(params EngineParams) (*Engine, error) {
 	cfg := params.Config
 	providerName, modelName := parseModel(cfg.Model)
 
-	var p provider.Provider
-	switch providerName {
-	case "anthropic":
-		pcfg := cfg.Provider["anthropic"]
-		p = provider.NewAnthropic(provider.AnthropicConfig{
-			APIKey:  pcfg.APIKey,
-			BaseURL: pcfg.BaseURL,
-		})
-	default:
-		return nil, fmt.Errorf("unsupported provider: %s", providerName)
+	p, err := createProvider(providerName, cfg)
+	if err != nil {
+		return nil, err
 	}
 
 	registry := tool.NewRegistry()
@@ -303,15 +296,42 @@ func (e *Engine) askPermission(tc collectedToolCall, out chan<- event.Event) too
 }
 
 func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool.Result) {
-	var parts []provider.ContentPart
+	providerName, _ := parseModel(e.cfg.Model)
+
 	for i, tc := range toolCalls {
 		output := results[i].Output
 		if results[i].Error != nil {
 			output = fmt.Sprintf("Error: %v", results[i].Error)
 		}
-		parts = append(parts, provider.NewToolResultPart(tc.ID, output))
+
+		switch providerName {
+		case "openai", "ollama", "lmstudio":
+			// OpenAI expects one role="tool" message per tool result
+			e.messages = append(e.messages, provider.Message{
+				Role: "tool",
+				Parts: []provider.ContentPart{
+					provider.NewToolResultPart(tc.ID, output),
+				},
+			})
+		default:
+			// Anthropic batches tool results in a single user message
+			// (handled after loop)
+		}
 	}
-	e.messages = append(e.messages, provider.ToolResultMessage(parts))
+
+	// Anthropic: batch all results into one user message
+	provName, _ := parseModel(e.cfg.Model)
+	if provName == "anthropic" || provName == "" {
+		var parts []provider.ContentPart
+		for i, tc := range toolCalls {
+			output := results[i].Output
+			if results[i].Error != nil {
+				output = fmt.Sprintf("Error: %v", results[i].Error)
+			}
+			parts = append(parts, provider.NewToolResultPart(tc.ID, output))
+		}
+		e.messages = append(e.messages, provider.ToolResultMessage(parts))
+	}
 }
 
 func (e *Engine) fireStopHooks(ctx context.Context) string {
@@ -338,6 +358,41 @@ func (e *Engine) toolSchemas() []provider.ToolSchema {
 		})
 	}
 	return schemas
+}
+
+func createProvider(name string, cfg *config.Config) (provider.Provider, error) {
+	switch name {
+	case "anthropic":
+		pcfg := cfg.Provider["anthropic"]
+		return provider.NewAnthropic(provider.AnthropicConfig{
+			APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
+		}), nil
+	case "openai":
+		pcfg := cfg.Provider["openai"]
+		return provider.NewOpenAI(provider.OpenAIConfig{
+			APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
+		}), nil
+	case "ollama":
+		pcfg := cfg.Provider["ollama"]
+		base := pcfg.BaseURL
+		if base == "" {
+			base = "http://localhost:11434"
+		}
+		return provider.NewOpenAI(provider.OpenAIConfig{
+			BaseURL: base,
+		}), nil
+	case "lmstudio":
+		pcfg := cfg.Provider["lmstudio"]
+		base := pcfg.BaseURL
+		if base == "" {
+			base = "http://localhost:1234"
+		}
+		return provider.NewOpenAI(provider.OpenAIConfig{
+			BaseURL: base,
+		}), nil
+	default:
+		return nil, fmt.Errorf("unsupported provider: %s", name)
+	}
 }
 
 func parseModel(model string) (providerName, modelName string) {
