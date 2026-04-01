@@ -1253,7 +1253,7 @@ func TestEngineCreation_UnsupportedProvider(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model = "openai/gpt-4"
 
-	_, err := engine.New(cfg)
+	_, err := engine.New(engine.EngineParams{Config: cfg})
 	if err == nil {
 		t.Fatal("Expected error for unsupported provider")
 	}
@@ -1267,7 +1267,7 @@ func TestEngineCreation_DefaultProvider(t *testing.T) {
 	cfg.Model = "claude-haiku-4-5-20251001" // no provider prefix
 	cfg.Provider["anthropic"] = config.ProviderConfig{APIKey: "test"}
 
-	eng, err := engine.New(cfg)
+	eng, err := engine.New(engine.EngineParams{Config: cfg})
 	if err != nil {
 		t.Fatalf("Should default to anthropic: %v", err)
 	}
@@ -1355,5 +1355,5 @@ var _ = event.PermissionResponse
 var _ = event.ErrorEvent
 var _ = event.Done
 
-// Ensure engine import works
-var _ = engine.New
+// Ensure engine types are importable
+var _ engine.EngineParams

@@ -67,7 +67,7 @@ func runTUI(modelFlag, configFlag, themeFlag string) error {
 		}
 	}
 
-	eng, err := engine.New(cfg)
+	eng, err := engine.New(engine.EngineParams{Config: cfg})
 	if err != nil {
 		return fmt.Errorf("create engine: %w", err)
 	}
