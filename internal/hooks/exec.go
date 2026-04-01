@@ -31,6 +31,7 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", entry.Command)
+	cmd.WaitDelay = time.Second // ensure child processes are cleaned up
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
