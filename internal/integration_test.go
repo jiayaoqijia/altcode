@@ -1251,7 +1251,7 @@ func TestToolIntegration_RegistrySchemas(t *testing.T) {
 
 func TestEngineCreation_UnsupportedProvider(t *testing.T) {
 	cfg := config.Default()
-	cfg.Model = "openai/gpt-4"
+	cfg.Model = "gemini/gemini-pro"
 
 	_, err := engine.New(engine.EngineParams{Config: cfg})
 	if err == nil {

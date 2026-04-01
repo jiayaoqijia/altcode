@@ -996,7 +996,7 @@ func TestSession_ToProviderMessagesPlainText(t *testing.T) {
 
 func TestEngine_UnsupportedProvider(t *testing.T) {
 	cfg := config.Default()
-	cfg.Model = "openai/gpt-4"
+	cfg.Model = "gemini/gemini-pro" // not yet supported
 
 	_, err := engine.New(engine.EngineParams{Config: cfg})
 	if err == nil || !strings.Contains(err.Error(), "unsupported provider") {
