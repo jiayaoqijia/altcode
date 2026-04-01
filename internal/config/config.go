@@ -17,7 +17,7 @@ type Config struct {
 	MCP        map[string]MCPServerConfig   `json:"mcp"`
 	Theme      string                       `json:"theme"`
 	Agent      map[string]AgentConfig       `json:"agent"`
-	Hooks      map[string][]HookConfig      `json:"hooks"`
+	Hooks      map[string][]HookMatcherConfig `json:"hooks"`
 }
 
 // ProviderConfig holds API credentials for a model provider.
@@ -48,10 +48,17 @@ type AgentConfig struct {
 	Tools []string `json:"tools"`
 }
 
-// HookConfig attaches a shell command to a tool event.
-type HookConfig struct {
-	Tool    string `json:"tool"`
-	Command string `json:"command"`
+// HookMatcherConfig pairs a tool matcher with hook entries.
+type HookMatcherConfig struct {
+	Matcher string            `json:"matcher"`
+	Hooks   []HookEntryConfig `json:"hooks"`
+}
+
+// HookEntryConfig defines a single hook action.
+type HookEntryConfig struct {
+	Type    string `json:"type"`
+	Command string `json:"command,omitempty"`
+	Timeout int    `json:"timeout,omitempty"`
 }
 
 // Default returns a Config populated with sensible defaults.
@@ -63,7 +70,7 @@ func Default() *Config {
 		MCP:        make(map[string]MCPServerConfig),
 		Theme:      "default",
 		Agent:      make(map[string]AgentConfig),
-		Hooks:      make(map[string][]HookConfig),
+		Hooks:      make(map[string][]HookMatcherConfig),
 	}
 }
 

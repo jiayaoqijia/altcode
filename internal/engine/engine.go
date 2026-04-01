@@ -7,6 +7,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/store"
@@ -22,6 +23,7 @@ type EngineParams struct {
 	Store     *store.DB             // nil = no persistence
 	SessionID string                // empty = new session
 	Messages  []provider.Message    // pre-loaded for session resume
+	Hooks     *hooks.Runner         // nil = no hooks
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -30,6 +32,7 @@ type Engine struct {
 	provider  provider.Provider
 	tools     *tool.Registry
 	perm      *permission.Evaluator
+	hooks     *hooks.Runner
 	store     *store.DB
 	sessionID string
 	model     string
@@ -72,11 +75,17 @@ func New(params EngineParams) (*Engine, error) {
 		msgs = []provider.Message{}
 	}
 
+	hooksRunner := params.Hooks
+	if hooksRunner == nil {
+		hooksRunner = hooks.NewRunner(nil)
+	}
+
 	return &Engine{
 		cfg:       cfg,
 		provider:  p,
 		tools:     registry,
 		perm:      perm,
+		hooks:     hooksRunner,
 		store:     params.Store,
 		sessionID: params.SessionID,
 		model:     modelName,
@@ -140,6 +149,12 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 			assistMsg := provider.TextMessage("assistant", turn.Text)
 			e.messages = append(e.messages, assistMsg)
 			e.persistMessage("assistant", assistMsg)
+
+			// Fire Stop hooks — may block completion
+			if reason := e.fireStopHooks(ctx); reason != "" {
+				e.messages = append(e.messages, provider.TextMessage("user", reason))
+				continue // loop back for another turn
+			}
 			return
 		}
 
@@ -227,11 +242,23 @@ func (e *Engine) dispatchTools(
 		e.perm.RecordCall(tc.Name, t.PermissionPattern(tc.Input))
 	}
 
-	out <- event.Event{
-		Type: event.ToolStart,
-		ToolCall: &event.ToolCall{
-			Name: fmt.Sprintf("dispatching %d tool(s)", len(calls)),
-		},
+	// Fire PreToolUse hooks — may deny individual calls
+	for i, tc := range toolCalls {
+		hookResults, _ := e.hooks.Fire(ctx, hooks.PreToolUse, hooks.Input{
+			Event:    hooks.PreToolUse,
+			ToolName: tc.Name,
+			ToolInput: tc.Input,
+		})
+		if hooks.HasDeny(hookResults) {
+			msg := "Blocked by hook"
+			if msgs := hooks.Messages(hookResults); len(msgs) > 0 {
+				msg = msgs[0]
+			}
+			calls[i].EagerResult = &tool.Result{
+				Output: msg,
+				Title:  tc.Name,
+			}
+		}
 	}
 
 	results := tool.Dispatch(ctx, calls)
@@ -280,6 +307,20 @@ func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool
 		parts = append(parts, provider.NewToolResultPart(tc.ID, output))
 	}
 	e.messages = append(e.messages, provider.ToolResultMessage(parts))
+}
+
+func (e *Engine) fireStopHooks(ctx context.Context) string {
+	results, _ := e.hooks.Fire(ctx, hooks.Stop, hooks.Input{
+		Event:     hooks.Stop,
+		SessionID: e.sessionID,
+	})
+	if hooks.HasDeny(results) {
+		if msgs := hooks.Messages(results); len(msgs) > 0 {
+			return msgs[0]
+		}
+		return "Stop hook blocked completion."
+	}
+	return ""
 }
 
 func (e *Engine) toolSchemas() []provider.ToolSchema {
