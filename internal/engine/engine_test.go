@@ -450,6 +450,7 @@ func TestAgentLoop_ContextCancelledBetweenTurns(t *testing.T) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
 	ch := eng.Run(ctx, "hi")
 
