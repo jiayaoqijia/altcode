@@ -18,6 +18,10 @@ const (
 	SubagentStop     Event = "SubagentStop"
 	PreCompact       Event = "PreCompact"
 	Notification     Event = "Notification"
+	CwdChanged       Event = "CwdChanged"
+	FileChanged      Event = "FileChanged"
+	TaskCreated      Event = "TaskCreated"
+	PermissionDenied Event = "PermissionDenied"
 )
 
 // MatcherConfig pairs a tool name matcher with hook entries.

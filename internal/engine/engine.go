@@ -296,6 +296,12 @@ func (e *Engine) dispatchTools(
 		action := e.checkPermission(t, tc)
 		switch action {
 		case permission.ActionDeny:
+			// Fire PermissionDenied hook
+			e.hooks.Fire(ctx, hooks.PermissionDenied, hooks.Input{
+				Event:    hooks.PermissionDenied,
+				ToolName: tc.Name,
+				ToolInput: tc.Input,
+			})
 			calls = append(calls, tool.Call{
 				ID: tc.ID, Tool: t, Input: tc.Input,
 				EagerResult: &tool.Result{

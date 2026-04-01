@@ -90,6 +90,46 @@ func (t *mcpTool) PermissionPattern(_ json.RawMessage) string {
 	return t.prefix + t.info.Name + ":*"
 }
 
+// RegisterSSETools discovers tools from an SSE client and registers them.
+func RegisterSSETools(ctx context.Context, registry *tool.Registry, client *SSEClient, serverName string) error {
+	tools, err := client.DiscoverTools(ctx)
+	if err != nil {
+		return err
+	}
+	for _, ti := range tools {
+		st := &sseMCPTool{
+			info:   ti,
+			client: client,
+			prefix: "mcp__" + serverName + "__",
+		}
+		registry.Register(st)
+	}
+	return nil
+}
+
+type sseMCPTool struct {
+	info   ToolInfo
+	client *SSEClient
+	prefix string
+}
+
+func (t *sseMCPTool) Name() string             { return t.prefix + t.info.Name }
+func (t *sseMCPTool) Description() string       { return t.info.Description }
+func (t *sseMCPTool) Parameters() json.RawMessage { return t.info.InputSchema }
+func (t *sseMCPTool) IsConcurrencySafe() bool   { return true }
+func (t *sseMCPTool) IsReadOnly() bool          { return true }
+func (t *sseMCPTool) PermissionPattern(_ json.RawMessage) string {
+	return t.prefix + t.info.Name + ":*"
+}
+
+func (t *sseMCPTool) Execute(ctx context.Context, input json.RawMessage) (*tool.Result, error) {
+	output, err := t.client.CallTool(ctx, t.info.Name, input)
+	if err != nil {
+		return &tool.Result{Output: fmt.Sprintf("Error: %v", err), Title: t.info.Name, Error: err}, nil
+	}
+	return &tool.Result{Output: output, Title: t.info.Name}, nil
+}
+
 func (t *mcpTool) Execute(ctx context.Context, input json.RawMessage) (*tool.Result, error) {
 	output, err := t.client.CallTool(ctx, t.info.Name, input)
 	if err != nil {
