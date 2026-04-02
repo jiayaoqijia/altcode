@@ -1,6 +1,7 @@
 package auth_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -98,5 +99,64 @@ func TestCredentialSource(t *testing.T) {
 	cfg := config.Default()
 	if auth.CredentialSource(cfg) != "no credentials" {
 		t.Error("Empty config should say no credentials")
+	}
+}
+
+func TestMissingCredentialPromptAnthropic(t *testing.T) {
+	cfg := config.Default()
+	cfg.Model = "anthropic/claude-sonnet-4-20250514"
+
+	prompt := auth.MissingCredentialPrompt(cfg)
+	if prompt == "" {
+		t.Fatal("expected missing credential prompt for anthropic model")
+	}
+}
+
+func TestMissingCredentialPromptOpenAI(t *testing.T) {
+	cfg := config.Default()
+	cfg.Model = "openai/gpt-5"
+
+	prompt := auth.MissingCredentialPrompt(cfg)
+	if prompt == "" {
+		t.Fatal("expected missing credential prompt for openai model")
+	}
+}
+
+func TestMissingCredentialPromptLocalModel(t *testing.T) {
+	cfg := config.Default()
+	cfg.Model = "ollama/llama3"
+
+	prompt := auth.MissingCredentialPrompt(cfg)
+	if prompt != "" {
+		t.Fatalf("expected no prompt for local model, got %q", prompt)
+	}
+}
+
+func TestSaveProviderAPIKey(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	path, err := auth.SaveProviderAPIKey("openai", "test-key")
+	if err != nil {
+		t.Fatalf("SaveProviderAPIKey returned error: %v", err)
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile returned error: %v", err)
+	}
+
+	var cfg config.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		t.Fatalf("Unmarshal returned error: %v", err)
+	}
+
+	if got := cfg.Provider["openai"].APIKey; got != "test-key" {
+		t.Fatalf("expected saved openai key, got %q", got)
+	}
+
+	wantPath := filepath.Join(home, ".altcode", "config.json")
+	if path != wantPath {
+		t.Fatalf("expected hidden home config path %q, got %q", wantPath, path)
 	}
 }

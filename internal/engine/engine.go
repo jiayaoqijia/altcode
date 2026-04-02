@@ -22,13 +22,13 @@ const maxIterations = 50
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
 	Config       *config.Config
-	Perm         *permission.Evaluator  // nil = allow all
-	Store        *store.DB              // nil = no persistence
-	SessionID    string                 // empty = new session
-	Messages     []provider.Message     // pre-loaded for session resume
-	Hooks        *hooks.Runner          // nil = no hooks
-	Instructions []config.Instruction   // loaded from CLAUDE.md etc.
-	Memory       *memory.Store          // nil = no persistent memory
+	Perm         *permission.Evaluator // nil = allow all
+	Store        *store.DB             // nil = no persistence
+	SessionID    string                // empty = new session
+	Messages     []provider.Message    // pre-loaded for session resume
+	Hooks        *hooks.Runner         // nil = no hooks
+	Instructions []config.Instruction  // loaded from CLAUDE.md etc.
+	Memory       *memory.Store         // nil = no persistent memory
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -129,6 +129,31 @@ func (e *Engine) ProviderInstance() provider.Provider {
 // Config returns the engine's configuration.
 func (e *Engine) Config() *config.Config {
 	return e.cfg
+}
+
+// PermissionEvaluator returns the engine's permission evaluator.
+func (e *Engine) PermissionEvaluator() *permission.Evaluator {
+	return e.perm
+}
+
+// HooksRunner returns the engine's hooks runner.
+func (e *Engine) HooksRunner() *hooks.Runner {
+	return e.hooks
+}
+
+// MemoryStore returns the engine's memory store.
+func (e *Engine) MemoryStore() *memory.Store {
+	return e.mem
+}
+
+// StoreInstance returns the engine's backing session store.
+func (e *Engine) StoreInstance() *store.DB {
+	return e.store
+}
+
+// Instructions returns the loaded project instructions.
+func (e *Engine) Instructions() []config.Instruction {
+	return e.instructions
 }
 
 // NewWithRegistry creates an Engine with an externally-provided tool registry.
@@ -249,10 +274,10 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 	}
 
 	req := &provider.Request{
-		Model:    e.model,
-		Messages: e.messages,
-		System:   system,
-		Tools:    e.toolSchemas(),
+		Model:     e.model,
+		Messages:  e.messages,
+		System:    system,
+		Tools:     e.toolSchemas(),
 		MaxTokens: 4096,
 	}
 	return e.provider.Stream(ctx, req)
@@ -298,8 +323,8 @@ func (e *Engine) dispatchTools(
 		case permission.ActionDeny:
 			// Fire PermissionDenied hook
 			e.hooks.Fire(ctx, hooks.PermissionDenied, hooks.Input{
-				Event:    hooks.PermissionDenied,
-				ToolName: tc.Name,
+				Event:     hooks.PermissionDenied,
+				ToolName:  tc.Name,
 				ToolInput: tc.Input,
 			})
 			calls = append(calls, tool.Call{
@@ -332,8 +357,8 @@ func (e *Engine) dispatchTools(
 	// Fire PreToolUse hooks — may deny individual calls
 	for i, tc := range toolCalls {
 		hookResults, _ := e.hooks.Fire(ctx, hooks.PreToolUse, hooks.Input{
-			Event:    hooks.PreToolUse,
-			ToolName: tc.Name,
+			Event:     hooks.PreToolUse,
+			ToolName:  tc.Name,
 			ToolInput: tc.Input,
 		})
 		if hooks.HasDeny(hookResults) {

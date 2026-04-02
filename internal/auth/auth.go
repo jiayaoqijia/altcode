@@ -199,6 +199,107 @@ func CredentialSource(cfg *config.Config) string {
 	return sources
 }
 
+// MissingCredentialPrompt returns a startup prompt when the active model
+// requires credentials that are not configured yet.
+func MissingCredentialPrompt(cfg *config.Config) string {
+	switch currentProvider(cfg.Model) {
+	case "anthropic":
+		if hasProviderKey(cfg, "anthropic") {
+			return ""
+		}
+		return "No Anthropic credentials detected for the current model. Sign in to Claude Code, set ANTHROPIC_API_KEY, add provider.anthropic.apiKey in config, or switch to a local model like ollama/... or lmstudio/.... Restart altcode after updating credentials."
+	case "openai":
+		if hasProviderKey(cfg, "openai") {
+			return ""
+		}
+		return "No OpenAI credentials detected for the current model. Sign in to Codex, set OPENAI_API_KEY, add provider.openai.apiKey in config, or switch to a local model like ollama/... or lmstudio/.... Restart altcode after updating credentials."
+	default:
+		return ""
+	}
+}
+
+// UserConfigPath returns the default user config path used by altcode.
+func UserConfigPath() string {
+	home := userHomeDir()
+	return filepath.Join(home, ".altcode", "config.json")
+}
+
+// LegacyUserConfigPaths returns older user config paths that altcode still reads.
+func LegacyUserConfigPaths() []string {
+	home := userHomeDir()
+
+	paths := []string{
+		filepath.Join(home, "Library", "Application Support", "altcode", "config.json"),
+	}
+
+	legacyXDG := filepath.Join(home, ".config", "altcode", "config.json")
+	if legacyXDG != paths[0] {
+		paths = append(paths, legacyXDG)
+	}
+
+	return paths
+}
+
+func userHomeDir() string {
+	if home := os.Getenv("HOME"); home != "" {
+		return home
+	}
+	home, _ := os.UserHomeDir()
+	return home
+}
+
+// SaveProviderAPIKey persists a provider API key into the user config file.
+func SaveProviderAPIKey(providerName, apiKey string) (string, error) {
+	path := UserConfigPath()
+
+	cfg := config.Default()
+	if _, err := os.Stat(path); err == nil {
+		existing, err := config.LoadFile(path)
+		if err != nil {
+			return "", err
+		}
+		cfg = existing
+	} else if !os.IsNotExist(err) {
+		return "", err
+	}
+
+	pcfg := cfg.Provider[providerName]
+	pcfg.APIKey = apiKey
+	cfg.Provider[providerName] = pcfg
+
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return "", err
+	}
+
+	data, err := json.MarshalIndent(cfg, "", "  ")
+	if err != nil {
+		return "", err
+	}
+	data = append(data, '\n')
+
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		return "", err
+	}
+	return path, nil
+}
+
+func hasProviderKey(cfg *config.Config, name string) bool {
+	p, ok := cfg.Provider[name]
+	return ok && p.APIKey != ""
+}
+
+func currentProvider(model string) string {
+	for i := 0; i < len(model); i++ {
+		if model[i] == '/' {
+			return model[:i]
+		}
+	}
+	if model == "" {
+		return "anthropic"
+	}
+	return model
+}
+
 // DefaultConfigDir returns the platform-appropriate config directory.
 func DefaultConfigDir() string {
 	if runtime.GOOS == "darwin" {
