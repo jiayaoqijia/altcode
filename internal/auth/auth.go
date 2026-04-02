@@ -220,13 +220,13 @@ func MissingCredentialPrompt(cfg *config.Config) string {
 
 // UserConfigPath returns the default user config path used by altcode.
 func UserConfigPath() string {
-	home, _ := os.UserHomeDir()
+	home := userHomeDir()
 	return filepath.Join(home, ".altcode", "config.json")
 }
 
 // LegacyUserConfigPaths returns older user config paths that altcode still reads.
 func LegacyUserConfigPaths() []string {
-	home, _ := os.UserHomeDir()
+	home := userHomeDir()
 
 	paths := []string{
 		filepath.Join(home, "Library", "Application Support", "altcode", "config.json"),
@@ -238,6 +238,14 @@ func LegacyUserConfigPaths() []string {
 	}
 
 	return paths
+}
+
+func userHomeDir() string {
+	if home := os.Getenv("HOME"); home != "" {
+		return home
+	}
+	home, _ := os.UserHomeDir()
+	return home
 }
 
 // SaveProviderAPIKey persists a provider API key into the user config file.
