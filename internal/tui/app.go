@@ -86,7 +86,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.viewport = viewport.New(msg.Width, msg.Height-6)
+		a.viewport = viewport.New(msg.Width, max(1, msg.Height-6))
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
 		a.updateViewport()
@@ -296,6 +296,12 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		}
 		return a, a.waitForEvent()
 	case event.ErrorEvent:
+		if provider := a.authErrorProvider(ev.Error); provider != "" {
+			a.busy = false
+			a.streaming = ""
+			a.repromptForAPIKey(provider)
+			return a, nil
+		}
 		a.messages = append(a.messages,
 			fmt.Sprintf("[error] %s", ev.Error))
 		a.streaming = ""
@@ -397,6 +403,11 @@ func (a *App) waitForEvent() tea.Cmd {
 }
 
 func (a *App) updateViewport() {
+	if a.setupProvider != "" {
+		a.viewport.SetContent(a.welcomeView())
+		a.viewport.GotoTop()
+		return
+	}
 	if len(a.messages) == 0 && a.streaming == "" {
 		a.viewport.SetContent(a.welcomeView())
 		a.viewport.GotoTop()
@@ -436,12 +447,7 @@ func (a *App) welcomeView() string {
 		version = "dev"
 	}
 
-	lines := []string{
-		logoStyle.Render(welcomeWordmark()),
-		"",
-		mutedStyle.Render("A blazing-fast AI coding CLI with TUI and headless modes."),
-		mutedStyle.Render("Works with Claude, Codex, local models, and existing repo instructions."),
-	}
+	lines := a.welcomeHeader(logoStyle, mutedStyle, version)
 
 	if a.setupSuccess != "" {
 		successStyle := lipgloss.NewStyle().
@@ -513,6 +519,34 @@ func (a *App) welcomeView() string {
 	}
 
 	return strings.Join(lines, "\n")
+}
+
+func (a *App) repromptForAPIKey(provider string) {
+	a.beginSetup(provider)
+	a.setupError = fmt.Sprintf(
+		"%s rejected the current API key for model %s. Enter a new key to continue.",
+		providerLabel(provider),
+		a.activeModel(),
+	)
+	a.setupSuccess = ""
+	a.updateViewport()
+}
+
+func (a *App) welcomeHeader(logoStyle, mutedStyle lipgloss.Style, version string) []string {
+	if a.width < 70 || a.viewport.Height < 10 {
+		return []string{
+			logoStyle.Render("altcode") + lipgloss.NewStyle().Foreground(a.theme.Muted).Render("  v"+displayVersion(version)),
+			"",
+			mutedStyle.Render("Fast AI coding CLI for Claude, Codex, and local models."),
+		}
+	}
+
+	return []string{
+		logoStyle.Render(welcomeWordmark()),
+		"",
+		mutedStyle.Render("A blazing-fast AI coding CLI with TUI and headless modes."),
+		mutedStyle.Render("Works with Claude, Codex, local models, and existing repo instructions."),
+	}
 }
 
 func normalInputPlaceholder(startupPrompt string) string {
@@ -613,6 +647,53 @@ func providerLoginLabel(provider string) string {
 	}
 }
 
+func (a *App) authErrorProvider(err string) string {
+	lower := strings.ToLower(err)
+	current := a.recommendedSetupProvider()
+
+	if current == "anthropic" && looksLikeAuthError(lower, "anthropic") {
+		return "anthropic"
+	}
+	if current == "openai" && looksLikeAuthError(lower, "openai") {
+		return "openai"
+	}
+
+	if looksLikeAuthError(lower, "anthropic") {
+		return "anthropic"
+	}
+	if looksLikeAuthError(lower, "openai") {
+		return "openai"
+	}
+	return ""
+}
+
+func looksLikeAuthError(msg, provider string) bool {
+	authSignals := []string{
+		" status 401",
+		" status 403",
+		"unauthorized",
+		"authentication",
+		"auth_error",
+		"authentication_error",
+		"invalid api key",
+		"incorrect api key",
+		"invalid x-api-key",
+	}
+
+	hasProvider := strings.Contains(msg, provider)
+	for _, signal := range authSignals {
+		if strings.Contains(msg, signal) {
+			if hasProvider {
+				return true
+			}
+			if signal == "incorrect api key" || signal == "invalid api key" || signal == "invalid x-api-key" {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 func providerLabel(name string) string {
 	switch name {
 	case "anthropic":
@@ -625,4 +706,11 @@ func providerLabel(name string) string {
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
+}
+
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
 }

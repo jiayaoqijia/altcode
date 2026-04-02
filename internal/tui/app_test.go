@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -96,5 +98,38 @@ func TestInputPlaceholderGuidesRecommendedSetup(t *testing.T) {
 
 	if got := app.input.Placeholder; got != "Press Enter to set up your OpenAI API key" {
 		t.Fatalf("unexpected placeholder: %q", got)
+	}
+}
+
+func TestWelcomeViewUsesCompactLayoutInSmallViewport(t *testing.T) {
+	app := New(nil, DefaultTheme, "test", "")
+	app.width = 60
+	app.viewport = viewport.New(60, 6)
+
+	view := app.welcomeView()
+	if !strings.Contains(view, "altcode  vtest") {
+		t.Fatalf("expected compact header in small viewport, got %q", view)
+	}
+	if strings.Contains(view, "_____") {
+		t.Fatalf("expected compact welcome without large wordmark, got %q", view)
+	}
+}
+
+func TestAuthErrorRepromptsForReplacementKey(t *testing.T) {
+	app := New(nil, DefaultTheme, "test", "")
+	app.viewport = viewport.New(80, 20)
+	app.messages = []string{"> hello"}
+
+	model, _ := app.handleEvent(event.Event{
+		Type:  event.ErrorEvent,
+		Error: `anthropic status 401: {"error":{"message":"invalid x-api-key"}}`,
+	})
+	app = model.(*App)
+
+	if app.setupProvider != "anthropic" {
+		t.Fatalf("expected anthropic re-prompt, got %q", app.setupProvider)
+	}
+	if !strings.Contains(app.setupError, "rejected the current API key") {
+		t.Fatalf("expected replacement key guidance, got %q", app.setupError)
 	}
 }

@@ -1,5 +1,7 @@
 # altcode
 
+![altcode TUI preview](docs/images/altcode-hero.png)
+
 A minimal, blazing-fast Go CLI/TUI for AI-assisted coding.
 
 **5ms startup. 10MB binary. 4 providers. 341 tests. Claude Code compatible.**
