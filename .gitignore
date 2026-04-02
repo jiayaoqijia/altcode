@@ -99,3 +99,7 @@ desktop.ini
 AGENTS.local.md
 PLAN.md
 .local/
+
+# Model-generated files from benchmarks
+*.go.bak
+main.go.bak
