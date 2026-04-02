@@ -44,27 +44,14 @@ altcode is a **multi-provider** alternative to Claude Code CLI that runs the **s
 
 ## Install
 
-**One-liner (downloads pre-built binary or builds from source):**
+**macOS / Linux (recommended):**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash
 ```
 
-**Pre-built binaries** (from [GitHub Releases](https://github.com/jiayaoqijia/altcode/releases)):
-
-| Platform | Download |
-|----------|----------|
-| Linux x86_64 | `altcode-linux-amd64` |
-| Linux ARM64 | `altcode-linux-arm64` |
-| macOS Intel | `altcode-darwin-amd64` |
-| macOS Apple Silicon | `altcode-darwin-arm64` |
-| Windows x64 | `altcode-windows-amd64.exe` |
-
-**Manual build:**
+**Homebrew:**
 ```bash
-git clone https://github.com/jiayaoqijia/altcode.git
-cd altcode
-make build
-sudo cp dist/altcode /usr/local/bin/
+brew install jiayaoqijia/tap/altcode
 ```
 
 **Go install:**
@@ -72,7 +59,26 @@ sudo cp dist/altcode /usr/local/bin/
 go install github.com/altcode-ai/altcode/cmd/altcode@latest
 ```
 
-**Requirements:** Go 1.23+ (for building from source only — pre-built binaries need nothing)
+**Manual download** (from [GitHub Releases](https://github.com/jiayaoqijia/altcode/releases)):
+
+| Platform | Binary | Size |
+|----------|--------|:----:|
+| macOS Apple Silicon | `altcode-darwin-arm64` | 10MB |
+| macOS Intel | `altcode-darwin-amd64` | 11MB |
+| Linux x86_64 | `altcode-linux-amd64` | 11MB |
+| Linux ARM64 | `altcode-linux-arm64` | 10MB |
+| Windows x64 | `altcode-windows-amd64.exe` | 11MB |
+
+**Build from source:**
+```bash
+git clone https://github.com/jiayaoqijia/altcode.git
+cd altcode && make build
+sudo cp dist/altcode /usr/local/bin/
+```
+
+**Uninstall:** `rm $(which altcode)`
+
+No runtime dependencies. No Node.js. No Python. Just a single binary.
 
 ## Get Started
 
