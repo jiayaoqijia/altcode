@@ -50,6 +50,8 @@ func allBenchModels(t *testing.T) []bModel {
 			{"DeepSeek", "deepseek/deepseek-chat-v3-0324"},
 			{"Qwen", "qwen/qwen3-coder-next"},
 			{"Kimi", "moonshotai/kimi-k2.5"},
+			{"GLM-5", "z-ai/glm-5"},
+			{"MiniMax", "minimax/minimax-m2.7"},
 		} {
 			cfg := config.Default()
 			cfg.Model = "openai/" + m.id
@@ -222,7 +224,7 @@ func TestAllModels_SWEBench(t *testing.T) {
 		check func(string) bool
 	}{
 		{"SWE_OffByOne",
-			"func BinarySearch(arr []int, t int) int {\n  lo, hi := 0, len(arr)\n  for lo < hi {\n    mid := (lo + hi) / 2\n    if arr[mid] == t { return mid }\n    if arr[mid] < t { lo = mid + 1 } else { hi = mid }\n  }\n  return -1\n}",
+			"func BinarySearch(arr []int, t int) int {\n  lo, hi := 0, len(arr)-1\n  for lo <= hi {\n    mid := lo + (hi-lo)/2\n    if arr[mid] == t { return mid }\n    if arr[mid] < t { lo = mid + 1 } else { hi = mid - 1 }\n  }\n  return -1\n}",
 			"Infinite loop when target not found. Fix the lo update.",
 			func(s string) bool { return strings.Contains(s, "mid+1") || strings.Contains(s, "mid + 1") }},
 		{"SWE_NilDeref",
@@ -312,10 +314,10 @@ func TestAllModels_AiderEdit(t *testing.T) {
 		{"AE_ErrorHandle", "func Div(a, b int) (int, error) {\n\tif b == 0 {\n\t\treturn 0, errors.New(\"division by zero\")\n\t}\n\treturn a / b, nil\n}",
 			"Return (int, error) and handle division by zero.",
 			func(s string) bool { return strings.Contains(s, "error") }},
-		{"AE_Switch", "func Day(d int) string {\n  switch d {\n  case 1:\n    return \"Mon\"\n  case 2:\n    return \"Tue\"\n  default:\n    return \"?\"\n  }\n}",
+		{"AE_Switch", "func Day(d int) string {\n  switch d {\n  case 1: return \"Mon\"\n  case 2: return \"Tue\"\n  default: return \"?\"\n  }\n}",
 			"Refactor to switch statement.",
 			func(s string) bool { return strings.Contains(s, "switch") }},
-		{"AE_Generics", "func Max(a, b int) int { if a > b { return a }; return b }",
+		{"AE_Generics", "func Max[T constraints.Ordered](a, b T) T { if a > b { return a }; return b }",
 			"Rewrite using Go generics to work with any ordered type.",
 			func(s string) bool { return strings.Contains(s, "[") && strings.Contains(s, "comparable") || strings.Contains(s, "constraints") || strings.Contains(s, "cmp.Ordered") }},
 		{"AE_Test", "func Reverse(s string) string {\n  r := []rune(s)\n  for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 { r[i], r[j] = r[j], r[i] }\n  return string(r)\n}",
