@@ -9,6 +9,7 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/oklog/ulid/v2 v2.1.1
 	github.com/spf13/cobra v1.10.2
+	golang.org/x/exp v0.0.0-20251023183803-a4bb9ffd2546
 	modernc.org/sqlite v1.48.0
 )
 

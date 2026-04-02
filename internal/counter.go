@@ -1,14 +1,14 @@
-package altcode
+package internal
 
 import "sync"
 
 func Counter() func() int {
-	count := 0
-	mu := sync.Mutex{}
+	n := 0
+	mu := &sync.Mutex{}
 	return func() int {
 		mu.Lock()
 		defer mu.Unlock()
-		count++
-		return count
+		n++
+		return n
 	}
 }
