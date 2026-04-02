@@ -54,7 +54,7 @@ func (s *StatusBar) View() string {
 	right := modeStyle.Render(s.mode)
 
 	hints := lipgloss.NewStyle().Foreground(s.theme.Muted).
-		Render("  Ctrl+D send  Esc cancel")
+		Render("  Enter send  Ctrl+J newline  Esc cancel")
 
 	gap := s.width - lipgloss.Width(left) - lipgloss.Width(right) - lipgloss.Width(hints)
 	if gap < 1 {

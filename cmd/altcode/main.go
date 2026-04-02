@@ -122,8 +122,8 @@ func runTUI(params engine.EngineParams) error {
 	cmds := discoverCommands()
 
 	theme := tui.GetTheme(params.Config.Theme)
-	app := tui.New(eng, theme, cmds...)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	app := tui.New(eng, theme, Version, auth.MissingCredentialPrompt(params.Config), cmds...)
+	p := tea.NewProgram(app, tea.WithAltScreen())
 	_, err = p.Run()
 	return err
 }
@@ -219,8 +219,9 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 
 	cfg := config.Default()
 
-	home, _ := os.UserHomeDir()
-	tryMerge(cfg, filepath.Join(home, ".config", "altcode", "config.json"))
+	for _, path := range userConfigPaths() {
+		tryMerge(cfg, path)
+	}
 	tryMerge(cfg, filepath.Join(projectRoot, ".altcode", "config.json"))
 	if configFlag != "" {
 		tryMerge(cfg, configFlag)
@@ -247,6 +248,18 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 	auth.LoadFromCLIs(cfg)
 
 	return cfg
+}
+
+func userConfigPaths() []string {
+	paths := []string{auth.UserConfigPath()}
+
+	for _, legacyPath := range auth.LegacyUserConfigPaths() {
+		if legacyPath != paths[0] {
+			paths = append(paths, legacyPath)
+		}
+	}
+
+	return paths
 }
 
 func tryMerge(base *config.Config, path string) {
