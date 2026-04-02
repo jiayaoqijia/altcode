@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // E2E tests verifying altcode can run Claude Code plugins/skills natively

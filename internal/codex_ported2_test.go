@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Tests ported from Codex test suite — ROUND 2

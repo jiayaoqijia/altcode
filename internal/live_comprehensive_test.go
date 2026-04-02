@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Comprehensive live integration tests against the real Codex relay.

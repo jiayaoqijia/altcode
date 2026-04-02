@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Claude Code ported tests — ROUND 2

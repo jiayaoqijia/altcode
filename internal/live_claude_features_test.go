@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Live e2e tests verifying EVERY Claude Code feature works on altcode

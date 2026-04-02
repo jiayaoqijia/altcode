@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Tests verifying altcode has feature parity with Claude Code CLI

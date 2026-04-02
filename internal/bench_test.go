@@ -7,7 +7,7 @@ import (
 )
 
 func TestStartupTime(t *testing.T) {
-	build := exec.Command("go", "build", "-ldflags=-s -w", "-o", "/tmp/altcode-bench", "./cmd/altcode")
+	build := exec.Command("go", "build", "-mod=mod", "-ldflags=-s -w", "-o", "/tmp/altcode-bench", "./cmd/altcode")
 	build.Dir = ".."
 	if err := build.Run(); err != nil {
 		t.Fatalf("Build: %v", err)

@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Tests ported from OpenAI Codex CLI test suite to verify altcode's

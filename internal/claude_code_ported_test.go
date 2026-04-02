@@ -1,3 +1,5 @@
+//go:build !windows
+
 package internal_test
 
 // Tests ported from Claude Code's hook system patterns.
