@@ -1,5 +1,5 @@
 #!/bin/bash
-# altcode installer — downloads and installs the latest release
+# altcode installer — downloads pre-built binary or builds from source
 set -euo pipefail
 
 VERSION="${ALTCODE_VERSION:-latest}"
@@ -16,46 +16,67 @@ case "$ARCH" in
     *)       echo "Unsupported architecture: $ARCH"; exit 1 ;;
 esac
 
+EXT=""
+[ "$OS" = "windows" ] && EXT=".exe"
+
 echo "altcode installer"
 echo "  OS:      $OS"
 echo "  Arch:    $ARCH"
 echo "  Version: $VERSION"
-echo "  Target:  $INSTALL_DIR/altcode"
 echo ""
 
-# For now, build from source (binary releases coming soon)
-if command -v go &>/dev/null; then
-    echo "Go found. Building from source..."
-    TMP=$(mktemp -d)
-    git clone --depth 1 "https://github.com/$REPO.git" "$TMP/altcode" 2>/dev/null
-    cd "$TMP/altcode"
-    GOFLAGS=-mod=mod go build -ldflags="-s -w -X main.Version=$VERSION" -o altcode ./cmd/altcode
-
-    if [ -w "$INSTALL_DIR" ]; then
-        mv altcode "$INSTALL_DIR/altcode"
-    else
-        sudo mv altcode "$INSTALL_DIR/altcode"
-    fi
-
-    rm -rf "$TMP"
-    echo ""
-    echo "Installed altcode to $INSTALL_DIR/altcode"
+# Try downloading pre-built binary
+if [ "$VERSION" = "latest" ]; then
+    DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/altcode-${OS}-${ARCH}${EXT}"
 else
-    echo "Go not found. Install Go 1.23+ first: https://go.dev/dl/"
-    echo "Or build manually:"
-    echo ""
-    echo "  git clone https://github.com/$REPO.git"
-    echo "  cd altcode"
-    echo "  make build"
-    echo "  sudo cp dist/altcode /usr/local/bin/"
+    DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/altcode-${OS}-${ARCH}${EXT}"
+fi
+
+echo "Downloading from $DOWNLOAD_URL ..."
+TMP=$(mktemp)
+if curl -fsSL -o "$TMP" "$DOWNLOAD_URL" 2>/dev/null; then
+    chmod +x "$TMP"
+    if [ -w "$INSTALL_DIR" ]; then
+        mv "$TMP" "$INSTALL_DIR/altcode${EXT}"
+    else
+        sudo mv "$TMP" "$INSTALL_DIR/altcode${EXT}"
+    fi
+    echo "Installed altcode to $INSTALL_DIR/altcode${EXT}"
+elif command -v go &>/dev/null; then
+    echo "Pre-built binary not available. Building from source..."
+    rm -f "$TMP"
+    BUILD_TMP=$(mktemp -d)
+    git clone --depth 1 "https://github.com/$REPO.git" "$BUILD_TMP/altcode" 2>/dev/null
+    cd "$BUILD_TMP/altcode"
+    GOFLAGS=-mod=mod go build -ldflags="-s -w -X main.Version=$VERSION" -o altcode ./cmd/altcode
+    if [ -w "$INSTALL_DIR" ]; then
+        mv altcode "$INSTALL_DIR/altcode${EXT}"
+    else
+        sudo mv altcode "$INSTALL_DIR/altcode${EXT}"
+    fi
+    rm -rf "$BUILD_TMP"
+    echo "Built and installed altcode to $INSTALL_DIR/altcode${EXT}"
+else
+    rm -f "$TMP"
+    echo "Error: No pre-built binary and Go not found."
+    echo "Install Go 1.23+: https://go.dev/dl/"
+    echo "Or build manually: git clone ... && make build"
     exit 1
 fi
 
 echo ""
+echo "Verify: altcode --version"
+altcode --version 2>/dev/null || "$INSTALL_DIR/altcode${EXT}" --version
+
+echo ""
 echo "Get started:"
+echo "  # If you have Claude Code or Codex CLI installed, just run:"
+echo "  altcode"
+echo ""
+echo "  # Or set an API key:"
 echo "  export ANTHROPIC_API_KEY=sk-ant-..."
 echo "  altcode"
 echo ""
-echo "Or with OpenAI/Codex:"
+echo "  # Or use OpenAI:"
 echo "  export OPENAI_API_KEY=sk-..."
 echo "  altcode --model openai/gpt-4"
