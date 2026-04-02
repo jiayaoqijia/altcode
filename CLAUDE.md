@@ -21,20 +21,21 @@ internal/sysctl/             → System prompt assembly
 
 ### Build & Test
 ```bash
-make build                   # Build to dist/altcode
-GOFLAGS=-mod=mod go test ./... -race   # Run all tests (114+)
-GOFLAGS=-mod=mod go vet ./...          # Lint
+make build          # Build to dist/altcode (uses -mod=mod)
+make test           # Run all tests with race detector
+make lint           # Run go vet
 ```
 
-Note: Use `GOFLAGS=-mod=mod` because vendor/ contains git submodules (codex, claude-code).
+Note: Makefile sets `GOFLAGS=-mod=mod` automatically because vendor/ contains git submodules (codex, claude-code), not Go dependencies.
 
 ### Current Status (v0.5.0)
-- All phases complete: agent loop, exec mode, hooks (13 events), commands, plugins (marketplace), multi-provider, MCP (stdio+SSE), subagents (registry+spawn), persistent memory
-- 412 tests passing (336 mock + 76 live against Claude Max + GPT-5.4)
-- 5ms startup, 8MB binary
+- All phases complete: agent loop, exec mode, hooks (13 events), commands, plugins (marketplace), multi-provider, MCP (stdio+SSE), subagents (registry+spawn), persistent memory, zero-config auth
+- 341 mock tests + 76 live tests, CI green on Linux + macOS + Windows
+- 5ms startup, 10MB binary
 - Providers: Anthropic, OpenAI/Codex, Ollama, LMStudio
+- Auth: auto-detects Claude Code subscription + Codex CLI subscription
 - Claude Code compatible: loads CLAUDE.md, hooks, commands, plugins, agents, memory natively
-- Outperforms Claude Code CLI: 40x faster startup, 6x smaller, 4 providers, 13 hook events
+- CI: build+test+vet on 3 platforms (ubuntu, macos, windows)
 
 ### Key Patterns
 - Engine emits `<-chan event.Event` consumed by TUI or exec mode
