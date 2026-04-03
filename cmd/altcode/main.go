@@ -137,7 +137,6 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	// Create a temporary engine to register MCP tools for exec mode
 	eng, err := engine.New(params)
 	if err != nil {
 		return fmt.Errorf("create engine: %w", err)
@@ -146,9 +145,9 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 	defer mcpCleanup()
 
 	return exec.Run(ctx, exec.Params{
-		EngineParams: params,
-		Prompt:       prompt,
-		JSON:         jsonMode,
+		Engine: eng,
+		Prompt: prompt,
+		JSON:   jsonMode,
 	})
 }
 

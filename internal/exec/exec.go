@@ -14,6 +14,7 @@ import (
 // Params configures a headless execution run.
 type Params struct {
 	EngineParams engine.EngineParams
+	Engine       *engine.Engine // if set, use this engine (skips New)
 	Prompt       string
 	JSON         bool      // emit JSONL events to Writer
 	Writer       io.Writer // defaults to os.Stdout
@@ -21,9 +22,13 @@ type Params struct {
 
 // Run executes a single prompt headlessly and writes output.
 func Run(ctx context.Context, p Params) error {
-	eng, err := engine.New(p.EngineParams)
-	if err != nil {
-		return fmt.Errorf("create engine: %w", err)
+	eng := p.Engine
+	if eng == nil {
+		var err error
+		eng, err = engine.New(p.EngineParams)
+		if err != nil {
+			return fmt.Errorf("create engine: %w", err)
+		}
 	}
 
 	w := p.Writer
