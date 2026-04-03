@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/signal"
@@ -13,9 +14,11 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/exec"
+	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/mcp"
 	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/altcode-ai/altcode/internal/plugin"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -111,7 +114,15 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 	}
 	memStore := memory.NewStore(memDir)
 
-	params := engine.EngineParams{Config: cfg, Instructions: instructions, Memory: memStore}
+	// Wire hooks from config into engine
+	hooksRunner := buildHooksRunner(cfg)
+
+	params := engine.EngineParams{
+		Config:       cfg,
+		Instructions: instructions,
+		Memory:       memStore,
+		Hooks:        hooksRunner,
+	}
 	if err := loadSession(db, &params, last, sessionID); err != nil {
 		return err
 	}
@@ -125,6 +136,14 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
+
+	// Create a temporary engine to register MCP tools for exec mode
+	eng, err := engine.New(params)
+	if err != nil {
+		return fmt.Errorf("create engine: %w", err)
+	}
+	mcpCleanup := connectMCP(params.Config, eng)
+	defer mcpCleanup()
 
 	return exec.Run(ctx, exec.Params{
 		EngineParams: params,
@@ -304,6 +323,15 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 		tryMerge(cfg, configFlag)
 	}
 
+	// Load .claude/settings.json (permissions + hooks for Claude Code compat)
+	loadClaudeSettings(cfg, projectRoot)
+
+	// Load .mcp.json (Claude Code MCP server format)
+	loadMCPJSON(cfg, projectRoot)
+
+	// Auto-discover and merge plugins
+	loadPlugins(cfg, projectRoot)
+
 	if themeFlag != "" {
 		cfg.Theme = themeFlag
 	}
@@ -365,7 +393,124 @@ func mergeConfig(base, overlay *config.Config) {
 	for k, v := range overlay.Agent {
 		base.Agent[k] = v
 	}
+	for k, v := range overlay.Hooks {
+		base.Hooks[k] = append(base.Hooks[k], v...)
+	}
 	if overlay.Team != nil {
 		base.Team = overlay.Team
+	}
+}
+
+// buildHooksRunner converts config hook entries into a hooks.Runner.
+func buildHooksRunner(cfg *config.Config) *hooks.Runner {
+	if len(cfg.Hooks) == 0 {
+		return hooks.NewRunner(nil)
+	}
+	converted := make(map[hooks.Event][]hooks.MatcherConfig, len(cfg.Hooks))
+	for eventName, matchers := range cfg.Hooks {
+		ev := hooks.Event(eventName)
+		for _, m := range matchers {
+			mc := hooks.MatcherConfig{Matcher: m.Matcher}
+			for _, h := range m.Hooks {
+				mc.Hooks = append(mc.Hooks, hooks.EntryConfig{
+					Type:    h.Type,
+					Command: h.Command,
+					Timeout: h.Timeout,
+				})
+			}
+			converted[ev] = append(converted[ev], mc)
+		}
+	}
+	return hooks.NewRunner(converted)
+}
+
+// loadClaudeSettings reads .claude/settings.json for Claude Code compat.
+// Extracts permissions (as allow rules) and hooks.
+func loadClaudeSettings(cfg *config.Config, projectRoot string) {
+	paths := []string{
+		filepath.Join(projectRoot, ".claude", "settings.json"),
+		filepath.Join(projectRoot, ".claude", "settings.local.json"),
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		paths = append([]string{filepath.Join(home, ".claude", "settings.json")}, paths...)
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var settings struct {
+			Permissions struct {
+				Allow []string `json:"allow"`
+				Deny  []string `json:"deny"`
+			} `json:"permissions"`
+			Hooks map[string][]config.HookMatcherConfig `json:"hooks"`
+		}
+		if json.Unmarshal(data, &settings) != nil {
+			continue
+		}
+		for _, pattern := range settings.Permissions.Allow {
+			cfg.Permission = append(cfg.Permission, config.PermissionRule{
+				Tool: pattern, Action: "allow",
+			})
+		}
+		for _, pattern := range settings.Permissions.Deny {
+			cfg.Permission = append(cfg.Permission, config.PermissionRule{
+				Tool: pattern, Action: "deny",
+			})
+		}
+		for k, v := range settings.Hooks {
+			cfg.Hooks[k] = append(cfg.Hooks[k], v...)
+		}
+	}
+}
+
+// loadMCPJSON reads .mcp.json (Claude Code format) and merges into config.
+func loadMCPJSON(cfg *config.Config, projectRoot string) {
+	paths := []string{
+		filepath.Join(projectRoot, ".mcp.json"),
+	}
+	home, _ := os.UserHomeDir()
+	if home != "" {
+		paths = append(paths, filepath.Join(home, ".claude", ".mcp.json"))
+	}
+
+	for _, path := range paths {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			continue
+		}
+		var mcpFile struct {
+			MCPServers map[string]config.MCPServerConfig `json:"mcpServers"`
+		}
+		if json.Unmarshal(data, &mcpFile) != nil {
+			continue
+		}
+		for name, srv := range mcpFile.MCPServers {
+			if _, exists := cfg.MCP[name]; !exists {
+				cfg.MCP[name] = srv
+			}
+		}
+	}
+}
+
+// loadPlugins discovers plugins from standard directories and merges them.
+func loadPlugins(cfg *config.Config, projectRoot string) {
+	home, _ := os.UserHomeDir()
+	dirs := []string{
+		filepath.Join(projectRoot, ".altcode", "plugins"),
+		filepath.Join(projectRoot, ".claude", "plugins"),
+	}
+	if home != "" {
+		dirs = append(dirs,
+			filepath.Join(home, ".config", "altcode", "plugins"),
+			filepath.Join(home, ".claude", "plugins"),
+		)
+	}
+	plugins, _ := plugin.Discover(dirs...)
+	for _, p := range plugins {
+		p.Merge(cfg)
 	}
 }
