@@ -11,16 +11,6 @@ import (
 
 const defaultTimeout = 30
 
-// executeHook runs a single hook entry and returns its result.
-func executeHook(ctx context.Context, entry EntryConfig, input Input) (*Result, error) {
-	switch entry.Type {
-	case "command":
-		return runCommandHook(ctx, entry, input)
-	default:
-		return &Result{Decision: "allow"}, nil
-	}
-}
-
 func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Result, error) {
 	timeout := entry.Timeout
 	if timeout <= 0 {

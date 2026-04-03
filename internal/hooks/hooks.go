@@ -3,6 +3,8 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+
+	"github.com/altcode-ai/altcode/internal/provider"
 )
 
 // Event identifies when a hook fires.
@@ -27,13 +29,15 @@ const (
 // MatcherConfig pairs a tool name matcher with hook entries.
 type MatcherConfig struct {
 	Matcher string        `json:"matcher"`
+	If      string        `json:"if,omitempty"` // e.g. "Bash(git *)"
 	Hooks   []EntryConfig `json:"hooks"`
 }
 
 // EntryConfig defines a single hook action.
 type EntryConfig struct {
-	Type    string `json:"type"`              // "command"
-	Command string `json:"command,omitempty"` // shell command
+	Type    string `json:"type"`              // "command" or "prompt"
+	Command string `json:"command,omitempty"` // shell command (type=command)
+	Prompt  string `json:"prompt,omitempty"`  // LLM prompt template (type=prompt)
 	Timeout int    `json:"timeout,omitempty"` // seconds (default 30)
 }
 
@@ -55,7 +59,9 @@ type Result struct {
 
 // Runner manages hook configurations and executes matching hooks.
 type Runner struct {
-	configs map[Event][]MatcherConfig
+	configs  map[Event][]MatcherConfig
+	provider provider.Provider // used by prompt hooks
+	model    string            // model for prompt hooks
 }
 
 // NewRunner creates a Runner from the given hook configurations.
@@ -64,6 +70,12 @@ func NewRunner(configs map[Event][]MatcherConfig) *Runner {
 		configs = make(map[Event][]MatcherConfig)
 	}
 	return &Runner{configs: configs}
+}
+
+// SetProvider configures the LLM provider for prompt-type hooks.
+func (r *Runner) SetProvider(p provider.Provider, model string) {
+	r.provider = p
+	r.model = model
 }
 
 // Fire executes all hooks matching the event and tool name.
@@ -79,8 +91,11 @@ func (r *Runner) Fire(ctx context.Context, ev Event, input Input) ([]Result, err
 		if !matchTool(mc.Matcher, input.ToolName) {
 			continue
 		}
+		if mc.If != "" && !matchCondition(mc.If, input) {
+			continue
+		}
 		for _, entry := range mc.Hooks {
-			result, err := executeHook(ctx, entry, input)
+			result, err := r.executeHookEntry(ctx, entry, input)
 			if err != nil {
 				results = append(results, Result{
 					Decision: "allow",
@@ -92,6 +107,22 @@ func (r *Runner) Fire(ctx context.Context, ev Event, input Input) ([]Result, err
 		}
 	}
 	return results, nil
+}
+
+// executeHookEntry dispatches to the correct hook type.
+func (r *Runner) executeHookEntry(
+	ctx context.Context,
+	entry EntryConfig,
+	input Input,
+) (*Result, error) {
+	switch entry.Type {
+	case "command":
+		return runCommandHook(ctx, entry, input)
+	case "prompt":
+		return runPromptHook(ctx, r.provider, r.model, entry, input)
+	default:
+		return &Result{Decision: "allow"}, nil
+	}
 }
 
 // HasDeny returns true if any result has decision "deny".

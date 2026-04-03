@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"time"
 )
 
 // handleBuiltinCommand checks if the input is a built-in slash command
@@ -31,6 +32,18 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinMemoryText())
 	case "/version":
 		a.appendInfo(a.builtinVersionText())
+	case "/cost":
+		a.appendInfo(a.builtinCostText())
+	case "/history":
+		a.appendInfo(a.builtinHistoryText())
+	case "/compact":
+		a.appendInfo(a.builtinCompactText())
+	case "/diff":
+		a.appendInfo(a.builtinDiffText())
+	case "/plan":
+		a.appendInfo(a.builtinPlanText())
+	case "/stats":
+		a.appendInfo(a.builtinStatsText())
 	default:
 		return false
 	}
@@ -46,7 +59,7 @@ func (a *App) appendInfo(text string) {
 func builtinHelpText() string {
 	return `Available commands:
   /help      — show this help
-  /status    — model, session, message count, cost
+  /status    — model, session, message count
   /context   — context size breakdown
   /model     — show current model
   /clear     — clear conversation history
@@ -54,6 +67,12 @@ func builtinHelpText() string {
   /sessions  — list recent sessions
   /memory    — show loaded memories
   /version   — show altcode version
+  /cost      — cost breakdown per turn
+  /history   — file change history this session
+  /compact   — manually trigger context compaction
+  /diff      — show files changed this session
+  /plan      — enter plan mode
+  /stats     — combined status + cost + history
 
 Keyboard shortcuts:
   Enter      — submit prompt
@@ -163,6 +182,110 @@ func (a *App) builtinMemoryText() string {
 		sb.WriteString(fmt.Sprintf("  - %s\n", m.Title))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinCostText() string {
+	if a.engine == nil || a.engine.CostTracker() == nil {
+		return "No cost data available."
+	}
+	tracker := a.engine.CostTracker()
+	turns := tracker.Turns()
+	if len(turns) == 0 {
+		return "No turns recorded yet."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Cost breakdown (%d turns):\n", len(turns)))
+	for i, t := range turns {
+		sb.WriteString(fmt.Sprintf("  Turn %d: %s — %d in / %d out — $%.4f\n",
+			i+1, t.Model, t.InputTokens, t.OutputTokens, t.CostUSD))
+	}
+	sb.WriteString(fmt.Sprintf("\nTotal: %s", tracker.Summary()))
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinHistoryText() string {
+	if a.engine == nil || a.engine.FileJournal() == nil {
+		return "No file history available."
+	}
+	entries := a.engine.FileJournal().Entries()
+	if len(entries) == 0 {
+		return "No file changes recorded this session."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("File history (%d operations):\n", len(entries)))
+	for _, e := range entries {
+		ts := e.Timestamp.Format(time.TimeOnly)
+		sb.WriteString(fmt.Sprintf("  %s  %-8s %-6s %s\n",
+			ts, e.Tool, e.Action, e.Path))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinCompactText() string {
+	if a.engine == nil {
+		return "No engine available."
+	}
+	before := a.engineMessageCount()
+	a.engine.Compact()
+	after := a.engineMessageCount()
+	return fmt.Sprintf(
+		"Compaction complete: %d messages (removed %d stale tool results).",
+		after, before-after)
+}
+
+func (a *App) builtinDiffText() string {
+	if a.engine == nil || a.engine.FileJournal() == nil {
+		return "No file history available."
+	}
+	entries := a.engine.FileJournal().Entries()
+	if len(entries) == 0 {
+		return "No files changed this session."
+	}
+	seen := make(map[string]bool)
+	var paths []string
+	for _, e := range entries {
+		if !seen[e.Path] {
+			seen[e.Path] = true
+			paths = append(paths, e.Path)
+		}
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Files changed this session (%d):\n", len(paths)))
+	for _, p := range paths {
+		sb.WriteString(fmt.Sprintf("  %s\n", p))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinPlanText() string {
+	return "Plan mode: describe your goal and altcode will outline steps " +
+		"before making changes.\n" +
+		"Tip: prefix your next message with the plan and altcode will " +
+		"execute it step by step."
+}
+
+func (a *App) builtinStatsText() string {
+	var sb strings.Builder
+	sb.WriteString(a.builtinStatusText())
+	sb.WriteString("\n\n")
+	sb.WriteString(a.builtinCostSummary())
+	sb.WriteString("\n")
+	sb.WriteString(a.builtinFileSummary())
+	return sb.String()
+}
+
+func (a *App) builtinCostSummary() string {
+	if a.engine == nil || a.engine.CostTracker() == nil {
+		return "Cost: n/a"
+	}
+	return "Cost: " + a.engine.CostTracker().Summary()
+}
+
+func (a *App) builtinFileSummary() string {
+	if a.engine == nil || a.engine.FileJournal() == nil {
+		return "Files: n/a"
+	}
+	return "Files: " + a.engine.FileJournal().Summary()
 }
 
 func (a *App) builtinVersionText() string {

@@ -12,13 +12,19 @@ import (
 	"sync/atomic"
 )
 
+// callResult carries either a successful result or an RPC error.
+type callResult struct {
+	Result json.RawMessage
+	Error  *jsonRPCError
+}
+
 // Client communicates with an MCP server via JSON-RPC 2.0 over stdio.
 type Client struct {
 	cmd     *exec.Cmd
 	stdin   io.WriteCloser
 	scanner *bufio.Scanner
 	nextID  atomic.Int64
-	pending map[int64]chan json.RawMessage
+	pending map[int64]chan callResult
 	mu      sync.Mutex
 	done    chan struct{}
 }
@@ -66,7 +72,7 @@ func Connect(ctx context.Context, command string, args []string, env []string) (
 		cmd:     cmd,
 		stdin:   stdin,
 		scanner: bufio.NewScanner(stdout),
-		pending: make(map[int64]chan json.RawMessage),
+		pending: make(map[int64]chan callResult),
 		done:    make(chan struct{}),
 	}
 
@@ -92,7 +98,7 @@ func (c *Client) readLoop() {
 		}
 		c.mu.Unlock()
 		if ok {
-			ch <- resp.Result
+			ch <- callResult{Result: resp.Result, Error: resp.Error}
 		}
 	}
 }
@@ -114,7 +120,7 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	}
 	data = append(data, '\n')
 
-	ch := make(chan json.RawMessage, 1)
+	ch := make(chan callResult, 1)
 	c.mu.Lock()
 	c.pending[id] = ch
 	c.mu.Unlock()
@@ -124,8 +130,12 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	}
 
 	select {
-	case result := <-ch:
-		return result, nil
+	case cr := <-ch:
+		if cr.Error != nil {
+			return nil, fmt.Errorf("mcp rpc error %d: %s",
+				cr.Error.Code, cr.Error.Message)
+		}
+		return cr.Result, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	case <-c.done:

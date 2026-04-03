@@ -225,6 +225,14 @@ func (e *Engine) FileJournal() *history.Journal {
 	return e.journal
 }
 
+// Compact manually triggers context compaction on the message history.
+func (e *Engine) Compact() int {
+	before := len(e.messages)
+	mc := compact.NewMicrocompactor(20)
+	e.messages = mc.Apply(e.messages)
+	return before - len(e.messages)
+}
+
 // NewWithRegistry creates an Engine with an externally-provided tool registry.
 // Used by the subagent system to create restricted child engines.
 func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, error) {
