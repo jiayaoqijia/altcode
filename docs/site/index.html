@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>altcode — AI coding CLI</title>
+<meta name="description" content="Multi-provider AI coding CLI. 5ms startup. Runs Claude, GPT, DeepSeek, Qwen, Ollama with the same plugins.">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0d1117;--fg:#c9d1d9;--dim:#6b7280;--border:#374151;
+  --purple:#7c3aed;--cyan:#06b6d4;--green:#10b981;--yellow:#f59e0b;--red:#ef4444;
+  --font:'SF Mono','Fira Code','JetBrains Mono','Cascadia Code',monospace;
+}
+body{background:var(--bg);color:var(--fg);font-family:var(--font);font-size:14px;line-height:1.6;min-height:100vh}
+a{color:var(--cyan);text-decoration:none}
+a:hover{text-decoration:underline}
+
+/* Terminal frame */
+.term{max-width:800px;margin:0 auto;padding:16px}
+.term-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#1a1e26;border:1px solid var(--border);border-bottom:none;border-radius:8px 8px 0 0}
+.term-dot{width:12px;height:12px;border-radius:50%}
+.term-dot.r{background:var(--red)}.term-dot.y{background:var(--yellow)}.term-dot.g{background:var(--green)}
+.term-title{flex:1;text-align:center;color:var(--dim);font-size:12px}
+.term-body{border:1px solid var(--border);border-radius:0 0 8px 8px;padding:20px 24px;background:#0d1117;overflow-x:auto}
+
+/* Header */
+.logo{color:var(--purple);font-weight:bold;font-size:20px}
+.logo span{color:var(--cyan)}
+.subtitle{color:var(--dim);margin-top:4px}
+.tagline{color:var(--green);margin-top:8px;font-size:12px}
+
+/* Sections */
+.sep{color:var(--border);margin:16px 0}
+h2{color:var(--purple);font-size:14px;margin-bottom:8px}
+h2::before{content:'## ';color:var(--dim)}
+
+/* Install block */
+.install{background:#161b22;border:1px solid var(--border);border-radius:6px;padding:12px 16px;margin:8px 0;position:relative}
+.install code{color:var(--green);font-size:13px}
+.install .copy{position:absolute;right:8px;top:8px;background:var(--border);border:none;color:var(--fg);padding:4px 8px;border-radius:4px;cursor:pointer;font-family:var(--font);font-size:11px}
+.install .copy:hover{background:var(--purple)}
+
+/* Table */
+table{width:100%;border-collapse:collapse;margin:8px 0;font-size:13px}
+th{text-align:left;color:var(--dim);border-bottom:1px solid var(--border);padding:4px 8px;font-weight:normal}
+td{padding:4px 8px;border-bottom:1px solid #1a1e26}
+td.win{color:var(--green);font-weight:bold}
+td.tie{color:var(--cyan)}
+td.num{color:var(--yellow);font-family:var(--font)}
+
+/* Benchmark */
+.bar{display:inline-block;height:14px;border-radius:2px;margin-right:6px;vertical-align:middle}
+.bar.p{background:var(--green)}.bar.f{background:var(--border)}
+
+/* Prompt */
+.prompt::before{content:'$ ';color:var(--purple)}
+.prompt{color:var(--fg);margin:4px 0}
+.output{color:var(--dim);margin:2px 0 8px 0}
+
+/* Cursor blink */
+.cursor{display:inline-block;width:8px;height:16px;background:var(--fg);animation:blink 1s step-end infinite;vertical-align:text-bottom}
+@keyframes blink{50%{opacity:0}}
+
+/* Status bar */
+.status{display:flex;justify-content:space-between;align-items:center;padding:6px 12px;background:#161b22;border:1px solid var(--border);border-radius:6px;margin-top:16px;font-size:12px}
+.status .left{color:var(--green)}
+.status .right{background:var(--purple);color:#fff;padding:2px 8px;border-radius:3px;font-size:11px}
+
+/* Responsive */
+@media(max-width:600px){.term{padding:8px}.term-body{padding:12px}}
+</style>
+</head>
+<body>
+
+<div class="term">
+  <!-- Title bar -->
+  <div class="term-bar">
+    <div class="term-dot r"></div>
+    <div class="term-dot y"></div>
+    <div class="term-dot g"></div>
+    <div class="term-title">altcode — ~/project</div>
+  </div>
+
+  <!-- Terminal body -->
+  <div class="term-body">
+
+    <!-- Header -->
+    <div class="logo">alt<span>code</span></div>
+    <div class="subtitle">AI-assisted coding CLI — multi-provider, open source</div>
+    <div class="tagline">5ms startup · 10MB binary · 6 providers · Claude Code compatible</div>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Install -->
+    <h2>Install</h2>
+
+    <div class="install" id="install-block">
+      <code>curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash</code>
+      <button class="copy" onclick="copyInstall()">copy</button>
+    </div>
+
+    <p style="color:var(--dim);font-size:12px;margin:4px 0">
+      Also: <code style="color:var(--cyan)">brew install jiayaoqijia/tap/altcode</code> ·
+      <code style="color:var(--cyan)">go install github.com/altcode-ai/altcode/cmd/altcode@latest</code>
+    </p>
+
+    <p style="color:var(--dim);font-size:12px;margin:8px 0">
+      Binaries:
+      <a href="https://github.com/jiayaoqijia/altcode/releases">Linux</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/releases">macOS</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/releases">Windows</a>
+      — no runtime deps, single binary
+    </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Zero config -->
+    <h2>Zero Config</h2>
+    <p style="font-size:13px">Already use <span style="color:var(--cyan)">Claude Code</span> or <span style="color:var(--cyan)">Codex CLI</span>? Just run <code style="color:var(--green)">altcode</code> — credentials auto-detected.</p>
+
+    <table style="margin-top:8px">
+      <tr><th>If you have...</th><th>altcode uses it</th></tr>
+      <tr><td>Claude Code CLI</td><td style="color:var(--green)">Claude subscription ✓</td></tr>
+      <tr><td>Codex CLI</td><td style="color:var(--green)">Codex subscription ✓</td></tr>
+      <tr><td>ANTHROPIC_API_KEY</td><td style="color:var(--green)">Anthropic API ✓</td></tr>
+      <tr><td>OPENAI_API_KEY</td><td style="color:var(--green)">OpenAI API ✓</td></tr>
+      <tr><td>OpenRouter key</td><td style="color:var(--green)">100+ models ✓</td></tr>
+      <tr><td>Ollama running</td><td style="color:var(--green)">Local models ✓</td></tr>
+    </table>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Demo -->
+    <h2>Usage</h2>
+    <div class="prompt">altcode</div>
+    <div class="output"># Interactive TUI (auto-detects provider)</div>
+    <div class="prompt">altcode "explain this error"</div>
+    <div class="output"># Headless exec mode</div>
+    <div class="prompt">altcode --model openai/gpt-4</div>
+    <div class="output"># Use any provider</div>
+    <div class="prompt">altcode --model ollama/llama3</div>
+    <div class="output"># Local models, no API key needed</div>
+    <div class="prompt">altcode --last</div>
+    <div class="output"># Resume last session</div>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- vs Claude Code -->
+    <h2>vs Claude Code CLI</h2>
+    <table>
+      <tr><th></th><th>Claude Code</th><th>altcode</th></tr>
+      <tr><td>Providers</td><td>1</td><td class="win">6 (Anthropic, OpenAI, DeepSeek, Qwen, Ollama, LMStudio)</td></tr>
+      <tr><td>Startup</td><td>~200ms</td><td class="win">5ms (40× faster)</td></tr>
+      <tr><td>Binary</td><td>~50MB</td><td class="win">10MB (5× smaller)</td></tr>
+      <tr><td>Hooks</td><td>~10</td><td class="win">13 events</td></tr>
+      <tr><td>Plugins</td><td class="tie">Claude format</td><td class="win">Loads Claude Code plugins natively</td></tr>
+      <tr><td>Auth</td><td>Anthropic only</td><td class="win">Claude sub + Codex sub + API keys</td></tr>
+      <tr><td>Source</td><td>Closed</td><td class="win">Fully open</td></tr>
+    </table>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Benchmarks -->
+    <h2>Benchmarks (5 suites × 6 models)</h2>
+    <table>
+      <tr><th>Model</th><th>Score</th><th></th></tr>
+      <tr><td>DeepSeek V3</td><td class="num">96%</td><td><span class="bar p" style="width:192px"></span><span class="bar f" style="width:8px"></span></td></tr>
+      <tr><td>MiniMax 2.7</td><td class="num">93%</td><td><span class="bar p" style="width:186px"></span><span class="bar f" style="width:14px"></span></td></tr>
+      <tr><td>Qwen Coder</td><td class="num">93%</td><td><span class="bar p" style="width:186px"></span><span class="bar f" style="width:14px"></span></td></tr>
+      <tr><td>Claude Haiku</td><td class="num">90%</td><td><span class="bar p" style="width:180px"></span><span class="bar f" style="width:20px"></span></td></tr>
+      <tr><td>GLM-5</td><td class="num">76%</td><td><span class="bar p" style="width:152px"></span><span class="bar f" style="width:48px"></span></td></tr>
+      <tr><td>Kimi K2.5</td><td class="num">40%</td><td><span class="bar p" style="width:80px"></span><span class="bar f" style="width:120px"></span></td></tr>
+    </table>
+    <p style="color:var(--dim);font-size:11px;margin-top:4px">HumanEval + SWE-bench + Terminal-Bench + Aider + FeatureBench · All via altcode</p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Features -->
+    <h2>Features</h2>
+    <p style="font-size:13px">
+      <span style="color:var(--green)">●</span> Multi-turn agent loop (tool dispatch, 50-iter cap)<br>
+      <span style="color:var(--green)">●</span> 7 tools: read, glob, grep, ls, bash, edit, write<br>
+      <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events<br>
+      <span style="color:var(--green)">●</span> Slash commands · Plugin system · Marketplace<br>
+      <span style="color:var(--green)">●</span> Subagents · Persistent memory · Auto-compact<br>
+      <span style="color:var(--green)">●</span> Session resume (--last) · JSON exec mode<br>
+      <span style="color:var(--green)">●</span> Claude Code compatible — plugins, hooks, agents<br>
+      <span style="color:var(--green)">●</span> Rich system prompt · Streaming TUI
+    </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Links -->
+    <h2>Links</h2>
+    <p style="font-size:13px">
+      <a href="https://github.com/jiayaoqijia/altcode">GitHub</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/releases">Releases</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/blob/main/README.md">Docs</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/blob/main/LICENSE">License</a>
+    </p>
+
+    <div style="margin-top:12px">
+      <span class="prompt">altcode<span class="cursor"></span></span>
+    </div>
+
+    <!-- Status bar -->
+    <div class="status">
+      <div class="left">● ready</div>
+      <div style="color:var(--dim)">Enter send · Esc quit</div>
+      <div class="right">v0.5.0</div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+function copyInstall(){
+  const t='curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash';
+  navigator.clipboard.writeText(t).then(()=>{
+    const b=document.querySelector('.copy');b.textContent='copied!';
+    setTimeout(()=>b.textContent='copy',2000);
+  });
+}
+</script>
+</body>
+</html>
