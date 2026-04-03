@@ -6,7 +6,11 @@ import (
 	"strings"
 )
 
-// Discover finds all .md command files in the given directories.
+// Discover finds all command/skill files in the given directories.
+// Supports two layouts:
+//   - Flat: dir/*.md (Claude Code commands format)
+//   - Nested: dir/<name>/SKILL.md (Claude Code skills format)
+//
 // Later directories override earlier ones if commands share a name.
 func Discover(dirs ...string) ([]*Command, error) {
 	byName := make(map[string]*Command)
@@ -20,7 +24,16 @@ func Discover(dirs ...string) ([]*Command, error) {
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			if e.IsDir() {
+				// Nested skill: dir/<name>/SKILL.md
+				skillPath := filepath.Join(dir, e.Name(), "SKILL.md")
+				if cmd, err := ParseFile(skillPath); err == nil {
+					cmd.Name = e.Name() // use directory name
+					byName[cmd.Name] = cmd
+				}
+				continue
+			}
+			if !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
 			cmd, err := ParseFile(filepath.Join(dir, e.Name()))

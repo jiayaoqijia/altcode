@@ -47,20 +47,55 @@ func splitFrontmatter(content string) (frontmatter, body string, ok bool) {
 }
 
 // parseFrontmatterFields extracts known fields from YAML-like frontmatter.
-// Uses simple line parsing to avoid a yaml dependency.
+// Handles both simple (key: value) and YAML block/list formats:
+//
+//	description: |
+//	  Multi-line text
+//	allowed-tools:
+//	  - Bash
+//	  - Read
 func parseFrontmatterFields(fm string, cmd *Command) {
-	for _, line := range strings.Split(fm, "\n") {
-		key, val, ok := splitKV(line)
+	lines := strings.Split(fm, "\n")
+	for i := 0; i < len(lines); i++ {
+		key, val, ok := splitKV(lines[i])
 		if !ok {
 			continue
 		}
 		switch key {
+		case "name":
+			if val != "" {
+				cmd.Name = val
+			}
 		case "description":
-			cmd.Description = val
+			if val == "|" || val == ">" {
+				// Collect indented block
+				var block []string
+				for i+1 < len(lines) && len(lines[i+1]) > 0 && (lines[i+1][0] == ' ' || lines[i+1][0] == '\t') {
+					i++
+					block = append(block, strings.TrimSpace(lines[i]))
+				}
+				cmd.Description = strings.Join(block, " ")
+			} else {
+				cmd.Description = val
+			}
 		case "argument-hint":
 			cmd.ArgumentHint = val
 		case "allowed-tools":
-			cmd.AllowedTools = parseCSV(val)
+			if val == "" {
+				// YAML list format:  - Tool
+				var tools []string
+				for i+1 < len(lines) {
+					next := strings.TrimSpace(lines[i+1])
+					if !strings.HasPrefix(next, "- ") {
+						break
+					}
+					i++
+					tools = append(tools, strings.TrimPrefix(next, "- "))
+				}
+				cmd.AllowedTools = tools
+			} else {
+				cmd.AllowedTools = parseCSV(val)
+			}
 		}
 	}
 }

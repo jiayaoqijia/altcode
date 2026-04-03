@@ -186,6 +186,7 @@ func debugEvent(ev event.Event) {
 
 // isContextOverflow returns true if the error indicates a context length limit.
 func isContextOverflow(msg string) bool {
+	msg = strings.ToLower(msg)
 	for _, sig := range []string{
 		"context_length_exceeded",
 		"context length",
@@ -193,8 +194,12 @@ func isContextOverflow(msg string) bool {
 		"too many tokens",
 		"token limit",
 		"request too large",
+		"prompt is too long",
+		"input is too long",
+		"context window",
+		"reduce the length",
 	} {
-		if strings.Contains(strings.ToLower(msg), sig) {
+		if strings.Contains(msg, sig) {
 			return true
 		}
 	}

@@ -185,8 +185,14 @@ func discoverCommands() []*command.Command {
 	home, _ := os.UserHomeDir()
 
 	dirs := []string{
+		// Claude Code commands (flat .md files)
 		filepath.Join(home, ".claude", "commands"),
 		filepath.Join(projectRoot, ".claude", "commands"),
+		// Claude Code skills (nested SKILL.md dirs)
+		filepath.Join(home, ".claude", "skills"),
+		filepath.Join(projectRoot, ".claude", "skills"),
+		// Agent skills (nested SKILL.md dirs)
+		filepath.Join(projectRoot, ".agents", "skills"),
 	}
 	cmds, _ := command.Discover(dirs...)
 	return cmds
