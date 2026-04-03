@@ -61,6 +61,11 @@ func (t *patchTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 }
 
 func trySystemPatch(ctx context.Context, patch string) *Result {
+	// Skip system patch for new files — macOS patch handles them poorly
+	if strings.Contains(patch, "--- /dev/null") {
+		return nil
+	}
+
 	patchBin, err := exec.LookPath("patch")
 	if err != nil {
 		return nil // not available, use fallback
