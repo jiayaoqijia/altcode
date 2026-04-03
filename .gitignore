@@ -103,3 +103,16 @@ PLAN.md
 # Model-generated files from benchmarks
 *.go.bak
 main.go.bak
+
+# Model-generated files from benchmark tests (DO NOT COMMIT)
+internal/main.go
+internal/stack*.go
+internal/lru*.go
+internal/middleware*.go
+internal/ratelimit/
+internal/reverse_test.go
+internal/rate_limiter*.go
+internal/howmanytimes.go
+internal/example_*.go
+internal/*_example.go
+lru_cache.go
