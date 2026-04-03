@@ -100,6 +100,62 @@ func TestMergeHooks(t *testing.T) {
 	}
 }
 
+func TestLoadClaudeCodeFormat(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "cc-plugin")
+
+	os.MkdirAll(filepath.Join(pluginDir, ".claude-plugin"), 0o755)
+	os.WriteFile(filepath.Join(pluginDir, ".claude-plugin", "plugin.json"),
+		[]byte(`{"name":"cc-plugin","version":"2.0.0","description":"claude code format"}`), 0o644)
+
+	p, err := plugin.Load(pluginDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Manifest.Name != "cc-plugin" {
+		t.Errorf("Name: %q", p.Manifest.Name)
+	}
+}
+
+func TestLoadInvalidManifestJSON(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "bad-plugin")
+
+	os.MkdirAll(filepath.Join(pluginDir, ".altcode-plugin"), 0o755)
+	os.WriteFile(filepath.Join(pluginDir, ".altcode-plugin", "plugin.json"),
+		[]byte(`{invalid json`), 0o644)
+
+	_, err := plugin.Load(pluginDir)
+	if err == nil {
+		t.Error("Expected error for invalid JSON manifest")
+	}
+}
+
+func TestLoadMissingManifest(t *testing.T) {
+	dir := t.TempDir()
+	_, err := plugin.Load(dir)
+	if err == nil {
+		t.Error("Expected error for directory without plugin manifest")
+	}
+}
+
+func TestLoadPluginWithNoCommands(t *testing.T) {
+	dir := t.TempDir()
+	pluginDir := filepath.Join(dir, "bare-plugin")
+
+	os.MkdirAll(filepath.Join(pluginDir, ".altcode-plugin"), 0o755)
+	os.WriteFile(filepath.Join(pluginDir, ".altcode-plugin", "plugin.json"),
+		[]byte(`{"name":"bare"}`), 0o644)
+
+	p, err := plugin.Load(pluginDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(p.Commands) != 0 {
+		t.Errorf("Expected 0 commands, got %d", len(p.Commands))
+	}
+}
+
 func TestMergeMultiplePlugins(t *testing.T) {
 	dir := setupPlugin(t, "plugin-x")
 

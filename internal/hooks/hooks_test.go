@@ -251,3 +251,256 @@ func TestMessages(t *testing.T) {
 		t.Errorf("Expected 2 messages, got %d", len(msgs))
 	}
 }
+
+// =============================================================================
+// MULTIPLE HOOKS PER MATCHER
+// =============================================================================
+
+func TestMultipleHooksPerMatcher(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow","message":"hook1"}'`},
+				{Type: "command", Command: `echo '{"decision":"allow","message":"hook2"}'`},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "Read",
+	})
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results from 2 hooks, got %d", len(results))
+	}
+	if results[0].Message != "hook1" {
+		t.Errorf("First hook message: %q", results[0].Message)
+	}
+	if results[1].Message != "hook2" {
+		t.Errorf("Second hook message: %q", results[1].Message)
+	}
+}
+
+// =============================================================================
+// MULTIPLE MATCHERS FOR SAME EVENT
+// =============================================================================
+
+func TestMultipleMatchersForEvent(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {
+			{Matcher: "Bash", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow","message":"bash-hook"}'`},
+			}},
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow","message":"all-hook"}'`},
+			}},
+		},
+	})
+
+	// Bash should match both matchers
+	results, _ := r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "Bash",
+	})
+	if len(results) != 2 {
+		t.Fatalf("Expected 2 results, got %d", len(results))
+	}
+
+	// Read should match only wildcard
+	results, _ = r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "Read",
+	})
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result for Read, got %d", len(results))
+	}
+	if results[0].Message != "all-hook" {
+		t.Errorf("Wrong hook fired for Read: %q", results[0].Message)
+	}
+}
+
+// =============================================================================
+// STOP EVENT HOOKS
+// =============================================================================
+
+func TestStopHook_Allow(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.Stop: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow"}'`},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.Stop, hooks.Input{
+		Event: hooks.Stop, SessionID: "sess-1",
+	})
+	if hooks.HasDeny(results) {
+		t.Error("Stop hook should allow")
+	}
+}
+
+func TestStopHook_Deny(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.Stop: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"deny","message":"not finished"}'`},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.Stop, hooks.Input{
+		Event: hooks.Stop, SessionID: "sess-1",
+	})
+	if !hooks.HasDeny(results) {
+		t.Error("Stop hook should deny")
+	}
+	msgs := hooks.Messages(results)
+	if len(msgs) == 0 || msgs[0] != "not finished" {
+		t.Errorf("Expected deny message, got %v", msgs)
+	}
+}
+
+// =============================================================================
+// POSTTOOLUSE EVENT
+// =============================================================================
+
+func TestPostToolUseHook(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PostToolUse: {
+			{Matcher: "Write", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow","message":"file written"}'`},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.PostToolUse, hooks.Input{
+		Event:      hooks.PostToolUse,
+		ToolName:   "Write",
+		ToolInput:  json.RawMessage(`{"file_path":"/tmp/x"}`),
+		ToolOutput: "Created /tmp/x",
+	})
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].Message != "file written" {
+		t.Errorf("Message: %q", results[0].Message)
+	}
+}
+
+// =============================================================================
+// SESSIONSTART EVENT
+// =============================================================================
+
+func TestSessionStartHook(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.SessionStart: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: `echo '{"decision":"allow","message":"session started"}'`},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.SessionStart, hooks.Input{
+		Event:     hooks.SessionStart,
+		SessionID: "test-session",
+	})
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].Message != "session started" {
+		t.Errorf("Message: %q", results[0].Message)
+	}
+}
+
+// =============================================================================
+// HOOK ERROR HANDLING
+// =============================================================================
+
+func TestHookCommand_ErrorDefaultsToAllow(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: "exit 1"}, // non-zero, non-2 exit
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "Read",
+	})
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	// Non-zero non-2 exit should result in error, which is treated as allow
+	if results[0].Decision == "deny" {
+		t.Error("Non-deny exit code should not deny")
+	}
+}
+
+func TestHookCommand_UnknownTypeDefaultsToAllow(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {
+			{Matcher: "*", Hooks: []hooks.EntryConfig{
+				{Type: "unknown_type"},
+			}},
+		},
+	})
+
+	results, _ := r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "Read",
+	})
+	if len(results) != 1 {
+		t.Fatalf("Expected 1 result, got %d", len(results))
+	}
+	if results[0].Decision != "allow" {
+		t.Errorf("Unknown type should default to allow, got %q", results[0].Decision)
+	}
+}
+
+// =============================================================================
+// CASE INSENSITIVE MATCHING
+// =============================================================================
+
+func TestMatchTool_CaseInsensitive(t *testing.T) {
+	r := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {
+			{Matcher: "Write|Edit", Hooks: []hooks.EntryConfig{
+				{Type: "command", Command: "echo ok"},
+			}},
+		},
+	})
+
+	// lowercase tool name should match PascalCase matcher
+	results, _ := r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "write",
+	})
+	if len(results) == 0 {
+		t.Error("Should match write (case-insensitive)")
+	}
+
+	results, _ = r.Fire(context.Background(), hooks.PreToolUse, hooks.Input{
+		Event: hooks.PreToolUse, ToolName: "EDIT",
+	})
+	if len(results) == 0 {
+		t.Error("Should match EDIT (case-insensitive)")
+	}
+}
+
+// =============================================================================
+// HASDENY AND MESSAGES EDGE CASES
+// =============================================================================
+
+func TestHasDeny_EmptyResults(t *testing.T) {
+	if hooks.HasDeny([]hooks.Result{}) {
+		t.Error("Empty results should not have deny")
+	}
+}
+
+func TestMessages_Empty(t *testing.T) {
+	msgs := hooks.Messages(nil)
+	if len(msgs) != 0 {
+		t.Error("nil results should return empty messages")
+	}
+	msgs = hooks.Messages([]hooks.Result{})
+	if len(msgs) != 0 {
+		t.Error("Empty results should return empty messages")
+	}
+}

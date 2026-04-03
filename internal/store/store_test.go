@@ -78,6 +78,75 @@ func TestSessionCRUD(t *testing.T) {
 	}
 }
 
+func TestConcurrentSessions(t *testing.T) {
+	db := openTestDB(t)
+
+	// Create sessions for multiple projects
+	s1, _ := db.CreateSession("proj-a", "Session A1", "claude-3")
+	s2, _ := db.CreateSession("proj-a", "Session A2", "claude-3")
+	s3, _ := db.CreateSession("proj-b", "Session B1", "claude-3")
+
+	// All should be listed
+	list, _ := db.ListSessions()
+	if len(list) != 3 {
+		t.Fatalf("Expected 3 sessions, got %d", len(list))
+	}
+
+	// IDs should all be unique
+	ids := map[string]bool{}
+	for _, s := range []*Session{s1, s2, s3} {
+		if ids[s.ID] {
+			t.Errorf("Duplicate session ID: %s", s.ID)
+		}
+		ids[s.ID] = true
+	}
+}
+
+func TestUpdateSessionTitle_NonexistentReturnsError(t *testing.T) {
+	db := openTestDB(t)
+	err := db.UpdateSessionTitle("nonexistent-id", "New Title")
+	if err == nil {
+		t.Error("Expected error for nonexistent session")
+	}
+}
+
+func TestMessageOrdering(t *testing.T) {
+	db := openTestDB(t)
+	sess, _ := db.CreateSession("proj", "ordering", "model")
+
+	db.AddMessage(sess.ID, "user", []byte("first"), "m", 0, 0)
+	db.AddMessage(sess.ID, "assistant", []byte("second"), "m", 0, 0)
+	db.AddMessage(sess.ID, "user", []byte("third"), "m", 0, 0)
+
+	msgs, _ := db.ListMessages(sess.ID)
+	if len(msgs) != 3 {
+		t.Fatalf("Expected 3 messages, got %d", len(msgs))
+	}
+	if string(msgs[0].Content) != "first" {
+		t.Errorf("First message: %q", string(msgs[0].Content))
+	}
+	if string(msgs[1].Content) != "second" {
+		t.Errorf("Second message: %q", string(msgs[1].Content))
+	}
+	if string(msgs[2].Content) != "third" {
+		t.Errorf("Third message: %q", string(msgs[2].Content))
+	}
+}
+
+func TestNewSession(t *testing.T) {
+	db := openTestDB(t)
+	s, err := db.CreateSession("proj", "test", "model")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s.UpdatedAt.IsZero() {
+		t.Error("UpdatedAt should be set")
+	}
+	if s.Summary != "" {
+		t.Error("Summary should default to empty")
+	}
+}
+
 func TestMessageCRUD(t *testing.T) {
 	db := openTestDB(t)
 

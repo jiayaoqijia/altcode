@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"path/filepath"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +16,8 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/hooks"
+	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/store"
@@ -1039,3 +1042,283 @@ func TestEngine_NilPermDefaultsBypass(t *testing.T) {
 		}
 	}
 }
+
+// =============================================================================
+// STOP HOOKS: block completion and re-loop
+// =============================================================================
+
+func TestAgentLoop_StopHookBlocksCompletion(t *testing.T) {
+	// Turn 1: model returns text -> Stop hook denies -> engine re-loops with hook msg
+	// Turn 2: model returns text -> Stop hook allows (file marker exists now)
+	// Turn 3 (if needed): final text
+	// Need 3 responses because: original text + re-looped text after deny + stop allows on second
+
+	// Use a temp file to track state across hook invocations
+	tmpFile := filepath.Join(t.TempDir(), "stop_flag")
+
+	srv := mockAnthropicServer(t, []string{
+		textOnlySSE("First attempt."),
+		textOnlySSE("Second attempt."),
+		textOnlySSE("Third if needed."),
+	})
+	defer srv.Close()
+
+	hookCmd := fmt.Sprintf(
+		`sh -c 'if [ ! -f "%s" ]; then touch "%s"; echo "{\"decision\":\"deny\",\"message\":\"not yet\"}"; else echo "{\"decision\":\"allow\"}"; fi'`,
+		tmpFile, tmpFile,
+	)
+
+	hooksRunner := hooks.NewRunner(map[hooks.Event][]hooks.MatcherConfig{
+		hooks.Stop: {{
+			Matcher: "*",
+			Hooks: []hooks.EntryConfig{{
+				Type:    "command",
+				Command: hookCmd,
+			}},
+		}},
+	})
+
+	eng, err := engine.New(engine.EngineParams{
+		Config: cfgWithServer(srv),
+		Hooks:  hooksRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := collectEvents(eng.Run(context.Background(), "complete"))
+
+	if countEventType(events, event.Done) != 1 {
+		t.Error("Expected one Done event")
+	}
+
+	// Messages should include the stop hook feedback
+	msgs := eng.Messages()
+	hasHookMsg := false
+	for _, m := range msgs {
+		if m.Role == "user" && strings.Contains(m.Content, "not yet") {
+			hasHookMsg = true
+		}
+	}
+	if !hasHookMsg {
+		t.Error("Expected stop hook feedback message in conversation")
+	}
+}
+
+// =============================================================================
+// ACCESSOR METHODS
+// =============================================================================
+
+func TestEngine_ClearMessages(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{textOnlySSE("Hello!")})
+	defer srv.Close()
+
+	eng, err := engine.New(engine.EngineParams{Config: cfgWithServer(srv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collectEvents(eng.Run(context.Background(), "hi"))
+	if len(eng.Messages()) == 0 {
+		t.Fatal("Should have messages after Run")
+	}
+
+	eng.ClearMessages()
+	if len(eng.Messages()) != 0 {
+		t.Error("ClearMessages should empty the slice")
+	}
+}
+
+func TestEngine_Compact(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{textOnlySSE("ok")})
+	defer srv.Close()
+
+	eng, err := engine.New(engine.EngineParams{Config: cfgWithServer(srv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	collectEvents(eng.Run(context.Background(), "hi"))
+
+	// With only 2 messages, compact should remove 0
+	removed := eng.Compact()
+	if removed < 0 {
+		t.Errorf("Compact returned negative: %d", removed)
+	}
+}
+
+func TestEngine_Accessors(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{textOnlySSE("ok")})
+	defer srv.Close()
+
+	cfg := cfgWithServer(srv)
+	eng, err := engine.New(engine.EngineParams{
+		Config:    cfg,
+		SessionID: "test-sess-123",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if eng.SessionID() != "test-sess-123" {
+		t.Errorf("SessionID: %q", eng.SessionID())
+	}
+	if eng.Config() != cfg {
+		t.Error("Config should return the same instance")
+	}
+	if eng.Registry() == nil {
+		t.Error("Registry should not be nil")
+	}
+	if eng.ProviderInstance() == nil {
+		t.Error("ProviderInstance should not be nil")
+	}
+	if eng.PermissionEvaluator() == nil {
+		t.Error("PermissionEvaluator should not be nil")
+	}
+	if eng.HooksRunner() == nil {
+		t.Error("HooksRunner should not be nil")
+	}
+	if eng.CostTracker() == nil {
+		t.Error("CostTracker should not be nil")
+	}
+	if eng.FileJournal() == nil {
+		t.Error("FileJournal should not be nil")
+	}
+	// MemoryStore is nil when not provided
+	if eng.MemoryStore() != nil {
+		t.Error("MemoryStore should be nil when not provided")
+	}
+	// StoreInstance is nil when not provided
+	if eng.StoreInstance() != nil {
+		t.Error("StoreInstance should be nil when not provided")
+	}
+	// Sandbox is nil when not provided
+	if eng.Sandbox() != nil {
+		t.Error("Sandbox should be nil when not provided")
+	}
+	if eng.TaskQueue() == nil {
+		t.Error("TaskQueue should not be nil (auto-created)")
+	}
+	if eng.Instructions() == nil {
+		// nil is acceptable for empty
+	}
+}
+
+// =============================================================================
+// TRUNCATION AUTO-CONTINUE
+// =============================================================================
+
+func TestAgentLoop_TruncatedResponseAutoContinues(t *testing.T) {
+	// First turn: truncated text response (stop_reason=max_tokens)
+	// Second turn: normal text response
+	truncatedSSE := sse("content_block_start", `{"index":0,"content_block":{"type":"text","text":""}}`) +
+		sse("content_block_delta", `{"delta":{"type":"text_delta","text":"partial..."}}`) +
+		sse("content_block_stop", `{}`) +
+		sse("message_delta", `{"delta":{"stop_reason":"max_tokens"}}`) +
+		sse("message_stop", `{}`)
+
+	srv := mockAnthropicServer(t, []string{
+		truncatedSSE,
+		textOnlySSE("...completed."),
+	})
+	defer srv.Close()
+
+	eng, err := engine.New(engine.EngineParams{Config: cfgWithServer(srv)})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := collectEvents(eng.Run(context.Background(), "write long text"))
+
+	if countEventType(events, event.Done) != 1 {
+		t.Error("Expected Done")
+	}
+
+	// Messages should include the continuation prompt
+	msgs := eng.Messages()
+	hasContinue := false
+	for _, m := range msgs {
+		if m.Role == "user" && strings.Contains(m.Content, "Continue") {
+			hasContinue = true
+		}
+	}
+	if !hasContinue {
+		t.Error("Expected auto-continue message for truncated response")
+	}
+}
+
+// =============================================================================
+// PRETOOLUSE HOOK DENY
+// =============================================================================
+
+func TestAgentLoop_PreToolUseHookDeny(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{
+		toolCallSSE("t1", "bash", `{"command":"git push"}`),
+		textOnlySSE("OK."),
+	})
+	defer srv.Close()
+
+	hookCfg := map[hooks.Event][]hooks.MatcherConfig{
+		hooks.PreToolUse: {{
+			Matcher: "bash",
+			Hooks: []hooks.EntryConfig{{
+				Type:    "command",
+				Command: `echo '{"decision":"deny","message":"git push blocked"}'`,
+			}},
+		}},
+	}
+	hooksRunner := hooks.NewRunner(hookCfg)
+
+	eng, err := engine.New(engine.EngineParams{
+		Config: cfgWithServer(srv),
+		Hooks:  hooksRunner,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := collectEvents(eng.Run(context.Background(), "push"))
+
+	// Tool result should contain the hook deny message
+	for _, ev := range events {
+		if ev.Type == event.ToolResultEvent && ev.ToolResult != nil {
+			if strings.Contains(ev.ToolResult.Output, "git push blocked") {
+				return // pass
+			}
+			if strings.Contains(ev.ToolResult.Output, "Blocked by hook") {
+				return // pass
+			}
+		}
+	}
+	t.Error("Expected tool result blocked by PreToolUse hook")
+}
+
+// =============================================================================
+// MEMORY INJECTION INTO SYSTEM PROMPT
+// =============================================================================
+
+func TestEngine_WithMemory(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{textOnlySSE("I remember!")})
+	defer srv.Close()
+
+	dir := t.TempDir()
+	mem := memory.NewStore(dir)
+	mem.Save("prefs", "Preferences", "User prefers Go.")
+
+	eng, err := engine.New(engine.EngineParams{
+		Config: cfgWithServer(srv),
+		Memory: mem,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	events := collectEvents(eng.Run(context.Background(), "hi"))
+	if countEventType(events, event.Done) != 1 {
+		t.Error("Expected Done with memory store")
+	}
+	if eng.MemoryStore() == nil {
+		t.Error("MemoryStore accessor should return the store")
+	}
+}
+

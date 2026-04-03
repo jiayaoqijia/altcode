@@ -205,6 +205,74 @@ func TestListEmptyDir(t *testing.T) {
 	}
 }
 
+func TestOverwriteExistingMemory(t *testing.T) {
+	dir := t.TempDir()
+	s := memory.NewStore(dir)
+
+	s.Save("key1", "Original", "original content")
+	s.Save("key1", "Updated", "updated content")
+
+	m, err := s.Load("key1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.Title != "Updated" {
+		t.Errorf("Title should be updated: %q", m.Title)
+	}
+	if !strings.Contains(m.Content, "updated content") {
+		t.Errorf("Content should be updated: %q", m.Content)
+	}
+
+	// Should still have only 1 memory
+	list, _ := s.List()
+	if len(list) != 1 {
+		t.Errorf("Expected 1 memory after overwrite, got %d", len(list))
+	}
+}
+
+func TestLoadNonexistent(t *testing.T) {
+	dir := t.TempDir()
+	s := memory.NewStore(dir)
+
+	_, err := s.Load("nonexistent-key")
+	if err == nil {
+		t.Error("Expected error for nonexistent memory")
+	}
+}
+
+func TestDeleteNonexistent(t *testing.T) {
+	dir := t.TempDir()
+	s := memory.NewStore(dir)
+
+	// Deleting nonexistent returns an error (file not found)
+	err := s.Delete("nonexistent-key")
+	if err == nil {
+		t.Error("Expected error when deleting nonexistent memory")
+	}
+}
+
+func TestSearchNoResults(t *testing.T) {
+	dir := t.TempDir()
+	s := memory.NewStore(dir)
+
+	s.Save("test", "Test", "hello world")
+	results, _ := s.Search("zzz_nonexistent_pattern")
+	if len(results) != 0 {
+		t.Errorf("Expected 0 results, got %d", len(results))
+	}
+}
+
+func TestSearchInTitle(t *testing.T) {
+	dir := t.TempDir()
+	s := memory.NewStore(dir)
+
+	s.Save("test", "Important Project Notes", "just some text")
+	results, _ := s.Search("Important Project")
+	if len(results) != 1 {
+		t.Errorf("Expected 1 result searching title, got %d", len(results))
+	}
+}
+
 func TestDefaultDirs(t *testing.T) {
 	d1 := memory.DefaultDir("/project")
 	if !strings.Contains(d1, ".altcode") {

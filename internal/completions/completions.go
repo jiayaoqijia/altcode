@@ -26,8 +26,13 @@ var skipDirs = map[string]bool{
 	".svn":         true,
 }
 
+// walkLimit caps the number of entries examined to prevent TUI freezes
+// on large repositories. Once we've seen this many entries, we stop walking.
+const walkLimit = 10000
+
 // Complete walks root and returns up to maxResults fuzzy matches for query.
-// Results are sorted by score (higher = better match).
+// Results are sorted by score (higher = better match). Walking stops early
+// once walkLimit entries have been examined to stay responsive in large repos.
 func Complete(root, query string, maxResults int) []Match {
 	if maxResults <= 0 {
 		maxResults = 20
@@ -35,6 +40,7 @@ func Complete(root, query string, maxResults int) []Match {
 
 	query = strings.ToLower(query)
 	var matches []Match
+	seen := 0
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -58,6 +64,11 @@ func Complete(root, query string, maxResults int) []Match {
 			return nil
 		}
 
+		seen++
+		if seen > walkLimit {
+			return filepath.SkipAll
+		}
+
 		rel, err := filepath.Rel(root, path)
 		if err != nil {
 			return nil
@@ -69,6 +80,9 @@ func Complete(root, query string, maxResults int) []Match {
 				IsDir: d.IsDir(),
 				Score: 0,
 			})
+			if len(matches) >= maxResults {
+				return filepath.SkipAll
+			}
 			return nil
 		}
 
