@@ -44,6 +44,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinPlanText())
 	case "/stats":
 		a.appendInfo(a.builtinStatsText())
+	case "/tasks":
+		a.appendInfo(a.builtinTasksText())
 	default:
 		return false
 	}
@@ -73,6 +75,7 @@ func builtinHelpText() string {
   /diff      — show files changed this session
   /plan      — enter plan mode
   /stats     — combined status + cost + history
+  /tasks     — list background tasks
 
 Keyboard shortcuts:
   Enter      — submit prompt
@@ -294,6 +297,27 @@ func (a *App) builtinVersionText() string {
 		v = "dev"
 	}
 	return fmt.Sprintf("altcode v%s", v)
+}
+
+func (a *App) builtinTasksText() string {
+	if a.engine == nil || a.engine.TaskQueue() == nil {
+		return "No task queue available."
+	}
+	tasks := a.engine.TaskQueue().List()
+	if len(tasks) == 0 {
+		return "No tasks."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Tasks (%d):\n", len(tasks)))
+	for _, t := range tasks {
+		ts := t.UpdatedAt.Format(time.TimeOnly)
+		sb.WriteString(fmt.Sprintf(
+			"  %s  %-10s %-9s %s\n",
+			ts, t.ID, t.Status, t.Subject,
+		))
+	}
+	sb.WriteString("\n" + a.engine.TaskQueue().Summary())
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 // engineSessionID returns the current session ID safely.

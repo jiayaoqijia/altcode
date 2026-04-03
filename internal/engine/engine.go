@@ -15,8 +15,10 @@ import (
 	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/altcode-ai/altcode/internal/sandbox"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/sysctl"
+	"github.com/altcode-ai/altcode/internal/task"
 	"github.com/altcode-ai/altcode/internal/tool"
 )
 
@@ -25,13 +27,15 @@ const maxIterations = 50
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
 	Config       *config.Config
-	Perm         *permission.Evaluator // nil = allow all
-	Store        *store.DB             // nil = no persistence
-	SessionID    string                // empty = new session
-	Messages     []provider.Message    // pre-loaded for session resume
-	Hooks        *hooks.Runner         // nil = no hooks
-	Instructions []config.Instruction  // loaded from CLAUDE.md etc.
-	Memory       *memory.Store         // nil = no persistent memory
+	Perm         *permission.Evaluator  // nil = allow all
+	Store        *store.DB              // nil = no persistence
+	SessionID    string                 // empty = new session
+	Messages     []provider.Message     // pre-loaded for session resume
+	Hooks        *hooks.Runner          // nil = no hooks
+	Instructions []config.Instruction   // loaded from CLAUDE.md etc.
+	Memory       *memory.Store          // nil = no persistent memory
+	Sandbox      *sandbox.Sandbox       // nil = no sandboxing
+	TaskQueue    *task.Queue            // nil = auto-created
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -43,6 +47,8 @@ type Engine struct {
 	hooks        *hooks.Runner
 	mem          *memory.Store
 	store        *store.DB
+	sandbox      *sandbox.Sandbox
+	taskQueue    *task.Queue
 	sessionID    string
 	model        string
 	messages     []provider.Message
@@ -67,9 +73,21 @@ func New(params EngineParams) (*Engine, error) {
 	registry.Register(tool.NewGlobTool())
 	registry.Register(tool.NewGrepTool())
 	registry.Register(tool.NewLsTool())
-	registry.Register(tool.NewBashTool())
+	if params.Sandbox != nil {
+		registry.Register(tool.NewBashToolWithSandbox(params.Sandbox))
+	} else {
+		registry.Register(tool.NewBashTool())
+	}
 	registry.Register(tool.NewEditTool())
 	registry.Register(tool.NewWriteTool())
+	registry.Register(tool.NewWebFetchTool())
+	registry.Register(tool.NewWebSearchTool())
+	registry.Register(tool.NewPatchTool())
+
+	tq := params.TaskQueue
+	if tq == nil {
+		tq = task.NewQueue()
+	}
 
 	perm := params.Perm
 	if perm == nil {
@@ -94,6 +112,8 @@ func New(params EngineParams) (*Engine, error) {
 		hooks:        hooksRunner,
 		mem:          params.Memory,
 		store:        params.Store,
+		sandbox:      params.Sandbox,
+		taskQueue:    tq,
 		sessionID:    params.SessionID,
 		model:        modelName,
 		messages:     msgs,
@@ -101,6 +121,16 @@ func New(params EngineParams) (*Engine, error) {
 		cost:         cost.NewTracker(),
 		journal:      history.NewJournal(),
 	}, nil
+}
+
+// Sandbox returns the engine's command sandbox.
+func (e *Engine) Sandbox() *sandbox.Sandbox {
+	return e.sandbox
+}
+
+// TaskQueue returns the engine's task queue.
+func (e *Engine) TaskQueue() *task.Queue {
+	return e.taskQueue
 }
 
 // Run sends user input to the provider and returns a channel of events.

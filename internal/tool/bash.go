@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"os/exec"
 	"time"
+
+	"github.com/altcode-ai/altcode/internal/sandbox"
 )
 
 const maxOutputBytes = 512 * 1024 // 512KB
@@ -19,10 +21,17 @@ func truncateOutput(s string) string {
 	return s
 }
 
-type bashTool struct{}
+type bashTool struct {
+	sandbox *sandbox.Sandbox
+}
 
 // NewBashTool creates a tool that executes bash commands.
 func NewBashTool() Tool { return &bashTool{} }
+
+// NewBashToolWithSandbox creates a bash tool with sandbox checking.
+func NewBashToolWithSandbox(sb *sandbox.Sandbox) Tool {
+	return &bashTool{sandbox: sb}
+}
 
 func (t *bashTool) Name() string               { return "bash" }
 func (t *bashTool) Description() string {
@@ -54,6 +63,15 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
 		return nil, fmt.Errorf("parse input: %w", err)
+	}
+
+	if t.sandbox != nil {
+		if err := t.sandbox.Check(params.Command); err != nil {
+			return &Result{
+				Output: fmt.Sprintf("Error: %v", err),
+				Title:  "sandbox:blocked",
+			}, nil
+		}
 	}
 
 	timeout := 120 * time.Second
