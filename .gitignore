@@ -116,3 +116,14 @@ internal/howmanytimes.go
 internal/example_*.go
 internal/*_example.go
 lru_cache.go
+
+# Aggressively ignore model-generated packages
+internal/lru/
+internal/stack/
+internal/middleware/
+internal/ratelimit/
+internal/datastructures/
+internal/stringxor.go
+internal/main.go
+internal/hascloseelements.go
+internal/prime.go
