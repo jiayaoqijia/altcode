@@ -392,6 +392,12 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.messages = append(a.messages, fmt.Sprintf("> %s", text))
 	a.streaming = ""
+
+	if a.handleBuiltinCommand(text) {
+		a.busy = false
+		return nil
+	}
+
 	a.busy = true
 	a.thinking = true
 	a.thinkingText = ""

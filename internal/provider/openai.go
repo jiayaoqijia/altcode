@@ -222,6 +222,7 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 
 	decoder := NewSSEDecoder(body)
 	toolState := make(map[int]*openaiToolState)
+	var stopReason string
 
 	for {
 		_, data, err := decoder.Next()
@@ -296,10 +297,11 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 			if *choice.FinishReason == "stop" {
 				ch <- StreamEvent{Type: StreamTextDone}
 			}
+			stopReason = *choice.FinishReason
 		}
 	}
 
-	ch <- StreamEvent{Type: StreamDone}
+	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
 
 type openaiToolState struct {

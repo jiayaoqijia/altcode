@@ -138,9 +138,8 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 	defer close(ch)
 
 	decoder := NewSSEDecoder(body)
-	// track current tool call index for input streaming
 	toolIndex := -1
-	var toolID, toolName string
+	var toolID, toolName, stopReason string
 
 	for {
 		evtType, data, err := decoder.Next()
@@ -153,24 +152,31 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 		if data == "" {
 			continue
 		}
-		if err := dispatchSSEEvent(evtType, data, ch, &toolIndex, &toolID, &toolName); err != nil {
+		reason, err := dispatchSSEEvent(
+			evtType, data, ch,
+			&toolIndex, &toolID, &toolName,
+		)
+		if err != nil {
 			ch <- StreamEvent{Type: StreamError, Error: err}
 			break
 		}
+		if reason != "" {
+			stopReason = reason
+		}
 	}
-	ch <- StreamEvent{Type: StreamDone}
+	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
 
 func dispatchSSEEvent(
 	evtType, data string,
 	ch chan<- StreamEvent,
 	toolIndex *int, toolID, toolName *string,
-) error {
+) (string, error) {
 	switch evtType {
 	case "content_block_start":
-		return handleContentBlockStart(data, ch, toolIndex, toolID, toolName)
+		return "", handleContentBlockStart(data, ch, toolIndex, toolID, toolName)
 	case "content_block_delta":
-		return handleContentBlockDelta(data, ch, *toolIndex, *toolID, *toolName)
+		return "", handleContentBlockDelta(data, ch, *toolIndex, *toolID, *toolName)
 	case "content_block_stop":
 		if *toolIndex >= 0 {
 			ch <- StreamEvent{Type: StreamToolCallEnd, ToolUse: &ToolCallEvent{
@@ -183,13 +189,13 @@ func dispatchSSEEvent(
 			ch <- StreamEvent{Type: StreamTextDone}
 		}
 	case "message_delta":
-		return handleMessageDelta(data, ch)
+		return handleMessageDeltaWithReason(data, ch)
 	case "message_stop":
 		// nothing to emit; StreamDone is sent by processSSE after loop
 	case "error":
-		return handleErrorEvent(data)
+		return "", handleErrorEvent(data)
 	}
-	return nil
+	return "", nil
 }
 
 // --- typed SSE payloads ---
@@ -213,6 +219,9 @@ type sseContentBlockDelta struct {
 }
 
 type sseMessageDelta struct {
+	Delta *struct {
+		StopReason string `json:"stop_reason"`
+	} `json:"delta"`
 	Usage *UsageInfo `json:"usage"`
 }
 
@@ -266,15 +275,18 @@ func handleContentBlockDelta(
 	return nil
 }
 
-func handleMessageDelta(data string, ch chan<- StreamEvent) error {
+func handleMessageDeltaWithReason(data string, ch chan<- StreamEvent) (string, error) {
 	var p sseMessageDelta
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
-		return fmt.Errorf("parse message_delta: %w", err)
+		return "", fmt.Errorf("parse message_delta: %w", err)
 	}
 	if p.Usage != nil {
 		ch <- StreamEvent{Type: StreamUsage, Usage: p.Usage}
 	}
-	return nil
+	if p.Delta != nil && p.Delta.StopReason != "" {
+		return p.Delta.StopReason, nil
+	}
+	return "", nil
 }
 
 func handleErrorEvent(data string) error {

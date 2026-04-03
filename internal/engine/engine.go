@@ -8,7 +8,9 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/altcode-ai/altcode/internal/cost"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/history"
 	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/permission"
@@ -46,6 +48,8 @@ type Engine struct {
 	messages     []provider.Message
 	instructions []config.Instruction
 	totalTokens  int // running token count
+	cost         *cost.Tracker
+	journal      *history.Journal
 }
 
 // New creates an Engine from the given parameters.
@@ -94,6 +98,8 @@ func New(params EngineParams) (*Engine, error) {
 		model:        modelName,
 		messages:     msgs,
 		instructions: params.Instructions,
+		cost:         cost.NewTracker(),
+		journal:      history.NewJournal(),
 	}, nil
 }
 
@@ -204,6 +210,21 @@ func (e *Engine) Instructions() []config.Instruction {
 	return e.instructions
 }
 
+// ClearMessages resets the conversation history.
+func (e *Engine) ClearMessages() {
+	e.messages = []provider.Message{}
+}
+
+// CostTracker returns the engine's cost tracker.
+func (e *Engine) CostTracker() *cost.Tracker {
+	return e.cost
+}
+
+// FileJournal returns the engine's file history journal.
+func (e *Engine) FileJournal() *history.Journal {
+	return e.journal
+}
+
 // NewWithRegistry creates an Engine with an externally-provided tool registry.
 // Used by the subagent system to create restricted child engines.
 func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, error) {
@@ -240,6 +261,8 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		model:        modelName,
 		messages:     msgs,
 		instructions: params.Instructions,
+		cost:         cost.NewTracker(),
+		journal:      history.NewJournal(),
 	}, nil
 }
 
@@ -286,6 +309,13 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		}
 
 		turn := collectTurn(stream, out)
+		e.recordTurnCost(turn)
+
+		// Auto-continue truncated text responses
+		if turn.Truncated && len(turn.ToolCalls) == 0 {
+			e.appendTruncatedAndContinue(turn)
+			continue
+		}
 
 		if len(turn.ToolCalls) == 0 {
 			assistMsg := provider.TextMessage("assistant", turn.Text)
@@ -305,6 +335,18 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		e.appendToolResults(turn.ToolCalls, results)
 		e.maybeCompact(ctx)
 	}
+}
+
+// appendTruncatedAndContinue saves the partial assistant text and appends
+// a continuation prompt so the engine loop retries with the model.
+func (e *Engine) appendTruncatedAndContinue(turn *turnResult) {
+	assistMsg := provider.TextMessage("assistant", turn.Text)
+	e.messages = append(e.messages, assistMsg)
+	e.persistMessage("assistant", assistMsg)
+	contMsg := provider.TextMessage("user",
+		"Continue from where you left off.")
+	e.messages = append(e.messages, contMsg)
+	e.persistMessage("user", contMsg)
 }
 
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
@@ -424,6 +466,7 @@ func (e *Engine) dispatchTools(
 	results := tool.Dispatch(ctx, calls)
 
 	for i, r := range results {
+		e.journalToolResult(toolCalls[i], r)
 		out <- event.Event{
 			Type:       event.ToolResultEvent,
 			ToolResult: &event.Result{Output: r.Output, Title: r.Title},
@@ -548,6 +591,42 @@ func (e *Engine) fireStopHooks(ctx context.Context) string {
 			return msgs[0]
 		}
 		return "Stop hook blocked completion."
+	}
+	return ""
+}
+
+func (e *Engine) recordTurnCost(turn *turnResult) {
+	if turn.InputTokens > 0 || turn.OutputTokens > 0 {
+		e.cost.RecordTurn(e.model, turn.InputTokens, turn.OutputTokens)
+	}
+}
+
+func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result) {
+	name := tc.Name
+	if name != "write" && name != "edit" {
+		return
+	}
+	path := extractPath(tc.Input)
+	if path == "" {
+		return
+	}
+	action := "modify"
+	if name == "write" {
+		action = "create"
+	}
+	e.journal.Record(name, path, action, "", r.Output)
+}
+
+func extractPath(input json.RawMessage) string {
+	var m map[string]any
+	if err := json.Unmarshal(input, &m); err != nil {
+		return ""
+	}
+	if p, ok := m["file_path"].(string); ok {
+		return p
+	}
+	if p, ok := m["path"].(string); ok {
+		return p
 	}
 	return ""
 }

@@ -65,11 +65,12 @@ const (
 
 // StreamEvent is a single event emitted from a provider stream.
 type StreamEvent struct {
-	Type    StreamEventType
-	Delta   string
-	ToolUse *ToolCallEvent
-	Usage   *UsageInfo
-	Error   error
+	Type       StreamEventType
+	Delta      string
+	ToolUse    *ToolCallEvent
+	Usage      *UsageInfo
+	Error      error
+	StopReason string // "end_turn", "max_tokens", "stop", "length", etc.
 }
 
 // ToolCallEvent carries information about a streaming tool call.

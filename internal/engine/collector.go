@@ -17,8 +17,11 @@ type collectedToolCall struct {
 
 // turnResult holds the complete output from a single provider stream.
 type turnResult struct {
-	Text      string
-	ToolCalls []collectedToolCall
+	Text         string
+	ToolCalls    []collectedToolCall
+	InputTokens  int
+	OutputTokens int
+	Truncated    bool // true when finish_reason indicates max_tokens/length
 }
 
 // collectTurn reads a provider stream, emits events to out in real-time,
@@ -71,6 +74,8 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 
 		case provider.StreamUsage:
 			if sev.Usage != nil {
+				result.InputTokens = sev.Usage.InputTokens
+				result.OutputTokens = sev.Usage.OutputTokens
 				out <- event.Event{Type: event.UsageEvent, Usage: &event.UsageInfo{
 					InputTokens:  sev.Usage.InputTokens,
 					OutputTokens: sev.Usage.OutputTokens,
@@ -82,7 +87,7 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 			return result
 
 		case provider.StreamDone:
-			// Stream complete — return what we have
+			result.Truncated = isTruncated(sev.StopReason)
 			return result
 		}
 	}
@@ -106,4 +111,10 @@ func (a *toolAccumulator) finish() collectedToolCall {
 		Name:  a.name,
 		Input: json.RawMessage(raw),
 	}
+}
+
+// isTruncated returns true when the stop reason indicates the model
+// hit max_tokens (Anthropic) or length (OpenAI).
+func isTruncated(reason string) bool {
+	return reason == "max_tokens" || reason == "length"
 }
