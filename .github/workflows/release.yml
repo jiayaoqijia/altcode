@@ -8,7 +8,31 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: false
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23'
+
+      - name: Build
+        run: go build -mod=mod ./...
+
+      - name: Test
+        run: go test -mod=mod ./... -race -count=1 -timeout=180s -parallel=8
+
+      - name: Vet
+        run: go vet -mod=mod ./...
+
   build:
+    needs: test
     strategy:
       matrix:
         include:
