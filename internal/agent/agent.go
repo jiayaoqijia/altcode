@@ -37,7 +37,10 @@ func ParseFile(path string) (*Agent, error) {
 	return a, nil
 }
 
-// Discover finds all .md agent files in the given directories.
+// Discover finds agent definitions in the given directories.
+// Supports two layouts:
+//   - Flat: dir/*.md
+//   - Nested: dir/<name>/SKILL.md (Claude Code agent format)
 func Discover(dirs ...string) ([]*Agent, error) {
 	byName := make(map[string]*Agent)
 	for _, dir := range dirs {
@@ -49,7 +52,15 @@ func Discover(dirs ...string) ([]*Agent, error) {
 			continue
 		}
 		for _, e := range entries {
-			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
+			if e.IsDir() {
+				skillPath := filepath.Join(dir, e.Name(), "SKILL.md")
+				if a, err := ParseFile(skillPath); err == nil {
+					a.Name = e.Name()
+					byName[a.Name] = a
+				}
+				continue
+			}
+			if !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
 			a, err := ParseFile(filepath.Join(dir, e.Name()))
@@ -79,24 +90,45 @@ func splitFrontmatter(content string) (string, string, bool) {
 }
 
 func parseFrontmatter(fm string, a *Agent) {
-	for _, line := range strings.Split(fm, "\n") {
-		idx := strings.Index(line, ":")
+	lines := strings.Split(fm, "\n")
+	for i := 0; i < len(lines); i++ {
+		idx := strings.Index(lines[i], ":")
 		if idx < 0 {
 			continue
 		}
-		key := strings.TrimSpace(line[:idx])
-		val := strings.TrimSpace(line[idx+1:])
+		key := strings.TrimSpace(lines[i][:idx])
+		val := strings.TrimSpace(lines[i][idx+1:])
 		switch key {
-		case "name":
-			a.Name = val
 		case "description":
-			a.Description = val
+			if val == "|" || val == ">" {
+				var block []string
+				for i+1 < len(lines) && len(lines[i+1]) > 0 && (lines[i+1][0] == ' ' || lines[i+1][0] == '\t') {
+					i++
+					block = append(block, strings.TrimSpace(lines[i]))
+				}
+				a.Description = strings.Join(block, " ")
+			} else {
+				a.Description = val
+			}
 		case "model":
 			a.Model = val
 		case "color":
 			a.Color = val
 		case "tools":
-			a.Tools = parseList(val)
+			if val == "" {
+				var tools []string
+				for i+1 < len(lines) {
+					next := strings.TrimSpace(lines[i+1])
+					if !strings.HasPrefix(next, "- ") {
+						break
+					}
+					i++
+					tools = append(tools, strings.TrimPrefix(next, "- "))
+				}
+				a.Tools = tools
+			} else {
+				a.Tools = parseList(val)
+			}
 		}
 	}
 }

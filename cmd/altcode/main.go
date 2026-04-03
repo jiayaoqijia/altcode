@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/auth"
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
@@ -116,6 +117,15 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 
 	hooksRunner := buildHooksRunner(cfg)
 	skills := discoverSkills()
+	agents := discoverAgents()
+
+	// Merge agent descriptions into skills list so the model knows about them
+	for _, a := range agents {
+		skills = append(skills, engine.Skill{
+			Name:        a.Name + " (agent)",
+			Description: a.Description,
+		})
+	}
 
 	params := engine.EngineParams{
 		Config:       cfg,
@@ -178,6 +188,24 @@ func connectMCP(cfg *config.Config, eng *engine.Engine) func() {
 	mgr := mcp.NewManager(ctx, cfg.MCP)
 	mgr.RegisterAll(ctx, eng.Registry())
 	return mgr.Close
+}
+
+func discoverAgents() []*agent.Agent {
+	wd, _ := os.Getwd()
+	projectRoot := config.DetectProjectRoot(wd)
+	home, _ := os.UserHomeDir()
+
+	dirs := []string{
+		filepath.Join(projectRoot, ".agents", "skills"),
+		filepath.Join(projectRoot, ".claude", "agents"),
+	}
+	if home != "" {
+		dirs = append(dirs,
+			filepath.Join(home, ".claude", "agents"),
+		)
+	}
+	agents, _ := agent.Discover(dirs...)
+	return agents
 }
 
 func discoverSkills() []engine.Skill {
