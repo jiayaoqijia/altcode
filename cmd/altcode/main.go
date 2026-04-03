@@ -304,9 +304,6 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 		tryMerge(cfg, configFlag)
 	}
 
-	if modelFlag != "" {
-		cfg.Model = modelFlag
-	}
 	if themeFlag != "" {
 		cfg.Theme = themeFlag
 	}
@@ -323,6 +320,12 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 
 	// Auto-detect credentials from Claude Code and Codex CLI installs
 	auth.LoadFromCLIs(cfg)
+
+	// Model flag takes highest priority — apply after auth detection
+	// so Codex's config.toml model doesn't override an explicit --model
+	if modelFlag != "" {
+		cfg.Model = modelFlag
+	}
 
 	return cfg
 }
