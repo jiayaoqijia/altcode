@@ -62,10 +62,6 @@ func parseFrontmatterFields(fm string, cmd *Command) {
 			continue
 		}
 		switch key {
-		case "name":
-			if val != "" {
-				cmd.Name = val
-			}
 		case "description":
 			if val == "|" || val == ">" {
 				// Collect indented block
