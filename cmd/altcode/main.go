@@ -26,7 +26,7 @@ var Version = "dev"
 
 func main() {
 	var modelFlag, configFlag, themeFlag, sessionFlag string
-	var jsonFlag, lastFlag bool
+	var jsonFlag, lastFlag, debugFlag bool
 
 	root := &cobra.Command{
 		Use:   "altcode [prompt]",
@@ -44,6 +44,9 @@ func main() {
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg := loadConfig(modelFlag, configFlag, themeFlag)
 			prompt := strings.Join(args, " ")
+			if debugFlag {
+				os.Setenv("ALTCODE_DEBUG", "1")
+			}
 			return run(cfg, prompt, jsonFlag, lastFlag, sessionFlag)
 		},
 	}
@@ -54,6 +57,7 @@ func main() {
 	root.Flags().BoolVar(&jsonFlag, "json", false, "Emit JSONL events (exec mode)")
 	root.Flags().BoolVar(&lastFlag, "last", false, "Resume last session")
 	root.Flags().StringVar(&sessionFlag, "session", "", "Resume session by ID")
+	root.Flags().BoolVar(&debugFlag, "debug", false, "Print events to stderr for debugging")
 
 	sessCmd := &cobra.Command{
 		Use:   "sessions",

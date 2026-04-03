@@ -35,12 +35,14 @@ type App struct {
 	width         int
 	height        int
 
-	messages  []string
-	streaming string
-	busy      bool
-	cancel    context.CancelFunc
-	events    <-chan event.Event
-	tokenInfo string
+	messages     []string
+	streaming    string
+	busy         bool
+	thinking     bool
+	thinkingText string
+	cancel       context.CancelFunc
+	events       <-chan event.Event
+	tokenInfo    string
 }
 
 // New creates a new App backed by the given engine and theme.
@@ -284,10 +286,30 @@ func (a *App) refreshEngine() error {
 func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 	switch ev.Type {
 	case event.TextDelta:
+		a.thinking = false
 		a.streaming += ev.Text
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.TextDone:
+		a.thinking = false
+		return a, a.waitForEvent()
+	case event.ThinkingDelta:
+		a.thinking = true
+		a.thinkingText = ev.Thinking
+		a.updateViewport()
+		return a, a.waitForEvent()
+	case event.ToolStart:
+		a.thinking = true
+		name := ""
+		if ev.ToolCall != nil {
+			name = ev.ToolCall.Name
+		}
+		a.thinkingText = "using " + name + "..."
+		a.updateViewport()
+		return a, a.waitForEvent()
+	case event.ToolResultEvent:
+		a.thinking = false
+		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.UsageEvent:
 		if ev.Usage != nil {
@@ -339,9 +361,21 @@ func (a *App) View() string {
 
 	status := ""
 	if a.busy {
-		status = lipgloss.NewStyle().
-			Foreground(a.theme.Warning).
-			Render("  streaming...")
+		if a.thinking && a.thinkingText != "" {
+			status = lipgloss.NewStyle().
+				Foreground(a.theme.Secondary).
+				Italic(true).
+				Render("  ◆ " + a.thinkingText)
+		} else if a.thinking {
+			status = lipgloss.NewStyle().
+				Foreground(a.theme.Secondary).
+				Italic(true).
+				Render("  ◆ thinking...")
+		} else {
+			status = lipgloss.NewStyle().
+				Foreground(a.theme.Warning).
+				Render("  ● streaming...")
+		}
 	}
 
 	inputView := a.input.View()
@@ -359,6 +393,8 @@ func (a *App) submit() tea.Cmd {
 	a.messages = append(a.messages, fmt.Sprintf("> %s", text))
 	a.streaming = ""
 	a.busy = true
+	a.thinking = true
+	a.thinkingText = ""
 
 	text = a.expandSlashCommand(text)
 	a.updateViewport()

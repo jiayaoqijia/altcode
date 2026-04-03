@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/config"
@@ -97,13 +98,60 @@ func New(params EngineParams) (*Engine, error) {
 }
 
 // Run sends user input to the provider and returns a channel of events.
+// Set ALTCODE_DEBUG=1 to log events to stderr.
 func (e *Engine) Run(ctx context.Context, input string) <-chan event.Event {
 	events := make(chan event.Event, 64)
+	debug := os.Getenv("ALTCODE_DEBUG") == "1"
 	go func() {
 		defer close(events)
-		e.loop(ctx, input, events)
+		if debug {
+			fmt.Fprintf(os.Stderr, "[debug] engine.Run: model=%s input=%q\n", e.model, truncate(input, 80))
+		}
+		raw := make(chan event.Event, 64)
+		go func() {
+			defer close(raw)
+			e.loop(ctx, input, raw)
+		}()
+		for ev := range raw {
+			if debug {
+				debugEvent(ev)
+			}
+			events <- ev
+		}
 	}()
 	return events
+}
+
+func debugEvent(ev event.Event) {
+	switch ev.Type {
+	case event.TextDelta:
+		// too noisy, skip
+	case event.ToolStart:
+		name := ""
+		if ev.ToolCall != nil {
+			name = ev.ToolCall.Name
+		}
+		fmt.Fprintf(os.Stderr, "[debug] tool_start: %s\n", name)
+	case event.ToolResultEvent:
+		title := ""
+		if ev.ToolResult != nil {
+			title = ev.ToolResult.Title
+		}
+		fmt.Fprintf(os.Stderr, "[debug] tool_result: %s\n", title)
+	case event.ErrorEvent:
+		fmt.Fprintf(os.Stderr, "[debug] error: %s\n", ev.Error)
+	case event.Done:
+		fmt.Fprintf(os.Stderr, "[debug] done\n")
+	default:
+		fmt.Fprintf(os.Stderr, "[debug] event: %s\n", ev.Type)
+	}
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n] + "..."
 }
 
 // Messages returns the current conversation history.
