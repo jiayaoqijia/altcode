@@ -1,10 +1,12 @@
 # altcode
 
-**[altcode.io](https://altcode.io)**
+![altcode TUI preview](docs/images/altcode-hero.png)
+
+**[altcode.io](https://altcode.io)** · [Install](#install) · [Docs](https://github.com/jiayaoqijia/altcode/blob/main/README.md) · [Releases](https://github.com/jiayaoqijia/altcode/releases)
 
 A minimal, blazing-fast Go CLI/TUI for AI-assisted coding.
 
-**5ms startup. 10MB binary. 6 providers. 340+ tests. Claude Code compatible.**
+**5ms startup. 10MB binary. 6+ providers. 340+ tests. Claude Code compatible.**
 
 ## Why altcode?
 
