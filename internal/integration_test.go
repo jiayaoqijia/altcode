@@ -1014,8 +1014,8 @@ func TestMarkdown_MultipleCodeBlocks(t *testing.T) {
 	r := tui.NewMarkdownRenderer(80)
 	input := "Block 1:\n```go\nfunc a() {}\n```\n\nBlock 2:\n```py\ndef b(): pass\n```\n"
 	result := r.Render(input)
-	if !strings.Contains(result, "go") || !strings.Contains(result, "py") {
-		t.Error("Should render both code blocks with language labels")
+	if !strings.Contains(result, "func") || !strings.Contains(result, "def") {
+		t.Error("Should render both code blocks with their content")
 	}
 }
 

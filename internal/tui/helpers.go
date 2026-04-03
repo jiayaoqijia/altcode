@@ -1,6 +1,11 @@
 package tui
 
-import "strings"
+import (
+	"os"
+	"strings"
+
+	"github.com/altcode-ai/altcode/internal/config"
+)
 
 func normalInputPlaceholder(startupPrompt string) string {
 	if strings.TrimSpace(startupPrompt) != "" {
@@ -117,6 +122,15 @@ func providerLabel(name string) string {
 		}
 		return strings.ToUpper(name[:1]) + name[1:]
 	}
+}
+
+// detectProjectRoot finds the project root from cwd.
+func detectProjectRoot() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return ""
+	}
+	return config.DetectProjectRoot(cwd)
 }
 
 func max(a, b int) int {

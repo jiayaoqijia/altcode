@@ -160,6 +160,8 @@ func buildPaletteCommands(
 		{Name: "/tasks", Description: "list background tasks"},
 		{Name: "/team", Description: "multi-AI team config"},
 		{Name: "/backends", Description: "detect coding backends"},
+		{Name: "/undo", Description: "git-backed undo (stash)"},
+		{Name: "/redo", Description: "restore last undo"},
 	}
 	// Assign actions that return the command name (submitted by the app).
 	for i := range builtins {

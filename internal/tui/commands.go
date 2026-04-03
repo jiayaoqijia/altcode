@@ -52,6 +52,10 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinTeamText())
 	case "/backends":
 		a.appendInfo(a.builtinBackendsText())
+	case "/undo":
+		a.appendInfo(a.builtinUndoText())
+	case "/redo":
+		a.appendInfo(a.builtinRedoText())
 	default:
 		return false
 	}
@@ -83,14 +87,17 @@ func builtinHelpText() string {
   /stats     — combined status + cost + history
   /tasks     — list background tasks
   /team      — show multi-AI team configuration
-  /tasks     — list background tasks
+  /undo      — stash changes (git-backed undo)
+  /redo      — restore stashed changes
 
 Keyboard shortcuts:
   Enter      — submit prompt
   Ctrl+J     — insert newline
   Ctrl+K     — command palette
   Ctrl+A     — session switcher
-  Esc        — cancel streaming / quit`
+  @file      — file completion popup
+  Esc        — vim mode (j/k/G/gg/ctrl+d/ctrl+u)
+  Esc Esc    — quit`
 }
 
 func (a *App) builtinStatusText() string {

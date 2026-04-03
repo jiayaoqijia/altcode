@@ -37,6 +37,11 @@ type App struct {
 
 	palette         *Palette
 	sessionSwitcher *SessionSwitcher
+	projectRoot     string
+
+	filePopup   filePopup
+	vimMode     bool
+	vimPendingG bool
 
 	messages     []string
 	streaming    string
@@ -81,6 +86,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		input:           ti,
 		palette:         pal,
 		sessionSwitcher: sw,
+		projectRoot:     detectProjectRoot(),
 	}
 }
 
@@ -119,6 +125,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if !a.busy {
 		var cmd tea.Cmd
 		a.input, cmd = a.input.Update(msg)
+		a.updateFilePopup()
 		return a, cmd
 	}
 	return a, nil
@@ -133,6 +140,16 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	// Route to session switcher overlay when visible.
 	if a.sessionSwitcher.IsVisible() {
 		return a.handleSwitcherKey(msg)
+	}
+
+	// Route to file popup when visible.
+	if a.filePopup.visible {
+		return a.handleFilePopupKey(msg)
+	}
+
+	// Vim mode: viewport navigation when input is blurred.
+	if a.vimMode && !a.busy {
+		return a.handleVimModeKey(msg)
 	}
 
 	if a.setupProvider != "" {
@@ -157,11 +174,21 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		a.toggleSessionSwitcher()
 		return a, nil, true
 	case "esc":
+		if a.filePopup.visible {
+			a.dismissFilePopup()
+			return a, nil, true
+		}
 		if a.busy {
 			if a.cancel != nil {
 				a.cancel()
 			}
 			a.busy = false
+			return a, nil, true
+		}
+		// Enter vim mode instead of quitting on first Esc.
+		if !a.vimMode && strings.TrimSpace(a.startupPrompt) == "" {
+			a.vimMode = true
+			a.input.Blur()
 			return a, nil, true
 		}
 		return a, tea.Quit, true
@@ -203,6 +230,58 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 	}
 	return a, nil, false
+}
+
+// handleFilePopupKey routes keys when the file completion popup is visible.
+func (a *App) handleFilePopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "tab", "enter":
+		a.acceptFileCompletion()
+		return a, nil, true
+	case "esc":
+		a.dismissFilePopup()
+		return a, nil, true
+	case "down", "ctrl+n":
+		a.filePopupMoveDown()
+		return a, nil, true
+	case "up", "ctrl+p":
+		a.filePopupMoveUp()
+		return a, nil, true
+	default:
+		// Pass through to input, then re-evaluate popup.
+		var cmd tea.Cmd
+		a.input, cmd = a.input.Update(msg)
+		a.updateFilePopup()
+		return a, cmd, true
+	}
+}
+
+// handleVimModeKey routes keys in vim navigation mode.
+func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "i", "a", "enter":
+		// Exit vim mode, re-focus input.
+		a.vimMode = false
+		a.vimPendingG = false
+		a.input.Focus()
+		return a, nil, true
+	case "esc":
+		// Second Esc in vim mode quits.
+		return a, tea.Quit, true
+	case "ctrl+c":
+		return a, tea.Quit, true
+	case "ctrl+k":
+		a.togglePalette()
+		return a, nil, true
+	case "ctrl+a":
+		a.toggleSessionSwitcher()
+		return a, nil, true
+	default:
+		if a.handleVimKey(msg) {
+			return a, nil, true
+		}
+		return a, nil, false
+	}
 }
 
 func (a *App) startRecommendedSetup() {
@@ -409,6 +488,17 @@ func (a *App) View() string {
 	if a.setupProvider != "" {
 		inputView = a.setupInput.View()
 	}
+	if a.vimMode {
+		inputView = lipgloss.NewStyle().
+			Foreground(a.theme.Warning).
+			Bold(true).
+			Render("-- NORMAL --") +
+			lipgloss.NewStyle().
+				Foreground(a.theme.Muted).
+				Render("  (i to insert, Esc to quit)")
+	}
+
+	popupView := a.filePopupView()
 
 	body := a.viewport.View()
 	if a.palette.IsVisible() {
@@ -417,8 +507,12 @@ func (a *App) View() string {
 		body = a.sessionSwitcher.View()
 	}
 
-	return fmt.Sprintf("%s\n%s\n%s%s\n%s\n%s",
+	result := fmt.Sprintf("%s\n%s\n%s%s\n%s\n%s",
 		header, sep, body, status, sep, inputView)
+	if popupView != "" {
+		result += "\n" + popupView
+	}
+	return result
 }
 
 func (a *App) submit() tea.Cmd {

@@ -17,6 +17,9 @@ import (
 
 func openRouterKey(t *testing.T) string {
 	t.Helper()
+	if os.Getenv("ALTCODE_LIVE_TESTS") == "" {
+		t.Skip("set ALTCODE_LIVE_TESTS=1 to run live OpenRouter tests")
+	}
 	if key := os.Getenv("OPENROUTER"); key != "" {
 		return key
 	}
