@@ -11,13 +11,34 @@ const DefaultModel = "anthropic/claude-sonnet-4-20250514"
 
 // Config holds the full application configuration.
 type Config struct {
-	Model      string                       `json:"model"`
-	Provider   map[string]ProviderConfig    `json:"provider"`
-	Permission []PermissionRule             `json:"permission"`
-	MCP        map[string]MCPServerConfig   `json:"mcp"`
-	Theme      string                       `json:"theme"`
-	Agent      map[string]AgentConfig       `json:"agent"`
+	Model      string                         `json:"model"`
+	Provider   map[string]ProviderConfig      `json:"provider"`
+	Permission []PermissionRule               `json:"permission"`
+	MCP        map[string]MCPServerConfig     `json:"mcp"`
+	Theme      string                         `json:"theme"`
+	Agent      map[string]AgentConfig         `json:"agent"`
 	Hooks      map[string][]HookMatcherConfig `json:"hooks"`
+	Team       *TeamConfig                    `json:"team,omitempty"`
+}
+
+// TeamConfig defines a multi-AI orchestration team.
+// Users configure which models play which roles.
+type TeamConfig struct {
+	Name    string                `json:"name,omitempty"`
+	Models  map[string]TeamModel  `json:"models"`           // role → model config
+	Default TeamDefaults          `json:"default,omitempty"` // fallback settings
+}
+
+// TeamModel defines a model assigned to a role.
+type TeamModel struct {
+	Model   string `json:"model"`             // e.g. "openai/gpt-5.4"
+	APIKey  string `json:"apiKey,omitempty"`   // override key
+	BaseURL string `json:"baseURL,omitempty"`  // override base URL
+}
+
+// TeamDefaults provides fallback configuration for team roles.
+type TeamDefaults struct {
+	Timeout int `json:"timeout,omitempty"` // seconds per model, default 60
 }
 
 // ProviderConfig holds API credentials for a model provider.

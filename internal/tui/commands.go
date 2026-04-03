@@ -46,6 +46,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinStatsText())
 	case "/tasks":
 		a.appendInfo(a.builtinTasksText())
+	case "/team":
+		a.appendInfo(a.builtinTeamText())
 	default:
 		return false
 	}
@@ -75,6 +77,8 @@ func builtinHelpText() string {
   /diff      — show files changed this session
   /plan      — enter plan mode
   /stats     — combined status + cost + history
+  /tasks     — list background tasks
+  /team      — show multi-AI team configuration
   /tasks     — list background tasks
 
 Keyboard shortcuts:
@@ -318,6 +322,61 @@ func (a *App) builtinTasksText() string {
 	}
 	sb.WriteString("\n" + a.engine.TaskQueue().Summary())
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinTeamText() string {
+	if a.engine == nil {
+		return "No engine available."
+	}
+	cfg := a.engine.Config()
+	if cfg == nil || cfg.Team == nil {
+		return `No multi-AI team configured.
+
+Add a team to your config.json:
+
+  {
+    "team": {
+      "name": "my-team",
+      "models": {
+        "architect":   {"model": "anthropic/claude-sonnet-4-20250514"},
+        "implementer": {"model": "openai/deepseek/deepseek-chat-v3-0324"},
+        "reviewer":    {"model": "openai/gpt-5.4"},
+        "challenger":  {"model": "openai/qwen/qwen3-coder-next"}
+      }
+    }
+  }
+
+Or use OpenRouter for all models:
+
+  {
+    "provider": {"openai": {"apiKey": "sk-or-...", "baseURL": "https://openrouter.ai/api"}},
+    "team": {
+      "models": {
+        "architect":   {"model": "openai/anthropic/claude-sonnet-4"},
+        "implementer": {"model": "openai/deepseek/deepseek-chat-v3-0324"},
+        "reviewer":    {"model": "openai/openai/gpt-4o"},
+        "challenger":  {"model": "openai/qwen/qwen3-coder-next"}
+      }
+    }
+  }
+
+Roles: architect, implementer, reviewer, challenger, evaluator`
+	}
+
+	team := cfg.Team
+	var sb strings.Builder
+	name := team.Name
+	if name == "" {
+		name = "default"
+	}
+	sb.WriteString(fmt.Sprintf("Team: %s (%d models)\n\n", name, len(team.Models)))
+
+	for role, m := range team.Models {
+		sb.WriteString(fmt.Sprintf("  %-14s → %s\n", role, m.Model))
+	}
+
+	sb.WriteString("\nUse 'altcode team \"prompt\"' to run multi-AI orchestration.")
+	return sb.String()
 }
 
 // engineSessionID returns the current session ID safely.

@@ -15,6 +15,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/exec"
 	"github.com/altcode-ai/altcode/internal/mcp"
 	"github.com/altcode-ai/altcode/internal/memory"
+	"github.com/altcode-ai/altcode/internal/orchestrator"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
@@ -51,9 +52,9 @@ func main() {
 		},
 	}
 
-	root.Flags().StringVar(&modelFlag, "model", "", "Model override")
-	root.Flags().StringVar(&configFlag, "config", "", "Config file path")
-	root.Flags().StringVar(&themeFlag, "theme", "", "Theme name")
+	root.PersistentFlags().StringVar(&modelFlag, "model", "", "Model override")
+	root.PersistentFlags().StringVar(&configFlag, "config", "", "Config file path")
+	root.PersistentFlags().StringVar(&themeFlag, "theme", "", "Theme name")
 	root.Flags().BoolVar(&jsonFlag, "json", false, "Emit JSONL events (exec mode)")
 	root.Flags().BoolVar(&lastFlag, "last", false, "Resume last session")
 	root.Flags().StringVar(&sessionFlag, "session", "", "Resume session by ID")
@@ -67,6 +68,24 @@ func main() {
 		},
 	}
 	root.AddCommand(sessCmd)
+
+	teamCmd := &cobra.Command{
+		Use:   "team [prompt]",
+		Short: "Run multi-AI orchestration — multiple models design/review/challenge together",
+		Long: `Run a prompt through a team of AI models, each playing a role.
+Configure your team in config.json under the "team" key.
+
+Example:
+  altcode team "Add rate limiting to the API"
+  altcode team "Review the auth module for security issues"`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := loadConfig(modelFlag, configFlag, themeFlag)
+			prompt := strings.Join(args, " ")
+			return runTeam(cfg, prompt)
+		},
+	}
+	root.AddCommand(teamCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -189,6 +208,60 @@ func loadSession(db *store.DB, params *engine.EngineParams, last bool, sessionID
 	return nil
 }
 
+func runTeam(cfg *config.Config, prompt string) error {
+	if cfg.Team == nil || len(cfg.Team.Models) == 0 {
+		return fmt.Errorf("no team configured. Add a 'team' section to your config.json:\n\n" +
+			"  {\"team\": {\"models\": {\n" +
+			"    \"architect\": {\"model\": \"anthropic/claude-sonnet-4-20250514\"},\n" +
+			"    \"reviewer\":  {\"model\": \"openai/gpt-5.4\"}\n" +
+			"  }}}")
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	session := orchestrator.NewSessionFromConfig(cfg.Team, cfg)
+	fmt.Printf("Running team '%s' with %d models...\n\n", teamName(cfg.Team), len(cfg.Team.Models))
+
+	// Phase 1: parallel execution
+	findings, err := session.RunParallel(ctx, prompt)
+	if err != nil {
+		return err
+	}
+	for _, f := range findings {
+		fmt.Printf("[%s / %s] %s\n", f.Model, f.Role, truncateMain(f.Content, 200))
+		fmt.Println()
+	}
+
+	// Phase 2: cross-check
+	fmt.Println("--- Cross-checking findings ---\n")
+	crossFindings, _ := session.CrossCheck(ctx)
+	for _, f := range crossFindings {
+		fmt.Printf("[%s / %s cross-check] %s\n", f.Model, f.Role, truncateMain(f.Content, 200))
+		fmt.Println()
+	}
+
+	// Phase 3: synthesize verdict
+	verdict := session.Synthesize()
+	fmt.Printf("=== VERDICT: %s (%.0f%% agreement) ===\n", verdict.Decision, verdict.Agreement*100)
+	return nil
+}
+
+func teamName(t *config.TeamConfig) string {
+	if t.Name != "" {
+		return t.Name
+	}
+	return "default"
+}
+
+func truncateMain(s string, n int) string {
+	s = strings.ReplaceAll(s, "\n", " ")
+	if len(s) > n {
+		return s[:n] + "..."
+	}
+	return s
+}
+
 func listSessions() error {
 	db, err := store.Open("")
 	if err != nil {
@@ -288,5 +361,8 @@ func mergeConfig(base, overlay *config.Config) {
 	}
 	for k, v := range overlay.Agent {
 		base.Agent[k] = v
+	}
+	if overlay.Team != nil {
+		base.Team = overlay.Team
 	}
 }

@@ -63,6 +63,56 @@ func NewSession(assignments []ModelAssignment) *Session {
 	return &Session{assignments: assignments}
 }
 
+// NewSessionFromConfig creates a session from user configuration.
+// Resolves provider credentials from the parent config.
+func NewSessionFromConfig(teamCfg *config.TeamConfig, parentCfg *config.Config) *Session {
+	var assignments []ModelAssignment
+	for roleName, tm := range teamCfg.Models {
+		role := Role(roleName)
+		cfg := buildModelConfig(tm, parentCfg)
+		assignments = append(assignments, ModelAssignment{
+			Role: role, Model: tm.Model, Config: cfg,
+		})
+	}
+	return &Session{assignments: assignments}
+}
+
+func buildModelConfig(tm config.TeamModel, parent *config.Config) *config.Config {
+	cfg := config.Default()
+
+	// Copy all provider credentials from parent
+	for k, v := range parent.Provider {
+		cfg.Provider[k] = v
+	}
+
+	// Set the model
+	cfg.Model = tm.Model
+
+	// Override credentials if specified
+	providerName := resolveProvider(tm.Model)
+	if tm.APIKey != "" || tm.BaseURL != "" {
+		pcfg := cfg.Provider[providerName]
+		if tm.APIKey != "" {
+			pcfg.APIKey = tm.APIKey
+		}
+		if tm.BaseURL != "" {
+			pcfg.BaseURL = tm.BaseURL
+		}
+		cfg.Provider[providerName] = pcfg
+	}
+
+	return cfg
+}
+
+func resolveProvider(model string) string {
+	for i, c := range model {
+		if c == '/' {
+			return model[:i]
+		}
+	}
+	return "anthropic"
+}
+
 // RunParallel sends a prompt to all assigned models in parallel,
 // collects their responses, and returns findings.
 func (s *Session) RunParallel(ctx context.Context, prompt string) ([]Finding, error) {
