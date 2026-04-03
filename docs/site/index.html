@@ -97,7 +97,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <h2>Install</h2>
 
     <div class="install" id="install-block">
-      <code>curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash</code>
+      <code>curl -fsSL https://altcode.io/install.sh | bash</code>
       <button class="copy" onclick="copyInstall()">copy</button>
     </div>
 
@@ -217,7 +217,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
 
 <script>
 function copyInstall(){
-  const t='curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash';
+  const t='curl -fsSL https://altcode.io/install.sh | bash';
   navigator.clipboard.writeText(t).then(()=>{
     const b=document.querySelector('.copy');b.textContent='copied!';
     setTimeout(()=>b.textContent='copy',2000);

@@ -62,20 +62,17 @@ altcode is a **multi-provider** alternative to Claude Code CLI that runs the **s
 
 **macOS / Linux (recommended):**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jiayaoqijia/altcode/main/scripts/install.sh | bash
+curl -fsSL https://altcode.io/install.sh | bash
 ```
 
-**Homebrew:**
+**Build from source:**
 ```bash
-brew install jiayaoqijia/tap/altcode
+git clone git@github.com:jiayaoqijia/altcode.git
+cd altcode && make build
+sudo cp dist/altcode /usr/local/bin/
 ```
 
-**Go install:**
-```bash
-go install github.com/altcode-ai/altcode/cmd/altcode@latest
-```
-
-**Manual download** (from [GitHub Releases](https://github.com/jiayaoqijia/altcode/releases)):
+**Pre-built binaries** (from [Releases](https://github.com/jiayaoqijia/altcode/releases)):
 
 | Platform | Binary | Size |
 |----------|--------|:----:|
@@ -84,13 +81,6 @@ go install github.com/altcode-ai/altcode/cmd/altcode@latest
 | Linux x86_64 | `altcode-linux-amd64` | 11MB |
 | Linux ARM64 | `altcode-linux-arm64` | 10MB |
 | Windows x64 | `altcode-windows-amd64.exe` | 11MB |
-
-**Build from source:**
-```bash
-git clone https://github.com/jiayaoqijia/altcode.git
-cd altcode && make build
-sudo cp dist/altcode /usr/local/bin/
-```
 
 **Uninstall:** `rm $(which altcode)`
 
