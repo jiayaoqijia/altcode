@@ -234,7 +234,7 @@ func runTeam(cfg *config.Config, prompt string) error {
 	}
 
 	// Phase 2: cross-check
-	fmt.Println("--- Cross-checking findings ---\n")
+	fmt.Println("--- Cross-checking findings ---")
 	crossFindings, _ := session.CrossCheck(ctx)
 	for _, f := range crossFindings {
 		fmt.Printf("[%s / %s cross-check] %s\n", f.Model, f.Role, truncateMain(f.Content, 200))

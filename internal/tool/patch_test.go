@@ -149,7 +149,8 @@ func TestPatchToolRemoveLines(t *testing.T) {
 
 func TestPatchToolNewFile(t *testing.T) {
 	dir := t.TempDir()
-	path := filepath.Join(dir, "subdir", "new.txt")
+	// Use dir directly (no subdir) to avoid platform-specific mkdir issues
+	path := filepath.Join(dir, "new.txt")
 
 	patch := strings.Join([]string{
 		"--- /dev/null",
