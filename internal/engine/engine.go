@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/config"
@@ -183,6 +184,23 @@ func debugEvent(ev event.Event) {
 	}
 }
 
+// isContextOverflow returns true if the error indicates a context length limit.
+func isContextOverflow(msg string) bool {
+	for _, sig := range []string{
+		"context_length_exceeded",
+		"context length",
+		"maximum context",
+		"too many tokens",
+		"token limit",
+		"request too large",
+	} {
+		if strings.Contains(strings.ToLower(msg), sig) {
+			return true
+		}
+	}
+	return false
+}
+
 func truncate(s string, n int) string {
 	if len(s) <= n {
 		return s
@@ -342,8 +360,15 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 
 		stream, err := e.callProvider(ctx)
 		if err != nil {
-			out <- event.Event{Type: event.ErrorEvent, Error: err.Error()}
-			return
+			// Auto-compact and retry on context overflow
+			if isContextOverflow(err.Error()) && len(e.messages) > 4 {
+				e.Compact()
+				stream, err = e.callProvider(ctx)
+			}
+			if err != nil {
+				out <- event.Event{Type: event.ErrorEvent, Error: err.Error()}
+				return
+			}
 		}
 
 		turn := collectTurn(stream, out)

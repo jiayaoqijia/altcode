@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -73,10 +74,13 @@ func (a *App) builtinRedoText() string {
 	return fmt.Sprintf("[redo] restored: %s", stashLabel)
 }
 
-// gitRun executes a git command in the given directory.
+// gitRun executes a git command in the given directory with a 10s timeout.
 func gitRun(dir string, args ...string) (string, error) {
-	cmd := exec.Command("git", args...)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
+	cmd.WaitDelay = time.Second // kill child processes on timeout
 	out, err := cmd.CombinedOutput()
 	return string(out), err
 }
