@@ -1,18 +1,18 @@
 # altcode
 
-![altcode TUI preview](docs/images/altcode-hero.png)
+**[altcode.io](https://altcode.io)**
 
 A minimal, blazing-fast Go CLI/TUI for AI-assisted coding.
 
-**5ms startup. 10MB binary. 4 providers. 341 tests. Claude Code compatible.**
+**5ms startup. 10MB binary. 6 providers. 340+ tests. Claude Code compatible.**
 
 ## Why altcode?
 
-altcode is a **multi-provider** alternative to Claude Code CLI that runs the **same plugins, hooks, commands, and agents** across Anthropic, OpenAI/Codex, Ollama, and LMStudio. It's 40x faster to start, 5x smaller, fully open source, and works with your existing Claude or Codex subscription — zero configuration.
+altcode is a **multi-provider** alternative to Claude Code CLI that runs the **same plugins, hooks, commands, and agents** across Anthropic, OpenAI/Codex, DeepSeek, Qwen, Ollama, LMStudio, and 100+ models via OpenRouter. It's 40x faster to start, 5x smaller, fully open source, and works with your existing Claude or Codex subscription — zero configuration.
 
 | | Claude Code CLI | altcode |
 |---|:-:|:-:|
-| Providers | Anthropic only | **4** (Anthropic, OpenAI, Ollama, LMStudio) |
+| Providers | Anthropic only | **6+** (Anthropic, OpenAI, DeepSeek, Qwen, Ollama, OpenRouter) |
 | Startup | ~200ms | **5ms** (40x faster) |
 | Binary | ~50MB | **10MB** (5x smaller) |
 | Hooks | ~10 events | **13 events** |
@@ -20,9 +20,21 @@ altcode is a **multi-provider** alternative to Claude Code CLI that runs the **s
 | MCP | stdio, SSE, HTTP | **stdio + SSE** |
 | Agents | Deep (spawning) | **Spawn with tool restriction + depth limits** |
 | Memory | Persistent | **Persistent** (compatible format) |
-| Auth | Anthropic OAuth | **Claude sub + Codex sub + API keys** |
-| Tests | Closed source | **341 tests** (mock + live) |
+| Auth | Anthropic OAuth | **Claude sub + Codex sub + OpenRouter + API keys** |
+| Tests | Closed source | **340+ tests** (mock + live) |
 | Source | Plugins only | **Fully open** |
+
+### Benchmarks (5 suites × 6 models)
+
+| Model | Score | Cost |
+|-------|:-----:|------|
+| DeepSeek V3 | **96%** | ~$0.001/req |
+| MiniMax 2.7 | **93%** | ~$0.002/req |
+| Qwen Coder | **93%** | free tier |
+| Claude Haiku | 90% | subscription |
+| GLM-5 | 76% | ~$0.001/req |
+
+*HumanEval + SWE-bench + Terminal-Bench + Aider + FeatureBench — all via altcode*
 
 ## Features
 
@@ -92,6 +104,7 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     | Codex CLI (`~/.codex/auth.json` + `config.toml`) | Codex subscription + relay URL + model |
     | `ANTHROPIC_API_KEY` env var | Anthropic API key |
     | `OPENAI_API_KEY` env var | OpenAI API key |
+    | `OPENROUTER` env var or `.env` file | 100+ models (DeepSeek, Qwen, GLM, Kimi, MiniMax...) |
 
     **No setup needed if you already use Claude Code or Codex CLI.** Just install and run.
 
@@ -110,6 +123,7 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     altcode --model anthropic/claude-sonnet-4-20250514
     altcode --model openai/gpt-4
     altcode --model ollama/llama3
+    altcode --model openai/deepseek/deepseek-chat-v3-0324  # via OpenRouter
 
     # Headless exec mode (for scripts/CI)
     altcode "explain this error"
@@ -242,6 +256,12 @@ GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s -parallel=8
 # Run live tests (needs API keys)
 GOFLAGS=-mod=mod go test ./internal/ -v -run "TestLive" -timeout=300s
 ```
+
+## Links
+
+- **Website**: [altcode.io](https://altcode.io)
+- **GitHub**: [github.com/jiayaoqijia/altcode](https://github.com/jiayaoqijia/altcode)
+- **Releases**: [Download binaries](https://github.com/jiayaoqijia/altcode/releases)
 
 ## License
 
