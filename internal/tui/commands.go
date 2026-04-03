@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/altcode-ai/altcode/internal/orchestrator"
 )
 
 // handleBuiltinCommand checks if the input is a built-in slash command
@@ -48,6 +50,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinTasksText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
+	case "/backends":
+		a.appendInfo(a.builtinBackendsText())
 	default:
 		return false
 	}
@@ -377,6 +381,11 @@ Roles: architect, implementer, reviewer, challenger, evaluator`
 
 	sb.WriteString("\nUse 'altcode team \"prompt\"' to run multi-AI orchestration.")
 	return sb.String()
+}
+
+func (a *App) builtinBackendsText() string {
+	backends := orchestrator.DetectBackends()
+	return orchestrator.BackendsSummary(backends)
 }
 
 // engineSessionID returns the current session ID safely.
