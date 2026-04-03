@@ -25,6 +25,12 @@ import (
 
 const maxIterations = 50
 
+// Skill describes a discoverable slash command/skill.
+type Skill struct {
+	Name        string
+	Description string
+}
+
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
 	Config       *config.Config
@@ -37,6 +43,7 @@ type EngineParams struct {
 	Memory       *memory.Store          // nil = no persistent memory
 	Sandbox      *sandbox.Sandbox       // nil = no sandboxing
 	TaskQueue    *task.Queue            // nil = auto-created
+	Skills       []Skill                // discovered slash commands/skills
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -54,6 +61,7 @@ type Engine struct {
 	model        string
 	messages     []provider.Message
 	instructions []config.Instruction
+	skills       []Skill
 	totalTokens  int // running token count
 	cost         *cost.Tracker
 	journal      *history.Journal
@@ -119,10 +127,14 @@ func New(params EngineParams) (*Engine, error) {
 		model:        modelName,
 		messages:     msgs,
 		instructions: params.Instructions,
+		skills:       params.Skills,
 		cost:         cost.NewTracker(),
 		journal:      history.NewJournal(),
 	}, nil
 }
+
+// Skills returns the discovered skills.
+func (e *Engine) Skills() []Skill { return e.skills }
 
 // Sandbox returns the engine's command sandbox.
 func (e *Engine) Sandbox() *sandbox.Sandbox {
@@ -322,6 +334,7 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		model:        modelName,
 		messages:     msgs,
 		instructions: params.Instructions,
+		skills:       params.Skills,
 		cost:         cost.NewTracker(),
 		journal:      history.NewJournal(),
 	}, nil
@@ -420,6 +433,18 @@ func (e *Engine) appendTruncatedAndContinue(turn *turnResult) {
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
 	env := sysctl.DetectEnv()
 	system := sysctl.BuildSystemPrompt(e.cfg, e.tools, e.instructions, env)
+
+	// Inject available skills/slash commands into system prompt
+	if len(e.skills) > 0 {
+		infos := make([]sysctl.SkillInfo, len(e.skills))
+		for i, s := range e.skills {
+			infos[i] = sysctl.SkillInfo{Name: s.Name, Description: s.Description}
+		}
+		system = append(system, provider.SystemSection{
+			Content:      sysctl.SkillsSection(infos),
+			CacheControl: &provider.CacheControl{Type: "ephemeral"},
+		})
+	}
 
 	// Inject persistent memories into system prompt
 	if e.mem != nil {

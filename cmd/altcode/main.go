@@ -114,14 +114,15 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 	}
 	memStore := memory.NewStore(memDir)
 
-	// Wire hooks from config into engine
 	hooksRunner := buildHooksRunner(cfg)
+	skills := discoverSkills()
 
 	params := engine.EngineParams{
 		Config:       cfg,
 		Instructions: instructions,
 		Memory:       memStore,
 		Hooks:        hooksRunner,
+		Skills:       skills,
 	}
 	if err := loadSession(db, &params, last, sessionID); err != nil {
 		return err
@@ -177,6 +178,15 @@ func connectMCP(cfg *config.Config, eng *engine.Engine) func() {
 	mgr := mcp.NewManager(ctx, cfg.MCP)
 	mgr.RegisterAll(ctx, eng.Registry())
 	return mgr.Close
+}
+
+func discoverSkills() []engine.Skill {
+	cmds := discoverCommands()
+	skills := make([]engine.Skill, len(cmds))
+	for i, c := range cmds {
+		skills[i] = engine.Skill{Name: c.Name, Description: c.Description}
+	}
+	return skills
 }
 
 func discoverCommands() []*command.Command {

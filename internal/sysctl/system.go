@@ -127,6 +127,32 @@ When write tools are needed, they run sequentially to avoid conflicts.
 	return sb.String()
 }
 
+// SkillInfo describes a skill for the system prompt.
+type SkillInfo struct {
+	Name        string
+	Description string
+}
+
+// SkillsSection builds a system prompt section listing available skills.
+func SkillsSection(skills []SkillInfo) string {
+	var sb strings.Builder
+	sb.WriteString("# Available skills and slash commands\n\n")
+	sb.WriteString("The user can invoke these skills with /<name>. ")
+	sb.WriteString("When the user says '/skill-name' or asks you to run a skill, ")
+	sb.WriteString("read the skill's SKILL.md file and follow its instructions.\n\n")
+	for _, s := range skills {
+		sb.WriteString("- **/")
+		sb.WriteString(s.Name)
+		sb.WriteString("**")
+		if s.Description != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(s.Description)
+		}
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 func envSection(env EnvContext) string {
 	return "# Environment\n\n" +
 		"- Working directory: " + env.WorkDir + "\n" +
