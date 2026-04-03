@@ -37,11 +37,12 @@ make lint           # Run go vet
 
 Note: Makefile sets `GOFLAGS=-mod=mod` automatically because vendor/ contains git submodules (codex, claude-code), not Go dependencies.
 
-### Current Status (v0.5.0)
+### Current Status
 - Website: https://altcode.io
-- All phases complete: agent loop, exec mode, hooks (13 events), commands, plugins (marketplace), multi-provider, MCP (stdio+SSE), subagents (registry+spawn), persistent memory, zero-config auth
-- 340+ mock tests + live tests against Claude, GPT-5.4, DeepSeek, Qwen, MiniMax, GLM-5, Kimi
+- Multi-AI orchestrator: calls Claude Code, Codex CLI, and API models as backends
+- 26 packages: engine, orchestrator, provider, tool (10), hooks (13 events), agent (teams), mcp, command, plugin, memory, cost, history, sandbox, task, auth, exec, tui, config, compact, store, sysctl, event
 - CI green on Linux + macOS + Windows
+- 5ms startup, 10MB binary
 - 5ms startup, 10MB binary
 - Providers: Anthropic, OpenAI/Codex, Ollama, LMStudio, OpenRouter (100+ models)
 - Auth: auto-detects Claude Code sub + Codex CLI sub + OpenRouter key

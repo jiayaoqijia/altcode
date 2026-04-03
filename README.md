@@ -4,30 +4,55 @@
 
 **[altcode.io](https://altcode.io)** · [Install](#install) · [Docs](https://github.com/jiayaoqijia/altcode/blob/main/README.md) · [Releases](https://github.com/jiayaoqijia/altcode/releases)
 
-The **multi-AI coding CLI** — orchestrate Claude, GPT, DeepSeek, Qwen, Kimi, Gemini and more to design, think, and evaluate code together.
+The **multi-AI coding CLI** — orchestrate Claude Code, Codex, DeepSeek, Qwen, Kimi, Gemini and more to design, think, and evaluate code together.
 
-**5ms startup. 10MB binary. 10+ models. Multi-AI orchestration. Claude Code compatible.**
+**5ms startup. 10MB binary. 10+ models. Multi-AI orchestration.**
 
 ## Why altcode?
 
-**Different AI models see different things.** Claude is great at architecture. DeepSeek excels at code generation. GPT catches edge cases others miss. Qwen is fast and free. Instead of picking one, altcode lets them **work as a team** — each model plays a role (architect, implementer, reviewer, challenger) and they cross-check each other's work.
+**Different AI models see different things.** Claude is great at architecture. DeepSeek excels at code generation. GPT catches edge cases others miss. Qwen is fast and free.
+
+Instead of picking one, altcode lets them **work as a team** — each model plays a role (architect, implementer, reviewer, challenger) and they cross-check each other's work.
 
 ```bash
-# One model writes code, another reviews it, a third challenges it
-altcode orchestrate --architect claude --implementer deepseek --reviewer gpt "Add rate limiting to the API"
+# Multiple AI models collaborate on the same task
+altcode team "Add rate limiting to the API"
+
+# Or use it as a single-model CLI (like Claude Code or Codex)
+altcode "explain this error"
 ```
 
-altcode is a **multi-provider** alternative to Claude Code CLI that runs the **same plugins, hooks, commands, and agents** across Anthropic, OpenAI/Codex, DeepSeek, Qwen, Ollama, LMStudio, and 100+ models via OpenRouter. It's 40x faster to start, 5x smaller, fully open source, and works with your existing Claude or Codex subscription — zero configuration.
+### Multi-AI Orchestration
 
-| | Claude Code CLI | altcode |
-|---|:-:|:-:|
-| Providers | Anthropic only | **6+** (Anthropic, OpenAI, DeepSeek, Qwen, Ollama, OpenRouter) |
-| Startup | ~200ms | **5ms** (40x faster) |
-| Binary | ~50MB | **10MB** (5x smaller) |
-| Hooks | ~10 events | **13 events** |
-| Plugins | Claude Code format | **Loads Claude Code plugins natively** |
-| MCP | stdio, SSE, HTTP | **stdio + SSE** |
-| Agents | Deep (spawning) | **Spawn with tool restriction + depth limits** |
+```
+                    ┌─────────────┐
+                    │   altcode    │
+                    │ orchestrator │
+                    └──────┬──────┘
+           ┌───────────────┼───────────────┐
+           │               │               │
+    ┌──────┴──────┐ ┌──────┴──────┐ ┌──────┴──────┐
+    │ Claude Code │ │  Codex CLI  │ │   DeepSeek  │
+    │ (architect) │ │ (reviewer)  │ │ (challenger)│
+    └─────────────┘ └─────────────┘ └─────────────┘
+           │               │               │
+           └───────────────┼───────────────┘
+                    Cross-check → Verdict
+```
+
+altcode can call **actual coding CLIs** (Claude Code, Codex, Gemini) as backends using your existing subscriptions, OR connect to models directly via API. No other tool does this.
+
+### altcode vs others
+
+| | Claude Code | Codex CLI | altcode |
+|---|:-:|:-:|:-:|
+| Models | Claude only | GPT only | **All** (Claude + GPT + DeepSeek + Qwen + 100+) |
+| Multi-AI | No | No | **Yes** (parallel orchestration + cross-check) |
+| CLI backends | — | — | **Calls Claude Code + Codex as backends** |
+| Startup | ~200ms | ~200ms | **5ms** (40x faster) |
+| Binary | ~50MB | ~50MB | **10MB** (5x smaller) |
+| Hooks | ~10 events | — | **13 events** |
+| Plugins | Claude format | — | **Loads Claude Code plugins natively** |
 | Memory | Persistent | **Persistent** (compatible format) |
 | Auth | Anthropic OAuth | **Claude sub + Codex sub + OpenRouter + API keys** |
 | Tests | Closed source | **340+ tests** (mock + live) |
