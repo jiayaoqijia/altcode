@@ -27,7 +27,7 @@ func (a *App) builtinUndoText() string {
 	ts := time.Now().Format("20060102-150405")
 	label := "altcode-undo-" + ts
 
-	_, err = gitRun(root, "stash", "push", "-m", label)
+	_, err = gitRun(root, "stash", "push", "-u", "-m", label)
 	if err != nil {
 		return fmt.Sprintf("[undo] git stash failed: %v", err)
 	}

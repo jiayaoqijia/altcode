@@ -89,7 +89,7 @@ func TestDiff_Modify(t *testing.T) {
 	j := NewJournal()
 	j.Record("edit", "/tmp/test.go", "modify", "line1\nline2", "line1\nline2modified")
 
-	d := j.Diff("/tmp/test.go")
+	d := j.diff("/tmp/test.go")
 	if !strings.Contains(d, "--- a//tmp/test.go") {
 		t.Errorf("diff missing old header: %q", d)
 	}
@@ -108,7 +108,7 @@ func TestDiff_Create(t *testing.T) {
 	j := NewJournal()
 	j.Record("write", "/tmp/new.go", "create", "", "package main\n")
 
-	d := j.Diff("/tmp/new.go")
+	d := j.diff("/tmp/new.go")
 	if !strings.Contains(d, "+package main") {
 		t.Errorf("create diff should show added lines: %q", d)
 	}
@@ -116,7 +116,7 @@ func TestDiff_Create(t *testing.T) {
 
 func TestDiff_NotFound(t *testing.T) {
 	j := NewJournal()
-	if j.Diff("/nonexistent") != "" {
+	if j.diff("/nonexistent") != "" {
 		t.Error("diff for nonexistent path should be empty")
 	}
 }
@@ -126,7 +126,7 @@ func TestDiff_LatestEntry(t *testing.T) {
 	j.Record("edit", "/tmp/f.go", "modify", "v1", "v2")
 	j.Record("edit", "/tmp/f.go", "modify", "v2", "v3")
 
-	d := j.Diff("/tmp/f.go")
+	d := j.diff("/tmp/f.go")
 	if !strings.Contains(d, "+v3") {
 		t.Errorf("should use latest entry: %q", d)
 	}
@@ -179,7 +179,7 @@ func TestDiff_Delete(t *testing.T) {
 	j := NewJournal()
 	j.Record("bash", "/tmp/gone.go", "delete", "package main\n", "")
 
-	d := j.Diff("/tmp/gone.go")
+	d := j.diff("/tmp/gone.go")
 	if !strings.Contains(d, "-package main") {
 		t.Errorf("delete diff should show removed lines: %q", d)
 	}

@@ -99,9 +99,9 @@ func mapAction(display string) string {
 	return display
 }
 
-// Diff returns a unified diff for a given file path.
+// diff returns a unified diff for a given file path.
 // Uses the most recent entry for that path.
-func (j *Journal) Diff(path string) string {
+func (j *Journal) diff(path string) string {
 	j.mu.Lock()
 	defer j.mu.Unlock()
 

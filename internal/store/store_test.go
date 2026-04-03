@@ -59,9 +59,9 @@ func TestSessionCRUD(t *testing.T) {
 		t.Fatalf("ListSessions len = %d, want 1", len(list))
 	}
 
-	// UpdateSessionTitle
-	if err := db.UpdateSessionTitle(s.ID, "Renamed"); err != nil {
-		t.Fatalf("UpdateSessionTitle: %v", err)
+	// updateSessionTitle
+	if err := db.updateSessionTitle(s.ID, "Renamed"); err != nil {
+		t.Fatalf("updateSessionTitle: %v", err)
 	}
 	updated, err := db.GetSession(s.ID)
 	if err != nil {
@@ -104,7 +104,7 @@ func TestConcurrentSessions(t *testing.T) {
 
 func TestUpdateSessionTitle_NonexistentReturnsError(t *testing.T) {
 	db := openTestDB(t)
-	err := db.UpdateSessionTitle("nonexistent-id", "New Title")
+	err := db.updateSessionTitle("nonexistent-id", "New Title")
 	if err == nil {
 		t.Error("Expected error for nonexistent session")
 	}

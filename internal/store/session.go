@@ -93,8 +93,8 @@ func (db *DB) LatestSession(projectID string) (*Session, error) {
 	return s, nil
 }
 
-// UpdateSessionTitle updates the title and bumps updated_at.
-func (db *DB) UpdateSessionTitle(id, title string) error {
+// updateSessionTitle updates the title and bumps updated_at.
+func (db *DB) updateSessionTitle(id, title string) error {
 	now := time.Now().UnixMilli()
 	res, err := db.sql.Exec(
 		`UPDATE session SET title = ?, updated_at = ? WHERE id = ?`,
