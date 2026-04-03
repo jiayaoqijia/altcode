@@ -88,6 +88,8 @@ func builtinHelpText() string {
 Keyboard shortcuts:
   Enter      — submit prompt
   Ctrl+J     — insert newline
+  Ctrl+K     — command palette
+  Ctrl+A     — session switcher
   Esc        — cancel streaming / quit`
 }
 
