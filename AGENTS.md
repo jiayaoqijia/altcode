@@ -36,6 +36,68 @@ Runs after review-pr identifies issues.
 ### merge-pr
 Squash merge a PR after prepare-pr succeeds. Final gate before landing.
 
+## Multi-AI Development Rules
+
+**Hard rule: Use BOTH Claude Code and Codex CLI for design, thinking, and evaluation.**
+
+### Design Phase — consult Codex before implementing
+
+Before writing code for any non-trivial feature:
+
+```bash
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  "Read [relevant files]. Design [feature]. Show Go structs, functions, integration points."
+```
+
+Codex provides a second architectural perspective. Incorporate its suggestions or
+explicitly document why they were rejected.
+
+### Evaluation Phase — Codex adversarial review after implementing
+
+After every major feature lands:
+
+```bash
+codex exec --dangerously-bypass-approvals-and-sandbox \
+  "Read [changed files]. Find bugs, race conditions, security holes, edge cases. Be adversarial."
+```
+
+Every finding from Codex becomes a test case in the evaluator suite.
+
+### Thinking Phase — use both for complex decisions
+
+When facing architectural decisions with multiple valid approaches:
+
+1. Ask Claude Code to propose options with trade-offs
+2. Ask Codex to challenge the recommendation:
+   ```bash
+   codex exec --dangerously-bypass-approvals-and-sandbox \
+     "Claude recommends [approach]. Challenge this. What could go wrong? Is there a simpler way?"
+   ```
+3. Synthesize both perspectives into the final design
+
+### The dual-AI loop
+
+```
+┌─────────────┐     ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
+│ Claude Code  │────▶│ Codex       │────▶│ Claude Code  │────▶│ Codex       │
+│ (design)     │     │ (challenge) │     │ (implement)  │     │ (evaluate)  │
+└─────────────┘     └─────────────┘     └─────────────┘     └─────────────┘
+```
+
+### Configuration
+
+- Codex flag: `--dangerously-bypass-approvals-and-sandbox` (required in this environment)
+- Codex model: configured in `~/.codex/config.toml` (currently GPT-5.4 via relay)
+- Claude Code: uses `--model` flag or auto-detected subscription
+- Both have full codebase read access
+
+### When NOT to use Codex
+
+- Simple bug fixes (< 10 lines changed)
+- Documentation-only changes
+- Dependency updates
+- When Codex relay is down or timing out
+
 ## Harness engineering architecture
 
 The harness wraps around agents to ensure quality. Three pillars from OpenAI;

@@ -6,16 +6,25 @@ A Go CLI/TUI for AI-assisted coding. Architecture:
 
 ```
 cmd/altcode/main.go         → Cobra CLI entry point
-internal/engine/             → Agent loop (tool dispatch, session persistence)
-internal/provider/           → Provider interface + Anthropic SSE streaming
+internal/engine/             → Agent loop (tool dispatch, session persistence, cost tracking)
+internal/provider/           → Provider interface (Anthropic SSE + OpenAI SSE)
 internal/tool/               → Tool interface, registry, concurrent dispatch
 internal/permission/         → Permission evaluator (4 modes, doom loop)
+internal/hooks/              → Hook system (13 events, command + prompt hooks, conditional if)
+internal/agent/              → Subagent definitions, spawn, registry, team orchestration
+internal/mcp/                → MCP client (stdio + SSE, tools + resources)
+internal/command/             → Slash commands (markdown + frontmatter)
+internal/plugin/             → Plugin discovery, loading, marketplace
+internal/memory/             → Persistent cross-session memory
+internal/cost/               → Per-turn token/USD cost tracking
+internal/history/            → File operation journaling with diffs
+internal/auth/               → Auto-detect Claude Code + Codex CLI credentials
 internal/store/              → SQLite sessions + messages
 internal/config/             → JSONC config, env expansion, instruction cascade
 internal/compact/            → Context compaction (budget + micro)
-internal/tui/                → Bubbletea TUI
+internal/exec/               → Headless execution mode
+internal/tui/                → Bubbletea TUI (15 slash commands, thinking indicator)
 internal/event/              → Event types (engine ↔ TUI)
-internal/hooks/              → Hook system (planned)
 internal/sysctl/             → System prompt assembly
 ```
 
@@ -45,6 +54,60 @@ Note: Makefile sets `GOFLAGS=-mod=mod` automatically because vendor/ contains gi
 - Messages use ContentPart for tool_use/tool_result blocks
 - Permission evaluator checks before every tool execution
 - Session messages persisted as JSON in SQLite
+
+### Multi-AI Development Process
+
+**Use both Claude Code and Codex CLI during design, thinking, and evaluation phases.**
+
+This is a hard rule — not optional. Two AI systems catch more bugs, produce better
+designs, and prevent blind spots from single-model reasoning.
+
+#### When to use Codex
+
+Use `codex --dangerously-bypass-approvals-and-sandbox` for:
+
+1. **Design review** — before implementing a feature, ask Codex to review the plan:
+   ```bash
+   codex exec --dangerously-bypass-approvals-and-sandbox \
+     "Read internal/engine/engine.go. Design [feature]. Show Go structs and functions."
+   ```
+
+2. **Adversarial challenge** — after implementing, ask Codex to break it:
+   ```bash
+   codex exec --dangerously-bypass-approvals-and-sandbox \
+     "Read [files]. Find race conditions, security holes, edge cases. Be adversarial."
+   ```
+
+3. **Architecture scoring** — periodically ask Codex to score altcode vs competitors:
+   ```bash
+   codex exec --dangerously-bypass-approvals-and-sandbox \
+     "Score altcode 1-10 on feature completeness, code quality, architecture. Compare to Claude Code CLI."
+   ```
+
+#### When to use Claude Code (this tool)
+
+Use Claude Code for:
+- Implementation (writing code, tests, docs)
+- Deep codebase exploration and refactoring
+- Running evaluator (`/evaluate`) with e2e tests
+- Multi-file changes with dependency tracking
+
+#### The generator/evaluator loop with both AIs
+
+```
+Claude Code (generate) → Codex (evaluate/challenge) → Claude Code (fix) → Codex (re-evaluate)
+```
+
+Every major feature should go through at least one Codex review before merging.
+Codex findings become test cases in the evaluator suite.
+
+#### Flags and configuration
+
+- Codex requires `--dangerously-bypass-approvals-and-sandbox` in this environment
+  (bwrap sandbox is blocked by the container runtime)
+- Codex uses whatever model is configured in `~/.codex/config.toml` (currently GPT-5.4)
+- Claude Code uses the model specified by `--model` or auto-detected credentials
+- Both AIs have read access to the full codebase
 
 ---
 
