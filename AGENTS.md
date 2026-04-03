@@ -5,6 +5,24 @@ compatible with Claude Code, Codex CLI, Gemini CLI, and Cursor.
 
 ## Hard rules for all agents
 
+### Pre-push gate — NEVER skip
+
+**Every agent MUST verify locally before pushing:**
+
+```bash
+# 1. Clean model-generated junk
+rm -f internal/main.go internal/stringxor.go internal/reverse_test.go
+rm -rf internal/lru internal/middleware internal/stack internal/ratelimit stack/
+
+# 2. Build + vet + test
+GOFLAGS=-mod=mod go build ./...
+GOFLAGS=-mod=mod go vet ./...
+GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s
+```
+
+If any step fails, **fix before committing**. Do not push and rely on CI.
+Benchmark tests generate files in the working directory — always clean first.
+
 ### Secrets — zero tolerance
 - **Never commit, log, or output secrets.** API keys, private keys, tokens, passwords,
   connection strings, service account JSON — none in code, config, logs, or comments.

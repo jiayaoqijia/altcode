@@ -37,6 +37,34 @@ make lint           # Run go vet
 
 Note: Makefile sets `GOFLAGS=-mod=mod` automatically because vendor/ contains git submodules (codex, claude-code), not Go dependencies.
 
+### Pre-Push Gate (HARD RULE)
+
+**NEVER push without passing these locally first:**
+
+```bash
+# 1. Clean model-generated files (benchmarks create junk)
+rm -f internal/main.go internal/stringxor.go internal/reverse_test.go
+rm -rf internal/lru internal/middleware internal/stack internal/ratelimit internal/datastructures stack/
+
+# 2. Build
+GOFLAGS=-mod=mod go build ./...
+
+# 3. Vet (catches fmt.Println newline issues, unused vars, etc.)
+GOFLAGS=-mod=mod go vet ./...
+
+# 4. Test (at minimum the packages you changed)
+GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s
+```
+
+**If ANY step fails, fix it before committing.** Do not push broken code
+and hope CI catches it — CI runs on 3 platforms and failures block everyone.
+
+Common CI failures and how to avoid them:
+- `found packages internal (bench_test.go) and main (main.go)` → model-generated `main.go` in internal/. Delete it.
+- `fmt.Println arg list ends with redundant newline` → remove `\n` from Println.
+- `undefined: SomeFunc` → model-generated test references deleted code. Delete the test file.
+- `TestPatchToolNewFile` fails on macOS → system `patch` behaves differently. Use fallback parser.
+
 ### Current Status
 - Website: https://altcode.io
 - Multi-AI orchestrator: calls Claude Code, Codex CLI, and API models as backends
