@@ -4,11 +4,18 @@
 
 **[altcode.io](https://altcode.io)** · [Install](#install) · [Docs](https://github.com/jiayaoqijia/altcode/blob/main/README.md) · [Releases](https://github.com/jiayaoqijia/altcode/releases)
 
-A minimal, blazing-fast Go CLI/TUI for AI-assisted coding.
+The **multi-AI coding CLI** — orchestrate Claude, GPT, DeepSeek, Qwen, Kimi, Gemini and more to design, think, and evaluate code together.
 
-**5ms startup. 10MB binary. 6+ providers. 340+ tests. Claude Code compatible.**
+**5ms startup. 10MB binary. 10+ models. Multi-AI orchestration. Claude Code compatible.**
 
 ## Why altcode?
+
+**Different AI models see different things.** Claude is great at architecture. DeepSeek excels at code generation. GPT catches edge cases others miss. Qwen is fast and free. Instead of picking one, altcode lets them **work as a team** — each model plays a role (architect, implementer, reviewer, challenger) and they cross-check each other's work.
+
+```bash
+# One model writes code, another reviews it, a third challenges it
+altcode orchestrate --architect claude --implementer deepseek --reviewer gpt "Add rate limiting to the API"
+```
 
 altcode is a **multi-provider** alternative to Claude Code CLI that runs the **same plugins, hooks, commands, and agents** across Anthropic, OpenAI/Codex, DeepSeek, Qwen, Ollama, LMStudio, and 100+ models via OpenRouter. It's 40x faster to start, 5x smaller, fully open source, and works with your existing Claude or Codex subscription — zero configuration.
 
