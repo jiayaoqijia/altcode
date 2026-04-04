@@ -134,6 +134,20 @@ func ListActive(projectRoot string) []State {
 	return active
 }
 
+// Summary returns a one-line summary of active workflows.
+func Summary(projectRoot string) string {
+	active := ListActive(projectRoot)
+	if len(active) == 0 {
+		return "no active workflows"
+	}
+
+	parts := make([]string, 0, len(active))
+	for _, s := range active {
+		parts = append(parts, fmt.Sprintf("%s: %s", s.Mode, s.Phase))
+	}
+	return strings.Join(parts, ", ")
+}
+
 // StatusText returns a human-readable summary of all workflow state.
 func StatusText(projectRoot string) string {
 	active := ListActive(projectRoot)

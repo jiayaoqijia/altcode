@@ -69,11 +69,10 @@ func runInterview(ctx context.Context, p RunParams, task string, w io.Writer) er
 	SaveState(p.ProjectRoot, st)
 
 	sysPrompt := InterviewPrompt(task)
-	p.EngineParams.Instructions = append(p.EngineParams.Instructions, config.Instruction{
-		Path: "workflow/interview", Content: sysPrompt,
-	})
+	params := p.EngineParams
+	params.Instructions = appendInstruction(params.Instructions, "workflow/interview", sysPrompt)
 
-	return drainEngine(ctx, p.EngineParams, task, w)
+	return drainEngine(ctx, params, task, w)
 }
 
 func runPlan(ctx context.Context, p RunParams, task string, w io.Writer) error {
@@ -86,11 +85,10 @@ func runPlan(ctx context.Context, p RunParams, task string, w io.Writer) error {
 	SaveState(p.ProjectRoot, st)
 
 	sysPrompt := PlanPrompt(task)
-	p.EngineParams.Instructions = append(p.EngineParams.Instructions, config.Instruction{
-		Path: "workflow/plan", Content: sysPrompt,
-	})
+	params := p.EngineParams
+	params.Instructions = appendInstruction(params.Instructions, "workflow/plan", sysPrompt)
 
-	return drainEngine(ctx, p.EngineParams, task, w)
+	return drainEngine(ctx, params, task, w)
 }
 
 func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.Writer) error {
@@ -112,9 +110,7 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 
 		sysPrompt := RalphPrompt(task, i, maxIter)
 		params := p.EngineParams
-		params.Instructions = append(params.Instructions, config.Instruction{
-			Path: "workflow/ralph", Content: sysPrompt,
-		})
+		params.Instructions = appendInstruction(params.Instructions, "workflow/ralph", sysPrompt)
 		params.Messages = nil // fresh conversation each iteration
 
 		text, err := drainEngineCapture(ctx, params, task, w)
@@ -204,6 +200,12 @@ func drainEngineCapture(ctx context.Context, params engine.EngineParams, prompt 
 		return sb.String(), fmt.Errorf("%s", lastErr)
 	}
 	return sb.String(), nil
+}
+
+func appendInstruction(base []config.Instruction, path, content string) []config.Instruction {
+	cp := make([]config.Instruction, len(base), len(base)+1)
+	copy(cp, base)
+	return append(cp, config.Instruction{Path: path, Content: content})
 }
 
 func truncate(s string, n int) string {
