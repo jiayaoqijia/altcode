@@ -462,7 +462,7 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 		Messages:  e.messages,
 		System:    system,
 		Tools:     e.toolSchemas(),
-		MaxTokens: 4096,
+		MaxTokens: 16384,
 	}
 	return e.provider.Stream(ctx, req)
 }

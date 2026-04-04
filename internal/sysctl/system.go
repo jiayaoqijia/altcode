@@ -47,36 +47,43 @@ func BuildSystemPrompt(
 }
 
 func corePersona() string {
-	return `You are altcode, an AI coding assistant. Be concise. Read before editing. Match codebase style. Use dedicated tools (read, edit, grep) over bash equivalents. Batch independent tool calls. Never fabricate outputs.`
+	return `You are altcode, an AI coding assistant.
+
+Rules for speed:
+- Act immediately. Do NOT read the entire codebase before making changes.
+- Read only the specific file you need, not the whole package.
+- Call multiple independent tools in the SAME response (parallel tool calls). For example, call read + grep + ls together, not one at a time.
+- Prefer grep to find what you need over reading whole files.
+- After making an edit, verify with a targeted test, not the full suite.
+- Keep responses concise. If the diff is clear, don't narrate it.
+
+Rules for correctness:
+- Read a file before editing it.
+- Match codebase style and conventions.
+- Use dedicated tools (read, edit, grep) instead of bash equivalents.
+- Never fabricate file contents or tool outputs.`
 }
 
 func toolSection(registry *tool.Registry) string {
 	var sb strings.Builder
-	sb.WriteString("# Available tools\n\n")
-	sb.WriteString("You have access to these tools. Use them to accomplish tasks.\n\n")
+	sb.WriteString("# Tools\n\n")
 
 	for _, t := range registry.All() {
-		sb.WriteString("## ")
+		sb.WriteString("- **")
 		sb.WriteString(t.Name())
+		sb.WriteString("**: ")
+		// First sentence only
+		desc := t.Description()
+		if idx := strings.Index(desc, ". "); idx > 0 && idx < 120 {
+			desc = desc[:idx+1]
+		} else if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+		sb.WriteString(desc)
 		sb.WriteString("\n")
-		sb.WriteString(t.Description())
-		sb.WriteString("\n\n")
 	}
 
-	sb.WriteString(`## Tool usage guidelines
-
-- **read** is concurrency-safe and read-only. Use it freely.
-- **glob** finds files by pattern. Use before creating new files to check if similar ones exist.
-- **grep** searches file contents. Use it to find implementations, references, and patterns.
-- **ls** lists directory contents. Use it to understand project structure.
-- **bash** executes shell commands. NOT concurrency-safe. Use for builds, tests, git operations, and commands that don't have dedicated tools.
-- **edit** performs exact string replacement. NOT concurrency-safe. Provide enough context in old_string to make the match unique.
-- **write** creates or overwrites files. NOT concurrency-safe. Use for new files only — prefer edit for modifications.
-
-When multiple read-only tools are needed, call them in parallel for efficiency.
-When write tools are needed, they run sequentially to avoid conflicts.
-`)
-
+	sb.WriteString("\nCall read-only tools (read, grep, glob, ls) in parallel. Write tools (edit, write, bash) run sequentially.\n")
 	return sb.String()
 }
 

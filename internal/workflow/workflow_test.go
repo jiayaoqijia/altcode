@@ -209,6 +209,14 @@ func TestPlanPrompt(t *testing.T) {
 	}
 }
 
+func TestSummary_Empty(t *testing.T) {
+	dir := t.TempDir()
+	got := Summary(dir)
+	if got != "no active workflows" {
+		t.Errorf("Summary = %q, want %q", got, "no active workflows")
+	}
+}
+
 func TestSaveStateCreatesDir(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "deep", "nested")
 	st := &State{Mode: ModeRalph, Phase: PhasePending}

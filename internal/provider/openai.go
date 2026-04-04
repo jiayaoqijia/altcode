@@ -72,12 +72,13 @@ func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan Strea
 // --- request types ---
 
 type openaiRequest struct {
-	Model       string          `json:"model"`
-	Messages    []openaiMessage `json:"messages"`
-	Tools       []openaiTool    `json:"tools,omitempty"`
-	MaxTokens   int             `json:"max_tokens,omitempty"`
-	Temperature *float64        `json:"temperature,omitempty"`
-	Stream      bool            `json:"stream"`
+	Model              string          `json:"model"`
+	Messages           []openaiMessage `json:"messages"`
+	Tools              []openaiTool    `json:"tools,omitempty"`
+	MaxTokens          int             `json:"max_tokens,omitempty"`
+	Temperature        *float64        `json:"temperature,omitempty"`
+	Stream             bool            `json:"stream"`
+	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
 }
 
 type openaiMessage struct {
@@ -135,13 +136,15 @@ func buildOpenAIRequest(req *Request) ([]byte, error) {
 		})
 	}
 
+	parallel := true
 	r := openaiRequest{
-		Model:       req.Model,
-		Messages:    msgs,
-		Tools:       tools,
-		MaxTokens:   req.MaxTokens,
-		Temperature: req.Temperature,
-		Stream:      true,
+		Model:             req.Model,
+		Messages:          msgs,
+		Tools:             tools,
+		MaxTokens:         req.MaxTokens,
+		Temperature:       req.Temperature,
+		Stream:            true,
+		ParallelToolCalls: &parallel,
 	}
 	return json.Marshal(r)
 }

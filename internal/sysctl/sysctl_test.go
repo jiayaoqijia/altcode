@@ -49,8 +49,8 @@ func TestBuildSystemPrompt_Basic(t *testing.T) {
 	}
 
 	// Second section should list tools
-	if !strings.Contains(sections[1].Content, "Available tools") {
-		t.Error("Second section should list available tools")
+	if !strings.Contains(sections[1].Content, "Tools") {
+		t.Error("Second section should list tools")
 	}
 
 	// Last section should have environment info
