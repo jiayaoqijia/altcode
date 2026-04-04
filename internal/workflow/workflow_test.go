@@ -228,6 +228,41 @@ func TestSaveStateCreatesDir(t *testing.T) {
 	}
 }
 
+func TestPauseActive(t *testing.T) {
+	dir := t.TempDir()
+	SaveState(dir, &State{Mode: ModeRalph, Phase: PhaseActive})
+	SaveState(dir, &State{Mode: ModeInterview, Phase: PhasePending})
+	SaveState(dir, &State{Mode: ModePlan, Phase: PhaseComplete})
+
+	n := PauseActive(dir)
+	if n != 1 {
+		t.Fatalf("PauseActive = %d, want 1 (only ralph is active)", n)
+	}
+	s, _ := LoadState(dir, ModeRalph)
+	if s.Phase != PhasePaused {
+		t.Errorf("ralph = %q, want paused", s.Phase)
+	}
+	s, _ = LoadState(dir, ModeInterview)
+	if s.Phase != PhasePending {
+		t.Errorf("interview = %q, want pending (unchanged)", s.Phase)
+	}
+}
+
+func TestResumeActive(t *testing.T) {
+	dir := t.TempDir()
+	SaveState(dir, &State{Mode: ModeRalph, Phase: PhasePaused})
+	SaveState(dir, &State{Mode: ModePlan, Phase: PhaseComplete})
+
+	n := ResumeActive(dir)
+	if n != 1 {
+		t.Fatalf("ResumeActive = %d, want 1", n)
+	}
+	s, _ := LoadState(dir, ModeRalph)
+	if s.Phase != PhaseActive {
+		t.Errorf("ralph = %q, want active", s.Phase)
+	}
+}
+
 func contains(s, sub string) bool {
 	return len(s) >= len(sub) && searchString(s, sub)
 }

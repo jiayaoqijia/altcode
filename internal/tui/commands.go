@@ -53,6 +53,10 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinWorkflowStatusText())
 	case "/wf-cancel":
 		a.appendInfo(a.builtinWorkflowCancelText())
+	case "/wf-pause":
+		a.appendInfo(a.builtinWorkflowPauseText())
+	case "/wf-resume":
+		a.appendInfo(a.builtinWorkflowResumeText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
 	case "/backends":
@@ -93,6 +97,8 @@ func builtinHelpText() string {
   /tasks     — list background tasks
   /wf-status — show active workflow state
   /wf-cancel — clear workflow state
+  /wf-pause  — pause running workflows
+  /wf-resume — resume paused workflows
   /team      — show multi-AI team configuration
   /undo      — stash changes (git-backed undo)
   /redo      — restore stashed changes
@@ -353,6 +359,22 @@ func (a *App) builtinWorkflowCancelText() string {
 		return fmt.Sprintf("Error clearing workflow state: %v", err)
 	}
 	return "Workflow state cleared."
+}
+
+func (a *App) builtinWorkflowPauseText() string {
+	n := workflow.PauseActive(a.projectRoot)
+	if n == 0 {
+		return "No active workflows to pause."
+	}
+	return fmt.Sprintf("Paused %d workflow(s).", n)
+}
+
+func (a *App) builtinWorkflowResumeText() string {
+	n := workflow.ResumeActive(a.projectRoot)
+	if n == 0 {
+		return "No paused workflows to resume."
+	}
+	return fmt.Sprintf("Resumed %d workflow(s).", n)
 }
 
 func (a *App) builtinTeamText() string {

@@ -59,36 +59,24 @@ func Run(ctx context.Context, p RunParams) error {
 	}
 }
 
+// runSingleTurn handles interview/plan modes: save state, inject prompt, run once.
+func runSingleTurn(ctx context.Context, p RunParams, mode Mode, label, task, sysPrompt string, maxIter int, w io.Writer) error {
+	fmt.Fprintf(w, "[workflow] Starting %s for: %s\n\n", label, truncate(task, 80))
+	SaveState(p.ProjectRoot, &State{
+		Mode: mode, Phase: PhaseActive,
+		StartedAt: time.Now(), MaxIter: maxIter,
+	})
+	params := p.EngineParams
+	params.Instructions = appendInstruction(params.Instructions, "workflow/"+string(mode), sysPrompt)
+	return drainEngine(ctx, params, task, w)
+}
+
 func runInterview(ctx context.Context, p RunParams, task string, w io.Writer) error {
-	fmt.Fprintf(w, "[workflow] Starting deep-interview for: %s\n\n", truncate(task, 80))
-	return runSingleTurn(ctx, p, task, ModeInterview, 10, "workflow/interview", InterviewPrompt(task), w)
+	return runSingleTurn(ctx, p, ModeInterview, "deep-interview", task, InterviewPrompt(task), 10, w)
 }
 
 func runPlan(ctx context.Context, p RunParams, task string, w io.Writer) error {
-	fmt.Fprintf(w, "[workflow] Starting consensus planning for: %s\n\n", truncate(task, 80))
-	return runSingleTurn(ctx, p, task, ModePlan, 1, "workflow/plan", PlanPrompt(task), w)
-}
-
-func runSingleTurn(
-	ctx context.Context,
-	p RunParams,
-	task string,
-	mode Mode,
-	maxIter int,
-	instructionPath string,
-	sysPrompt string,
-	w io.Writer,
-) error {
-	st := &State{
-		Mode: mode, Phase: PhaseActive,
-		StartedAt: time.Now(), MaxIter: maxIter,
-	}
-	SaveState(p.ProjectRoot, st)
-
-	params := p.EngineParams
-	params.Instructions = appendInstruction(params.Instructions, instructionPath, sysPrompt)
-
-	return drainEngine(ctx, params, task, w)
+	return runSingleTurn(ctx, p, ModePlan, "consensus planning", task, PlanPrompt(task), 1, w)
 }
 
 func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.Writer) error {
