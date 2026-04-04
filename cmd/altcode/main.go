@@ -63,7 +63,7 @@ func main() {
 	root.Flags().BoolVar(&jsonFlag, "json", false, "Emit JSONL events (exec mode)")
 	root.Flags().BoolVar(&lastFlag, "last", false, "Resume last session")
 	root.Flags().StringVar(&sessionFlag, "session", "", "Resume session by ID")
-	root.Flags().BoolVar(&debugFlag, "debug", false, "Print events to stderr for debugging")
+	root.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print events to stderr for debugging")
 
 	sessCmd := &cobra.Command{
 		Use:   "sessions",
