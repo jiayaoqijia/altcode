@@ -764,7 +764,20 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 	case "lmstudio":
 		return newOpenAICompat(cfg, "lmstudio", "http://localhost:1234"), nil
 	default:
-		return nil, fmt.Errorf("unsupported provider: %s", name)
+		// Unknown provider prefix — try as OpenAI-compatible.
+		// If the provider has its own config entry, use it.
+		// Otherwise fall back to the openai config (e.g. OpenRouter).
+		if pcfg, ok := cfg.Provider[name]; ok && pcfg.APIKey != "" {
+			return provider.NewOpenAI(provider.OpenAIConfig{
+				APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
+			}), nil
+		}
+		if pcfg, ok := cfg.Provider["openai"]; ok && pcfg.APIKey != "" {
+			return provider.NewOpenAI(provider.OpenAIConfig{
+				APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
+			}), nil
+		}
+		return nil, fmt.Errorf("unsupported provider: %s (set API key via config or env)", name)
 	}
 }
 
