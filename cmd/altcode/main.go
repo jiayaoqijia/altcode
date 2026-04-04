@@ -22,6 +22,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/plugin"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
+	"github.com/altcode-ai/altcode/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -90,6 +91,36 @@ Example:
 		},
 	}
 	root.AddCommand(teamCmd)
+
+	var wfMode string
+	var wfMaxIter int
+	workflowCmd := &cobra.Command{
+		Use:   "workflow [prompt]",
+		Short: "Structured workflow mode — interview, plan, or persistent execution",
+		Long: `Run a structured workflow pipeline inspired by oh-my-codex patterns.
+
+  altcode workflow "add auth"                      Auto-detect mode from keywords
+  altcode workflow --mode interview "add auth"     Socratic clarification first
+  altcode workflow --mode plan "add auth"           Consensus planning only
+  altcode workflow --mode ralph "add auth"          Persistent loop until complete
+  altcode workflow --mode ralph --max-iter 5 "fix"  Limit iterations
+
+Keywords auto-route: "$interview", "clarify", "$plan", "$ralph", "don't stop"
+
+Classic "altcode" behavior is completely unaffected by this subcommand.`,
+		Args: cobra.MinimumNArgs(1),
+		RunE: func(cmd *cobra.Command, args []string) error {
+			cfg := loadConfig(modelFlag, configFlag, themeFlag)
+			prompt := strings.Join(args, " ")
+			if debugFlag {
+				os.Setenv("ALTCODE_DEBUG", "1")
+			}
+			return runWorkflow(cfg, prompt, wfMode, wfMaxIter)
+		},
+	}
+	workflowCmd.Flags().StringVar(&wfMode, "mode", "", "Workflow mode: interview, plan, ralph, execute")
+	workflowCmd.Flags().IntVar(&wfMaxIter, "max-iter", 10, "Max iterations for ralph mode")
+	root.AddCommand(workflowCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
@@ -269,6 +300,45 @@ func loadSession(db *store.DB, params *engine.EngineParams, last bool, sessionID
 		}
 	}
 	return nil
+}
+
+func runWorkflow(cfg *config.Config, prompt, modeFlag string, maxIter int) error {
+	wd, _ := os.Getwd()
+	projectRoot := config.DetectProjectRoot(wd)
+	instructions, _ := config.LoadInstructions(projectRoot)
+
+	memDir := memory.DefaultDir(projectRoot)
+	if _, err := os.Stat(memDir); os.IsNotExist(err) {
+		memDir = memory.ClaudeCodeDir(projectRoot)
+	}
+	memStore := memory.NewStore(memDir)
+
+	hooksRunner := buildHooksRunner(cfg)
+	skills := discoverSkills()
+
+	params := engine.EngineParams{
+		Config:       cfg,
+		Instructions: instructions,
+		Memory:       memStore,
+		Hooks:        hooksRunner,
+		Skills:       skills,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer stop()
+
+	var mode workflow.Mode
+	if modeFlag != "" {
+		mode = workflow.Mode(modeFlag)
+	}
+
+	return workflow.Run(ctx, workflow.RunParams{
+		EngineParams: params,
+		ProjectRoot:  projectRoot,
+		Mode:         mode,
+		Prompt:       prompt,
+		MaxIter:      maxIter,
+	})
 }
 
 func runTeam(cfg *config.Config, prompt string) error {
