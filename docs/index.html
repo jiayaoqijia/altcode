@@ -88,8 +88,8 @@ td.num{color:var(--yellow);font-family:var(--font)}
 
     <!-- Header -->
     <div class="logo">alt<span>code</span></div>
-    <div class="subtitle">Multi-AI coding CLI — orchestrate Claude, GPT, DeepSeek, Qwen & more</div>
-    <div class="tagline">5ms startup · 10MB binary · 10+ models · Multi-AI orchestration</div>
+    <div class="subtitle">Multi-AI coding CLI — Claude, GPT, DeepSeek, Kimi, Qwen, GLM, MiniMax & more</div>
+    <div class="tagline">5ms startup · 10MB binary · 12 providers · 100+ models · Workflow mode</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -126,6 +126,11 @@ td.num{color:var(--yellow);font-family:var(--font)}
       <tr><td>Codex CLI</td><td style="color:var(--green)">Codex subscription ✓</td></tr>
       <tr><td>ANTHROPIC_API_KEY</td><td style="color:var(--green)">Anthropic API ✓</td></tr>
       <tr><td>OPENAI_API_KEY</td><td style="color:var(--green)">OpenAI API ✓</td></tr>
+      <tr><td>DEEPSEEK_API_KEY</td><td style="color:var(--green)">DeepSeek ✓</td></tr>
+      <tr><td>ZHIPU_API_KEY</td><td style="color:var(--green)">GLM-5 ✓</td></tr>
+      <tr><td>MOONSHOT_API_KEY</td><td style="color:var(--green)">Kimi K2.5 ✓</td></tr>
+      <tr><td>MINIMAX_API_KEY</td><td style="color:var(--green)">MiniMax M2.7 ✓</td></tr>
+      <tr><td>DASHSCOPE_API_KEY</td><td style="color:var(--green)">Qwen ✓</td></tr>
       <tr><td>OpenRouter key</td><td style="color:var(--green)">100+ models ✓</td></tr>
       <tr><td>Ollama running</td><td style="color:var(--green)">Local models ✓</td></tr>
     </table>
@@ -138,12 +143,14 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="output"># Interactive TUI (auto-detects provider)</div>
     <div class="prompt">altcode "explain this error"</div>
     <div class="output"># Headless exec mode</div>
-    <div class="prompt">altcode --model openai/gpt-4</div>
-    <div class="output"># Use any provider</div>
+    <div class="prompt">altcode --model deepseek/deepseek-chat</div>
+    <div class="output"># Chinese providers: DeepSeek, GLM, Kimi, MiniMax, Qwen</div>
     <div class="prompt">altcode --model ollama/llama3</div>
     <div class="output"># Local models, no API key needed</div>
-    <div class="prompt">altcode --last</div>
-    <div class="output"># Resume last session</div>
+    <div class="prompt">altcode workflow --mode ralph "add auth"</div>
+    <div class="output"># Persistent execution — loops until complete</div>
+    <div class="prompt">altcode workflow --mode interview "add rate limiting"</div>
+    <div class="output"># Socratic clarification before coding</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -151,7 +158,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <h2>vs Claude Code CLI</h2>
     <table>
       <tr><th></th><th>Claude Code</th><th>altcode</th></tr>
-      <tr><td>Providers</td><td>1</td><td class="win">6 (Anthropic, OpenAI, DeepSeek, Qwen, Ollama, LMStudio)</td></tr>
+      <tr><td>Providers</td><td>1</td><td class="win">12 (Anthropic, OpenAI, DeepSeek, GLM, Kimi, MiniMax, Qwen, Ollama...)</td></tr>
       <tr><td>Startup</td><td>~200ms</td><td class="win">5ms (40× faster)</td></tr>
       <tr><td>Binary</td><td>~50MB</td><td class="win">10MB (5× smaller)</td></tr>
       <tr><td>Hooks</td><td>~10</td><td class="win">13 events</td></tr>
@@ -186,8 +193,9 @@ td.num{color:var(--yellow);font-family:var(--font)}
       <span style="color:var(--green)">●</span> Slash commands · Plugin system · Marketplace<br>
       <span style="color:var(--green)">●</span> Subagents · Persistent memory · Auto-compact<br>
       <span style="color:var(--green)">●</span> Session resume (--last) · JSON exec mode<br>
-      <span style="color:var(--green)">●</span> Claude Code compatible — plugins, hooks, agents<br>
-      <span style="color:var(--green)">●</span> Rich system prompt · Streaming TUI
+      <span style="color:var(--green)">●</span> Workflow mode — interview, plan, ralph (persistent execution)<br>
+      <span style="color:var(--green)">●</span> Claude Code compat — .mcp.json, skills, plugins, hooks, agents<br>
+      <span style="color:var(--green)">●</span> 47 skills · Streaming TUI · 6 themes
     </p>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
@@ -209,7 +217,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="status">
       <div class="left">● ready</div>
       <div style="color:var(--dim)">Enter send · Esc quit</div>
-      <div class="right">v0.5.0</div>
+      <div class="right">v0.6.0</div>
     </div>
 
   </div>
