@@ -191,4 +191,34 @@ altcode --model anthropic/claude-sonnet-4-20250514 "Fix the bugs in cache.go and
 
 # Or use Codex subscription  
 altcode "Fix the bugs in cache.go and write tests"  # defaults to GPT via Codex relay
+
+# Or use Chinese AI providers directly (native support)
+export DEEPSEEK_API_KEY=sk-...
+altcode --model deepseek/deepseek-chat "Fix the bugs"
+
+export ZHIPU_API_KEY=...
+altcode --model zhipu/glm-5 "Fix the bugs"
+
+export MOONSHOT_API_KEY=sk-...
+altcode --model moonshot/kimi-k2.5 "Fix the bugs"
+
+export MINIMAX_API_KEY=...
+altcode --model minimax/MiniMax-M2.7 "Fix the bugs"
+
+export DASHSCOPE_API_KEY=sk-...
+altcode --model qwen/qwen3-coder "Fix the bugs"
 ```
+
+## Native Chinese Provider Support
+
+altcode supports 5 Chinese AI providers natively (all OpenAI-compatible):
+
+| Provider | Prefix | Base URL | Env Variable | Models |
+|----------|--------|----------|--------------|--------|
+| DeepSeek | `deepseek/` | api.deepseek.com | `DEEPSEEK_API_KEY` | deepseek-chat, deepseek-reasoner |
+| Zhipu AI | `zhipu/` or `glm/` | open.bigmodel.cn | `ZHIPU_API_KEY` | glm-4-plus, glm-5 |
+| Moonshot | `moonshot/` or `kimi/` | api.moonshot.cn | `MOONSHOT_API_KEY` | kimi-k2.5, moonshot-v1-auto |
+| MiniMax | `minimax/` | api.minimax.chat | `MINIMAX_API_KEY` | MiniMax-M2.5, MiniMax-M2.7 |
+| Alibaba | `qwen/` or `dashscope/` | dashscope.aliyuncs.com | `DASHSCOPE_API_KEY` | qwen-max, qwen3-coder |
+
+These also work through OpenRouter with the `openai/` prefix and an OpenRouter key.
