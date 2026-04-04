@@ -31,6 +31,7 @@ type Phase string
 const (
 	PhasePending   Phase = "pending"
 	PhaseActive    Phase = "active"
+	PhasePaused    Phase = "paused"
 	PhaseVerifying Phase = "verifying"
 	PhaseComplete  Phase = "complete"
 	PhaseCancelled Phase = "cancelled"
@@ -146,6 +147,40 @@ func CancelActive(projectRoot string) int {
 		cancelled++
 	}
 	return cancelled
+}
+
+// PauseActive marks active and verifying workflows as paused and returns the count.
+func PauseActive(projectRoot string) int {
+	active := ListActive(projectRoot)
+	paused := 0
+	for i := range active {
+		if active[i].Phase != PhaseActive && active[i].Phase != PhaseVerifying {
+			continue
+		}
+		active[i].Phase = PhasePaused
+		if err := SaveState(projectRoot, &active[i]); err != nil {
+			continue
+		}
+		paused++
+	}
+	return paused
+}
+
+// ResumeActive marks paused workflows as active and returns the count.
+func ResumeActive(projectRoot string) int {
+	active := ListActive(projectRoot)
+	resumed := 0
+	for i := range active {
+		if active[i].Phase != PhasePaused {
+			continue
+		}
+		active[i].Phase = PhaseActive
+		if err := SaveState(projectRoot, &active[i]); err != nil {
+			continue
+		}
+		resumed++
+	}
+	return resumed
 }
 
 // Summary returns a one-line summary of active workflows.
