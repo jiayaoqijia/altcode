@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/config"
@@ -116,11 +117,21 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 		})
 		params.Messages = nil // fresh conversation each iteration
 
-		if err := drainEngine(ctx, params, task, w); err != nil {
+		text, err := drainEngineCapture(ctx, params, task, w)
+		if err != nil {
 			fmt.Fprintf(w, "\n[ralph] Iteration %d error: %v\n", i, err)
-			continue // try next iteration
+			continue
 		}
 		fmt.Fprintf(w, "\n[ralph] Iteration %d complete.\n\n", i)
+
+		// Stop early if model signals task is done
+		if isRalphComplete(text) {
+			st.Phase = PhaseComplete
+			st.Iteration = i
+			SaveState(p.ProjectRoot, st)
+			fmt.Fprintf(w, "[ralph] Task verified complete after %d iteration(s).\n", i)
+			return nil
+		}
 	}
 
 	st := &State{
@@ -129,8 +140,35 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 	}
 	SaveState(p.ProjectRoot, st)
 
-	fmt.Fprintf(w, "[ralph] All %d iterations complete.\n", maxIter)
+	fmt.Fprintf(w, "[ralph] Reached max iterations (%d).\n", maxIter)
 	return nil
+}
+
+// isRalphComplete checks if the model's response indicates the task is done.
+// Looks for verification language in the output.
+func isRalphComplete(text string) bool {
+	lower := strings.ToLower(text)
+	signals := []string{
+		"all tests pass",
+		"already pass",
+		"nothing to fix",
+		"no failing tests",
+		"task complete",
+		"all verified",
+		"everything passes",
+		"no issues found",
+		"already green",
+		"verified",
+		"output is exactly",
+		"no code changes were needed",
+		"completed successfully",
+	}
+	for _, s := range signals {
+		if strings.Contains(lower, s) {
+			return true
+		}
+	}
+	return false
 }
 
 func runExecute(ctx context.Context, p RunParams, task string, w io.Writer) error {
@@ -138,17 +176,24 @@ func runExecute(ctx context.Context, p RunParams, task string, w io.Writer) erro
 }
 
 func drainEngine(ctx context.Context, params engine.EngineParams, prompt string, w io.Writer) error {
+	_, err := drainEngineCapture(ctx, params, prompt, w)
+	return err
+}
+
+func drainEngineCapture(ctx context.Context, params engine.EngineParams, prompt string, w io.Writer) (string, error) {
 	eng, err := engine.New(params)
 	if err != nil {
-		return fmt.Errorf("create engine: %w", err)
+		return "", fmt.Errorf("create engine: %w", err)
 	}
 
 	ch := eng.Run(ctx, prompt)
 	var lastErr string
+	var sb strings.Builder
 	for ev := range ch {
 		switch ev.Type {
 		case event.TextDelta:
 			fmt.Fprint(w, ev.Text)
+			sb.WriteString(ev.Text)
 		case event.ErrorEvent:
 			lastErr = ev.Error
 		case event.Done:
@@ -156,9 +201,9 @@ func drainEngine(ctx context.Context, params engine.EngineParams, prompt string,
 		}
 	}
 	if lastErr != "" {
-		return fmt.Errorf("%s", lastErr)
+		return sb.String(), fmt.Errorf("%s", lastErr)
 	}
-	return nil
+	return sb.String(), nil
 }
 
 func truncate(s string, n int) string {
