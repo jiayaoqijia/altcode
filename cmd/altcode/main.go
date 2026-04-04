@@ -204,6 +204,8 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 		Engine: eng,
 		Prompt: prompt,
 		JSON:   jsonMode,
+		Model:  params.Config.Model,
+		Auth:   auth.CredentialSource(params.Config),
 	})
 }
 
