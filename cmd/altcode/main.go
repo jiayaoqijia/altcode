@@ -128,7 +128,12 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
 }
 
 func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID string) error {
-	db, _ := store.Open("")
+	// Skip SQLite in exec mode when no session resume needed — saves ~5-10ms
+	needsDB := last || sessionID != "" || prompt == ""
+	var db *store.DB
+	if needsDB {
+		db, _ = store.Open("")
+	}
 	defer func() {
 		if db != nil {
 			db.Close()
@@ -184,14 +189,33 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 	if err != nil {
 		return fmt.Errorf("create engine: %w", err)
 	}
-	mcpCleanup := connectMCP(params.Config, eng)
-	defer mcpCleanup()
+
+	// Only start MCP servers if prompt likely needs them.
+	// MCP startup adds 1-5s of blocking latency per server.
+	var mcpCleanup func()
+	if needsMCP(prompt) {
+		mcpCleanup = connectMCP(params.Config, eng)
+	}
+	if mcpCleanup != nil {
+		defer mcpCleanup()
+	}
 
 	return exec.Run(ctx, exec.Params{
 		Engine: eng,
 		Prompt: prompt,
 		JSON:   jsonMode,
 	})
+}
+
+// needsMCP returns true if the prompt likely requires MCP tools.
+func needsMCP(prompt string) bool {
+	lower := strings.ToLower(prompt)
+	return strings.Contains(lower, "mcp") ||
+		strings.Contains(lower, "playwright") ||
+		strings.Contains(lower, "browser") ||
+		strings.Contains(lower, "language-server") ||
+		strings.Contains(lower, "lsp") ||
+		strings.Contains(lower, "chrome")
 }
 
 func runTUI(params engine.EngineParams) error {

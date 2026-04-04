@@ -23,30 +23,45 @@ type Manager struct {
 	sseClients   map[string]*SSEClient
 }
 
-// NewManager connects to all configured MCP servers.
+// NewManager connects to all configured MCP servers in parallel.
+// Servers that fail to connect are logged and skipped.
 func NewManager(ctx context.Context, servers map[string]config.MCPServerConfig) *Manager {
 	m := &Manager{
 		stdioClients: make(map[string]*Client),
 		sseClients:   make(map[string]*SSEClient),
 	}
 
+	type stdioResult struct {
+		name   string
+		client *Client
+		err    error
+	}
+	ch := make(chan stdioResult, len(servers))
+	stdioCount := 0
+
 	for name, cfg := range servers {
 		if cfg.URL != "" {
-			// SSE/HTTP transport
 			headers := make(map[string]string)
 			for k, v := range cfg.Env {
 				headers[k] = os.ExpandEnv(v)
 			}
 			m.sseClients[name] = ConnectSSE(cfg.URL, headers)
 		} else if cfg.Command != "" {
-			// stdio transport
-			client, err := connectStdio(ctx, cfg)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "mcp: failed to connect %s: %v\n", name, err)
-				continue
-			}
-			m.stdioClients[name] = client
+			stdioCount++
+			go func(n string, c config.MCPServerConfig) {
+				client, err := connectStdio(ctx, c)
+				ch <- stdioResult{name: n, client: client, err: err}
+			}(name, cfg)
 		}
+	}
+
+	for i := 0; i < stdioCount; i++ {
+		r := <-ch
+		if r.err != nil {
+			fmt.Fprintf(os.Stderr, "mcp: failed to connect %s: %v\n", r.name, r.err)
+			continue
+		}
+		m.stdioClients[r.name] = r.client
 	}
 	return m
 }
