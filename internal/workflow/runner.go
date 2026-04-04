@@ -61,32 +61,32 @@ func Run(ctx context.Context, p RunParams) error {
 
 func runInterview(ctx context.Context, p RunParams, task string, w io.Writer) error {
 	fmt.Fprintf(w, "[workflow] Starting deep-interview for: %s\n\n", truncate(task, 80))
-
-	st := &State{
-		Mode: ModeInterview, Phase: PhaseActive,
-		StartedAt: time.Now(), MaxIter: 10,
-	}
-	SaveState(p.ProjectRoot, st)
-
-	sysPrompt := InterviewPrompt(task)
-	params := p.EngineParams
-	params.Instructions = appendInstruction(params.Instructions, "workflow/interview", sysPrompt)
-
-	return drainEngine(ctx, params, task, w)
+	return runSingleTurn(ctx, p, task, ModeInterview, 10, "workflow/interview", InterviewPrompt(task), w)
 }
 
 func runPlan(ctx context.Context, p RunParams, task string, w io.Writer) error {
 	fmt.Fprintf(w, "[workflow] Starting consensus planning for: %s\n\n", truncate(task, 80))
+	return runSingleTurn(ctx, p, task, ModePlan, 1, "workflow/plan", PlanPrompt(task), w)
+}
 
+func runSingleTurn(
+	ctx context.Context,
+	p RunParams,
+	task string,
+	mode Mode,
+	maxIter int,
+	instructionPath string,
+	sysPrompt string,
+	w io.Writer,
+) error {
 	st := &State{
-		Mode: ModePlan, Phase: PhaseActive,
-		StartedAt: time.Now(), MaxIter: 1,
+		Mode: mode, Phase: PhaseActive,
+		StartedAt: time.Now(), MaxIter: maxIter,
 	}
 	SaveState(p.ProjectRoot, st)
 
-	sysPrompt := PlanPrompt(task)
 	params := p.EngineParams
-	params.Instructions = appendInstruction(params.Instructions, "workflow/plan", sysPrompt)
+	params.Instructions = appendInstruction(params.Instructions, instructionPath, sysPrompt)
 
 	return drainEngine(ctx, params, task, w)
 }
