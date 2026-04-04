@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/altcode-ai/altcode/internal/workflow"
 )
 
 // handleBuiltinCommand checks if the input is a built-in slash command
@@ -48,6 +49,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinStatsText())
 	case "/tasks":
 		a.appendInfo(a.builtinTasksText())
+	case "/wf-status":
+		a.appendInfo(a.builtinWorkflowStatusText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
 	case "/backends":
@@ -86,6 +89,7 @@ func builtinHelpText() string {
   /plan      — enter plan mode
   /stats     — combined status + cost + history
   /tasks     — list background tasks
+  /wf-status — show active workflow state
   /team      — show multi-AI team configuration
   /undo      — stash changes (git-backed undo)
   /redo      — restore stashed changes
@@ -335,6 +339,10 @@ func (a *App) builtinTasksText() string {
 	}
 	sb.WriteString("\n" + a.engine.TaskQueue().Summary())
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) builtinWorkflowStatusText() string {
+	return workflow.StatusText(a.projectRoot)
 }
 
 func (a *App) builtinTeamText() string {
