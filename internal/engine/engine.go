@@ -749,27 +749,34 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 		return provider.NewOpenAI(provider.OpenAIConfig{
 			APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
 		}), nil
+	case "deepseek":
+		return newOpenAICompat(cfg, "deepseek", "https://api.deepseek.com"), nil
+	case "zhipu", "glm":
+		return newOpenAICompat(cfg, "zhipu", "https://open.bigmodel.cn/api/paas/v4"), nil
+	case "moonshot", "kimi":
+		return newOpenAICompat(cfg, "moonshot", "https://api.moonshot.cn/v1"), nil
+	case "minimax":
+		return newOpenAICompat(cfg, "minimax", "https://api.minimax.chat/v1"), nil
+	case "qwen", "dashscope":
+		return newOpenAICompat(cfg, "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"), nil
 	case "ollama":
-		pcfg := cfg.Provider["ollama"]
-		base := pcfg.BaseURL
-		if base == "" {
-			base = "http://localhost:11434"
-		}
-		return provider.NewOpenAI(provider.OpenAIConfig{
-			BaseURL: base,
-		}), nil
+		return newOpenAICompat(cfg, "ollama", "http://localhost:11434"), nil
 	case "lmstudio":
-		pcfg := cfg.Provider["lmstudio"]
-		base := pcfg.BaseURL
-		if base == "" {
-			base = "http://localhost:1234"
-		}
-		return provider.NewOpenAI(provider.OpenAIConfig{
-			BaseURL: base,
-		}), nil
+		return newOpenAICompat(cfg, "lmstudio", "http://localhost:1234"), nil
 	default:
 		return nil, fmt.Errorf("unsupported provider: %s", name)
 	}
+}
+
+func newOpenAICompat(cfg *config.Config, name, defaultBase string) provider.Provider {
+	pcfg := cfg.Provider[name]
+	base := pcfg.BaseURL
+	if base == "" {
+		base = defaultBase
+	}
+	return provider.NewOpenAI(provider.OpenAIConfig{
+		APIKey: pcfg.APIKey, BaseURL: base,
+	})
 }
 
 func parseModel(model string) (providerName, modelName string) {

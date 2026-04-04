@@ -484,6 +484,21 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 		}
 	}
 
+	// Chinese AI provider API keys (all OpenAI-compatible)
+	for _, ep := range []struct{ env, provider string }{
+		{"DEEPSEEK_API_KEY", "deepseek"},
+		{"ZHIPU_API_KEY", "zhipu"},
+		{"MOONSHOT_API_KEY", "moonshot"},
+		{"MINIMAX_API_KEY", "minimax"},
+		{"DASHSCOPE_API_KEY", "qwen"},
+	} {
+		if key := os.Getenv(ep.env); key != "" {
+			if p, ok := cfg.Provider[ep.provider]; !ok || p.APIKey == "" {
+				cfg.Provider[ep.provider] = config.ProviderConfig{APIKey: key}
+			}
+		}
+	}
+
 	// Auto-detect credentials from Claude Code and Codex CLI installs
 	auth.LoadFromCLIs(cfg)
 
