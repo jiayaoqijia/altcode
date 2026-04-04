@@ -131,6 +131,38 @@ func TestListActive(t *testing.T) {
 	}
 }
 
+func TestCancelActive(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveState(dir, &State{Mode: ModeRalph, Phase: PhaseActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(dir, &State{Mode: ModePlan, Phase: PhaseVerifying}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(dir, &State{Mode: ModeInterview, Phase: PhaseCancelled}); err != nil {
+		t.Fatal(err)
+	}
+
+	cancelled := CancelActive(dir)
+	if cancelled != 2 {
+		t.Fatalf("CancelActive() = %d, want 2", cancelled)
+	}
+
+	for _, mode := range []Mode{ModeRalph, ModePlan, ModeInterview} {
+		state, err := LoadState(dir, mode)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if state.Phase != PhaseCancelled {
+			t.Fatalf("%s phase = %q, want %q", mode, state.Phase, PhaseCancelled)
+		}
+	}
+
+	if got := len(ListActive(dir)); got != 0 {
+		t.Fatalf("ListActive() len = %d, want 0", got)
+	}
+}
+
 func TestStatusText_Empty(t *testing.T) {
 	dir := t.TempDir()
 	text := StatusText(dir)
@@ -199,4 +231,56 @@ func searchString(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestInterviewSpec(t *testing.T) {
+	out := InterviewSpec("add auth", "OAuth2 flow", "login returns token", "no SAML")
+	for _, want := range []string{"add auth", "OAuth2 flow", "## Task", "## Non-Goals"} {
+		if !contains(out, want) {
+			t.Errorf("InterviewSpec missing %q", want)
+		}
+	}
+}
+
+func TestSummary_Active(t *testing.T) {
+	dir := t.TempDir()
+	SaveState(dir, &State{Mode: ModeRalph, Phase: PhaseActive})
+	got := Summary(dir)
+	if !contains(got, "ralph") {
+		t.Errorf("Summary = %q, want ralph", got)
+	}
+}
+
+func TestStatusText_Active(t *testing.T) {
+	dir := t.TempDir()
+	SaveState(dir, &State{Mode: ModeRalph, Phase: PhaseActive, Iteration: 2, MaxIter: 5})
+	got := StatusText(dir)
+	if !contains(got, "ralph") || !contains(got, "active") {
+		t.Errorf("StatusText = %q", got)
+	}
+}
+
+func TestCancelActive_None(t *testing.T) {
+	dir := t.TempDir()
+	if n := CancelActive(dir); n != 0 {
+		t.Fatalf("CancelActive empty = %d, want 0", n)
+	}
+}
+
+func TestIsRalphComplete(t *testing.T) {
+	tests := []struct {
+		text string
+		want bool
+	}{
+		{"All tests pass.", true},
+		{"Nothing to fix.", true},
+		{"Verified: output correct.", true},
+		{"Still working on it.", false},
+		{"", false},
+	}
+	for _, tt := range tests {
+		if got := isRalphComplete(tt.text); got != tt.want {
+			t.Errorf("isRalphComplete(%q) = %v, want %v", tt.text, got, tt.want)
+		}
+	}
 }

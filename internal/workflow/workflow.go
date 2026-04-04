@@ -134,6 +134,20 @@ func ListActive(projectRoot string) []State {
 	return active
 }
 
+// CancelActive marks all active workflows as cancelled and returns the count.
+func CancelActive(projectRoot string) int {
+	active := ListActive(projectRoot)
+	cancelled := 0
+	for i := range active {
+		active[i].Phase = PhaseCancelled
+		if err := SaveState(projectRoot, &active[i]); err != nil {
+			continue
+		}
+		cancelled++
+	}
+	return cancelled
+}
+
 // Summary returns a one-line summary of active workflows.
 func Summary(projectRoot string) string {
 	active := ListActive(projectRoot)
