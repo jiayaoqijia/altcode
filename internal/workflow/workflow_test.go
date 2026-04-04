@@ -86,6 +86,39 @@ func TestClearState(t *testing.T) {
 	}
 }
 
+func TestClearAll(t *testing.T) {
+	dir := t.TempDir()
+	if err := SaveState(dir, &State{Mode: ModeInterview, Phase: PhaseActive}); err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveState(dir, &State{Mode: ModePlan, Phase: PhaseActive}); err != nil {
+		t.Fatal(err)
+	}
+	stateDir := StateDir(dir)
+	if err := os.WriteFile(filepath.Join(stateDir, "note.txt"), []byte("keep"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := ClearAll(dir); err != nil {
+		t.Fatal(err)
+	}
+
+	entries, err := os.ReadDir(stateDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "note.txt" {
+		t.Fatalf("unexpected remaining entries: %+v", entries)
+	}
+}
+
+func TestClearAll_MissingStateDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := ClearAll(dir); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestListActive(t *testing.T) {
 	dir := t.TempDir()
 	SaveState(dir, &State{Mode: ModeRalph, Phase: PhaseActive})

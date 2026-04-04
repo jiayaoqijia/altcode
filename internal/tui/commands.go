@@ -51,6 +51,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinTasksText())
 	case "/wf-status":
 		a.appendInfo(a.builtinWorkflowStatusText())
+	case "/wf-cancel":
+		a.appendInfo(a.builtinWorkflowCancelText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
 	case "/backends":
@@ -90,6 +92,7 @@ func builtinHelpText() string {
   /stats     — combined status + cost + history
   /tasks     — list background tasks
   /wf-status — show active workflow state
+  /wf-cancel — clear workflow state
   /team      — show multi-AI team configuration
   /undo      — stash changes (git-backed undo)
   /redo      — restore stashed changes
@@ -343,6 +346,13 @@ func (a *App) builtinTasksText() string {
 
 func (a *App) builtinWorkflowStatusText() string {
 	return workflow.StatusText(a.projectRoot)
+}
+
+func (a *App) builtinWorkflowCancelText() string {
+	if err := workflow.ClearAll(a.projectRoot); err != nil {
+		return fmt.Sprintf("Error clearing workflow state: %v", err)
+	}
+	return "Workflow state cleared."
 }
 
 func (a *App) builtinTeamText() string {

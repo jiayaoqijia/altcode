@@ -99,6 +99,8 @@ func parseFrontmatter(fm string, a *Agent) {
 		key := strings.TrimSpace(lines[i][:idx])
 		val := strings.TrimSpace(lines[i][idx+1:])
 		switch key {
+		case "name":
+			a.Name = strings.Trim(val, `"'`)
 		case "description":
 			if val == "|" || val == ">" {
 				var block []string

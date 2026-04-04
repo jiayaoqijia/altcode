@@ -159,6 +159,7 @@ func buildPaletteCommands(
 		{Name: "/stats", Description: "combined status + cost"},
 		{Name: "/tasks", Description: "list background tasks"},
 		{Name: "/wf-status", Description: "show active workflow state"},
+		{Name: "/wf-cancel", Description: "clear workflow state"},
 		{Name: "/team", Description: "multi-AI team config"},
 		{Name: "/backends", Description: "detect coding backends"},
 		{Name: "/undo", Description: "git-backed undo (stash)"},
