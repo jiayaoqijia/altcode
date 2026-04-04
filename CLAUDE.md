@@ -7,7 +7,8 @@ A Go CLI/TUI for AI-assisted coding. Architecture:
 ```
 cmd/altcode/main.go         → Cobra CLI entry point
 internal/engine/             → Agent loop (tool dispatch, session persistence, cost tracking)
-internal/provider/           → Provider interface (Anthropic SSE + OpenAI SSE)
+internal/provider/           → Provider interface (Anthropic SSE + OpenAI SSE + 5 Chinese providers)
+internal/workflow/           → Optional workflow mode (interview, plan, ralph)
 internal/tool/               → Tool interface, registry, concurrent dispatch
 internal/permission/         → Permission evaluator (4 modes, doom loop)
 internal/hooks/              → Hook system (13 events, command + prompt hooks, conditional if)
@@ -72,10 +73,13 @@ Common CI failures and how to avoid them:
 - CI green on Linux + macOS + Windows
 - 5ms startup, 10MB binary
 - 5ms startup, 10MB binary
-- Providers: Anthropic, OpenAI/Codex, Ollama, LMStudio, OpenRouter (100+ models)
-- Auth: auto-detects Claude Code sub + Codex CLI sub + OpenRouter key
-- Claude Code compatible: loads CLAUDE.md, hooks, commands, plugins, agents, memory natively
+- Providers: Anthropic, OpenAI/Codex, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models)
+- Auth: auto-detects Claude Code sub + Codex CLI sub + 7 provider API keys + OpenRouter
+- Claude Code compatible: loads CLAUDE.md, .mcp.json, settings.json, hooks, skills, plugins, agents, memory natively
+- Workflow mode: optional interview → plan → ralph pipeline (altcode workflow)
+- Skills: 47 discovered from .claude/skills/ + .agents/skills/ (Codex-style paths in system prompt)
 - Benchmarks: DeepSeek 96%, MiniMax 93%, Qwen 93%, Claude 90% (5 suites × 6 models)
+- 7-model benchmark: all 7 models pass identical coding task (see docs/benchmark-multi-model.md)
 
 ### Key Patterns
 - Engine emits `<-chan event.Event` consumed by TUI or exec mode

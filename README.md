@@ -73,8 +73,9 @@ altcode can call **actual coding CLIs** (Claude Code, Codex, Gemini) as backends
 ## Features
 
 - **Multi-turn agent loop** — model calls tools, gets results, loops until done (50-iteration cap)
-- **Multi-provider** — Anthropic, OpenAI/Codex, Ollama, LMStudio, any OpenAI-compatible API
-- **Zero config auth** — auto-detects Claude Code and Codex CLI subscriptions
+- **Multi-provider** — Anthropic, OpenAI/Codex, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models), any OpenAI-compatible API
+- **Zero config auth** — auto-detects Claude Code, Codex CLI subscriptions, and 7 provider API keys
+- **Workflow mode** — optional `altcode workflow` with interview, planning, and persistent execution (ralph) modes
 - **7 built-in tools** — read, glob, grep, ls, bash, edit, write
 - **MCP client** — stdio + SSE/HTTP transports with auto-discovery and namespace isolation
 - **13 hook events** — PreToolUse, PostToolUse, Stop, SessionStart/End, UserPromptSubmit, SubagentStop, PreCompact, Notification, CwdChanged, FileChanged, TaskCreated, PermissionDenied
@@ -126,9 +127,14 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     |----------------|------------------------------|
     | Claude Code CLI (`~/.claude/.credentials.json`) | Claude subscription (Max/Pro) |
     | Codex CLI (`~/.codex/auth.json` + `config.toml`) | Codex subscription + relay URL + model |
-    | `ANTHROPIC_API_KEY` env var | Anthropic API key |
-    | `OPENAI_API_KEY` env var | OpenAI API key |
-    | `OPENROUTER` env var or `.env` file | 100+ models (DeepSeek, Qwen, GLM, Kimi, MiniMax...) |
+    | `ANTHROPIC_API_KEY` env var | Anthropic API |
+    | `OPENAI_API_KEY` env var | OpenAI API |
+    | `DEEPSEEK_API_KEY` env var | DeepSeek (api.deepseek.com) |
+    | `ZHIPU_API_KEY` env var | GLM-5 (open.bigmodel.cn) |
+    | `MOONSHOT_API_KEY` env var | Kimi K2.5 (api.moonshot.cn) |
+    | `MINIMAX_API_KEY` env var | MiniMax M2.7 (api.minimax.chat) |
+    | `DASHSCOPE_API_KEY` env var | Qwen (dashscope.aliyuncs.com) |
+    | `OPENROUTER` env var or `.env` file | 100+ models via OpenRouter |
 
     **No setup needed if you already use Claude Code or Codex CLI.** Just install and run.
 
@@ -148,6 +154,19 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     altcode --model openai/gpt-4
     altcode --model ollama/llama3
     altcode --model openai/deepseek/deepseek-chat-v3-0324  # via OpenRouter
+
+    # Chinese AI providers (direct API or OpenRouter fallback)
+    altcode --model deepseek/deepseek-chat "fix this"
+    altcode --model zhipu/glm-5 "explain this"
+    altcode --model moonshot/kimi-k2.5 "review this code"
+    altcode --model minimax/MiniMax-M2.7 "write tests"
+    altcode --model qwen/qwen3-coder "refactor this"
+
+    # Structured workflow mode (optional)
+    altcode workflow "add auth"                        # auto-detect mode
+    altcode workflow --mode interview "add auth"       # Socratic clarification
+    altcode workflow --mode plan "add auth"             # consensus planning
+    altcode workflow --mode ralph "add auth"            # persistent until done
 
     # Headless exec mode (for scripts/CI)
     altcode "explain this error"
@@ -212,6 +231,11 @@ Config files in JSONC (JSON with comments), loaded in cascade:
   "provider": {
     "anthropic": { "apiKey": "$ANTHROPIC_API_KEY" },
     "openai": { "apiKey": "$OPENAI_API_KEY", "baseURL": "https://api.openai.com" },
+    "deepseek": { "apiKey": "$DEEPSEEK_API_KEY" },
+    "zhipu": { "apiKey": "$ZHIPU_API_KEY" },
+    "moonshot": { "apiKey": "$MOONSHOT_API_KEY" },
+    "minimax": { "apiKey": "$MINIMAX_API_KEY" },
+    "qwen": { "apiKey": "$DASHSCOPE_API_KEY" },
     "ollama": { "baseURL": "http://localhost:11434" }
   },
   "hooks": {
