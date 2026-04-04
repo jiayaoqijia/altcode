@@ -29,6 +29,7 @@ const maxIterations = 50
 type Skill struct {
 	Name        string
 	Description string
+	Path        string // file path so the model can read SKILL.md on demand
 }
 
 // EngineParams holds all dependencies for creating an Engine.
@@ -438,7 +439,7 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 	if len(e.skills) > 0 {
 		infos := make([]sysctl.SkillInfo, len(e.skills))
 		for i, s := range e.skills {
-			infos[i] = sysctl.SkillInfo{Name: s.Name, Description: s.Description}
+			infos[i] = sysctl.SkillInfo{Name: s.Name, Description: s.Description, Path: s.Path}
 		}
 		system = append(system, provider.SystemSection{
 			Content:      sysctl.SkillsSection(infos),

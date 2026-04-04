@@ -124,6 +124,7 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 		skills = append(skills, engine.Skill{
 			Name:        a.Name + " (agent)",
 			Description: a.Description,
+			Path:        a.Path,
 		})
 	}
 
@@ -212,7 +213,7 @@ func discoverSkills() []engine.Skill {
 	cmds := discoverCommands()
 	skills := make([]engine.Skill, len(cmds))
 	for i, c := range cmds {
-		skills[i] = engine.Skill{Name: c.Name, Description: c.Description}
+		skills[i] = engine.Skill{Name: c.Name, Description: c.Description, Path: c.Path}
 	}
 	return skills
 }

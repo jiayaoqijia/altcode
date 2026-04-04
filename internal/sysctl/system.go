@@ -131,25 +131,43 @@ When write tools are needed, they run sequentially to avoid conflicts.
 type SkillInfo struct {
 	Name        string
 	Description string
+	Path        string
 }
 
 // SkillsSection builds a system prompt section listing available skills.
+// Follows Codex's pattern: include file paths so the model can read SKILL.md
+// on demand, plus progressive disclosure instructions.
 func SkillsSection(skills []SkillInfo) string {
 	var sb strings.Builder
-	sb.WriteString("# Available skills and slash commands\n\n")
-	sb.WriteString("The user can invoke these skills with /<name>. ")
-	sb.WriteString("When the user says '/skill-name' or asks you to run a skill, ")
-	sb.WriteString("read the skill's SKILL.md file and follow its instructions.\n\n")
+	sb.WriteString("# Available skills\n\n")
+	sb.WriteString("A skill is a set of instructions stored in a SKILL.md file. ")
+	sb.WriteString("Below is the list of skills available in this session.\n\n")
+
 	for _, s := range skills {
-		sb.WriteString("- **/")
+		sb.WriteString("- **")
 		sb.WriteString(s.Name)
 		sb.WriteString("**")
 		if s.Description != "" {
-			sb.WriteString(" — ")
+			sb.WriteString(": ")
 			sb.WriteString(s.Description)
+		}
+		if s.Path != "" {
+			sb.WriteString(" (file: ")
+			sb.WriteString(s.Path)
+			sb.WriteString(")")
 		}
 		sb.WriteString("\n")
 	}
+
+	sb.WriteString(`
+## How to use skills
+
+- If the user names a skill (e.g. "/review" or "run the evaluate agent") or the task matches a skill's description, use that skill.
+- To use a skill: read its SKILL.md file using the read tool, then follow the instructions inside.
+- When SKILL.md references relative paths (e.g. scripts/foo.py), resolve them relative to the skill's directory.
+- Read only what you need — don't bulk-load all skill files at once.
+- If a skill can't be applied (missing files, unclear instructions), state the issue and continue with the best fallback.
+`)
 	return sb.String()
 }
 
