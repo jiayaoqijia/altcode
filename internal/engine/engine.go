@@ -704,24 +704,21 @@ func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool
 			autoCheck = "" // only append once
 		}
 
-		switch providerName {
-		case "openai", "ollama", "lmstudio":
-			// OpenAI expects one role="tool" message per tool result
+		// Anthropic batches all results into one message (handled below).
+		// All other providers use OpenAI-compatible format: one role="tool" message per result.
+		if providerName != "anthropic" {
 			e.messages = append(e.messages, provider.Message{
 				Role: "tool",
 				Parts: []provider.ContentPart{
 					provider.NewToolResultPart(tc.ID, output),
 				},
 			})
-		default:
-			// Anthropic batches tool results in a single user message
-			// (handled after loop)
 		}
 	}
 
 	// Anthropic: batch all results into one user message
 	provName, _ := parseModel(e.cfg.Model)
-	if provName == "anthropic" || provName == "" {
+	if provName == "anthropic" {
 		autoCheckAnth := e.goAutoVerify(toolCalls, results)
 		var parts []provider.ContentPart
 		for i, tc := range toolCalls {
