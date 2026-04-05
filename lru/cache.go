@@ -2,24 +2,24 @@ package lru
 
 import "sync"
 
-// Node represents a doubly-linked list node for LRU cache
+// Node represents a doubly-linked list node in the LRU cache
 type Node struct {
-	key   string
-	value interface{}
-	prev  *Node
-	next  *Node
+	key  string
+	val  interface{}
+	prev *Node
+	next *Node
 }
 
-// Cache implements a thread-safe Least Recently Used cache
+// Cache implements a Least Recently Used cache with fixed capacity
 type Cache struct {
 	capacity int
-	cache    map[string]*Node
-	head     *Node // dummy head node
-	tail     *Node // dummy tail node
-	mu       sync.RWMutex
+	cache    map[string]*Node // key -> node mapping
+	head     *Node            // dummy head node
+	tail     *Node            // dummy tail node
+	mu       sync.RWMutex     // thread-safe access
 }
 
-// New creates a new LRU cache with given capacity
+// New creates a new LRU cache with the given capacity
 func New(capacity int) *Cache {
 	head := &Node{}
 	tail := &Node{}
@@ -34,7 +34,8 @@ func New(capacity int) *Cache {
 	}
 }
 
-// Get retrieves the value for a key and marks it as recently used
+// Get retrieves the value for a given key and marks it as recently used
+// Returns the value and a boolean indicating if the key exists
 func (c *Cache) Get(key string) (interface{}, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -46,23 +47,24 @@ func (c *Cache) Get(key string) (interface{}, bool) {
 
 	// Move node to the end (most recently used)
 	c.moveToEnd(node)
-	return node.value, true
+	return node.val, true
 }
 
-// Put inserts or updates a key-value pair and marks it as recently used
+// Put inserts or updates a key-value pair
+// If capacity is exceeded, the least recently used item is evicted
 func (c *Cache) Put(key string, value interface{}) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	// If key already exists, update value and move to end
 	if node, exists := c.cache[key]; exists {
-		node.value = value
+		node.val = value
 		c.moveToEnd(node)
 		return
 	}
 
-	// Create new node and add to cache
-	newNode := &Node{key: key, value: value}
+	// Create new node and add to end
+	newNode := &Node{key: key, val: value}
 	c.cache[key] = newNode
 	c.addToEnd(newNode)
 
@@ -99,8 +101,8 @@ func (c *Cache) evictLRU() {
 	delete(c.cache, lruNode.key)
 }
 
-// Len returns the current number of items in the cache
-func (c *Cache) Len() int {
+// Size returns the current number of items in the cache
+func (c *Cache) Size() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.cache)

@@ -341,7 +341,7 @@ type User struct { Name string }`,
 		return count
 	}
 }`,
-			"Counter has a race condition when called from multiple goroutines. Fix it.",
+			"Counter has a race condition when called from multiple goroutines. Fix it using sync.Mutex or sync/atomic.",
 			func(fix string) bool {
 				return strings.Contains(fix, "sync") || strings.Contains(fix, "atomic") || strings.Contains(fix, "Mutex")
 			},

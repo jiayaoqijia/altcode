@@ -15,22 +15,18 @@ func main() {
 	// Parse command-line arguments
 	flag.Parse()
 
-	// Validate port number
-	if *port < 1 || *port > 65535 {
-		log.Fatalf("Error: port must be between 1 and 65535, got %d\n", *port)
-	}
+	// Print the configuration
+	printConfig(*port, *host, *verbose)
+}
 
-	// Print configuration
+func printConfig(port int, host string, verbose bool) {
 	fmt.Println("=== Configuration ===")
-	fmt.Printf("Host:    %s\n", *host)
-	fmt.Printf("Port:    %d\n", *port)
-	fmt.Printf("Verbose: %v\n", *verbose)
+	fmt.Printf("Host:    %s\n", host)
+	fmt.Printf("Port:    %d\n", port)
+	fmt.Printf("Verbose: %v\n", verbose)
 	fmt.Println("====================")
 
-	// Additional verbose output if enabled
-	if *verbose {
-		fmt.Println("\n[VERBOSE] Configuration details:")
-		fmt.Printf("[VERBOSE] Server will listen on %s:%d\n", *host, *port)
-		fmt.Println("[VERBOSE] Ready to start server")
+	if verbose {
+		log.Println("Verbose mode enabled - additional logging would go here")
 	}
 }
