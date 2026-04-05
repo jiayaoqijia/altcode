@@ -73,7 +73,7 @@ altcode can call **actual coding CLIs** (Claude Code, Codex, Gemini) as backends
 ## Features
 
 - **Multi-turn agent loop** — model calls tools, gets results, loops until done (50-iteration cap)
-- **Multi-provider** — Anthropic, OpenAI/Codex, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models), any OpenAI-compatible API
+- **Multi-provider** — Anthropic, OpenAI/Codex, altllm, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models), any OpenAI-compatible API
 - **Zero config auth** — auto-detects Claude Code, Codex CLI subscriptions, and 7 provider API keys
 - **Workflow mode** — optional `altcode workflow` with interview, planning, and persistent execution (ralph) modes
 - **7 built-in tools** — read, glob, grep, ls, bash, edit, write
@@ -134,6 +134,7 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     | `MOONSHOT_API_KEY` env var | Kimi K2.5 (api.moonshot.cn) |
     | `MINIMAX_API_KEY` env var | MiniMax M2.7 (api.minimax.chat) |
     | `DASHSCOPE_API_KEY` env var | Qwen (dashscope.aliyuncs.com) |
+    | `ALTLLM` env var | altllm (api.altllm.ai) |
     | `OPENROUTER` env var or `.env` file | 100+ models via OpenRouter |
 
     **No setup needed if you already use Claude Code or Codex CLI.** Just install and run.
@@ -161,6 +162,7 @@ No runtime dependencies. No Node.js. No Python. Just a single binary.
     altcode --model moonshot/kimi-k2.5 "review this code"
     altcode --model minimax/MiniMax-M2.7 "write tests"
     altcode --model qwen/qwen3-coder "refactor this"
+    altcode --model altllm/altllm-basic "add this feature"
 
     # Structured workflow mode (optional)
     altcode workflow "add auth"                        # auto-detect mode
@@ -236,6 +238,7 @@ Config files in JSONC (JSON with comments), loaded in cascade:
     "moonshot": { "apiKey": "$MOONSHOT_API_KEY" },
     "minimax": { "apiKey": "$MINIMAX_API_KEY" },
     "qwen": { "apiKey": "$DASHSCOPE_API_KEY" },
+    "altllm": { "apiKey": "$ALTLLM" },
     "ollama": { "baseURL": "http://localhost:11434" }
   },
   "hooks": {

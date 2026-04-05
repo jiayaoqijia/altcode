@@ -20,6 +20,7 @@
 | 5 | GLM-5 | Zhipu AI | altcode via OpenRouter |
 | 6 | Kimi K2.5 | Moonshot | altcode via OpenRouter |
 | 7 | Qwen3 Coder | Alibaba | altcode via OpenRouter |
+| 8 | altllm-basic | alt-research | altcode via api.altllm.ai |
 
 ## Results
 

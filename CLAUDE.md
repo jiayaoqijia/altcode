@@ -73,8 +73,8 @@ Common CI failures and how to avoid them:
 - CI green on Linux + macOS + Windows
 - 5ms startup, 10MB binary
 - 5ms startup, 10MB binary
-- Providers: Anthropic, OpenAI/Codex, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models)
-- Auth: auto-detects Claude Code sub + Codex CLI sub + 7 provider API keys + OpenRouter
+- Providers: Anthropic, OpenAI/Codex, altllm, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models)
+- Auth: auto-detects Claude Code sub + Codex CLI sub + 8 provider API keys + OpenRouter
 - Claude Code compatible: loads CLAUDE.md, .mcp.json, settings.json, hooks, skills, plugins, agents, memory natively
 - Workflow mode: optional interview → plan → ralph pipeline (altcode workflow)
 - Skills: 47 discovered from .claude/skills/ + .agents/skills/ (Codex-style paths in system prompt)
