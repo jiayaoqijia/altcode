@@ -10,11 +10,48 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 )
 
-// LoadFromCLIs detects and loads credentials from installed Claude Code
-// and Codex CLI configurations. Merges into the given config.
+// LoadFromCLIs detects and loads credentials from Claude Code, Codex CLI,
+// and altcode's own OAuth login file. Merges into the given config.
 func LoadFromCLIs(cfg *config.Config) {
 	loadClaudeCodeAuth(cfg)
 	loadCodexAuth(cfg)
+	loadAltcodeAuth(cfg)
+}
+
+// loadAltcodeAuth reads ~/.altcode/auth.json written by `altcode login`.
+func loadAltcodeAuth(cfg *config.Config) {
+	if p, ok := cfg.Provider["openai"]; ok && p.APIKey != "" {
+		return // already configured
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return
+	}
+	path := filepath.Join(home, ".altcode", "auth.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var a struct {
+		Tokens struct {
+			AccessToken string `json:"access_token"`
+		} `json:"tokens"`
+		OpenAIKey string `json:"OPENAI_API_KEY"`
+	}
+	if json.Unmarshal(data, &a) != nil {
+		return
+	}
+	token := a.Tokens.AccessToken
+	if token == "" {
+		token = a.OpenAIKey
+	}
+	if token == "" {
+		return
+	}
+	cfg.Provider["openai"] = config.ProviderConfig{
+		APIKey:  token,
+		BaseURL: "https://chatgpt.com/backend-api/codex",
+	}
 }
 
 // loadClaudeCodeAuth reads ~/.claude/.credentials.json (Claude subscription)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/auth"
+	"github.com/altcode-ai/altcode/internal/oauth"
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
@@ -121,6 +122,43 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
 	workflowCmd.Flags().StringVar(&wfMode, "mode", "", "Workflow mode: interview, plan, ralph, execute")
 	workflowCmd.Flags().IntVar(&wfMaxIter, "max-iter", 10, "Max iterations for ralph mode")
 	root.AddCommand(workflowCmd)
+
+	var loginNoBrowser bool
+	loginCmd := &cobra.Command{
+		Use:   "login",
+		Short: "Log in with your ChatGPT subscription (browser OAuth + PKCE)",
+		Long: `Authenticate with OpenAI using the ChatGPT (Plus/Pro/Team/Enterprise)
+subscription via browser OAuth. Stores credentials in ~/.altcode/auth.json.
+
+  altcode login              Open browser and complete login
+  altcode login --no-browser Print URL only (useful over SSH)`,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+			defer stop()
+			path := oauth.DefaultAuthFile()
+			_, err := oauth.Login(ctx, path, oauth.LoginOptions{
+				OpenBrowser: !loginNoBrowser,
+				Stdout:      os.Stdout,
+			})
+			return err
+		},
+	}
+	loginCmd.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not auto-open a browser; print the URL only")
+	root.AddCommand(loginCmd)
+
+	logoutCmd := &cobra.Command{
+		Use:   "logout",
+		Short: "Remove stored altcode login credentials",
+		RunE: func(cmd *cobra.Command, args []string) error {
+			path := oauth.DefaultAuthFile()
+			if err := oauth.Logout(path); err != nil {
+				return err
+			}
+			fmt.Println("Logged out.")
+			return nil
+		},
+	}
+	root.AddCommand(logoutCmd)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
