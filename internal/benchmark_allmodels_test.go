@@ -314,7 +314,7 @@ func TestAllModels_AiderEdit(t *testing.T) {
 		{"AE_ErrorHandle", "func Div(a, b int) (int, error) {\n\tif b == 0 {\n\t\treturn 0, errors.New(\"division by zero\")\n\t}\n\treturn a / b, nil\n}",
 			"Return (int, error) and handle division by zero.",
 			func(s string) bool { return strings.Contains(s, "error") }},
-		{"AE_Switch", "func Day(d int) string {\n  switch d {\n  case 1: return \"Mon\"\n  case 2: return \"Tue\"\n  default: return \"?\"\n  }\n}",
+		{"AE_Switch", "func Day(d int) string {\n  switch d {\n  case 1: return \"Mon\"\n  case 2: return \"Tue\"\n  case 3: return \"Wed\"\n  case 4: return \"Thu\"\n  case 5: return \"Fri\"\n  case 6: return \"Sat\"\n  case 7: return \"Sun\"\n  default: return \"?\"\n  }\n}",
 			"Refactor to switch statement.",
 			func(s string) bool { return strings.Contains(s, "switch") }},
 		{"AE_Generics", "func Max[T constraints.Ordered](a, b T) T { if a > b { return a }; return b }",
