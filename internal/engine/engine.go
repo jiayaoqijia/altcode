@@ -505,37 +505,41 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 		}
 	}
 
-	temp := providerDefaultTemperature(e.cfg.Model)
 	req := &provider.Request{
-		Model:       e.model,
-		Messages:    e.messages,
-		System:      system,
-		Tools:       e.toolSchemas(),
-		MaxTokens:   16384,
-		Temperature: &temp,
+		Model:     e.model,
+		Messages:  e.messages,
+		System:    system,
+		Tools:     e.toolSchemas(),
+		MaxTokens: 16384,
+	}
+	if temp, ok := providerDefaultTemperature(e.cfg.Model); ok {
+		req.Temperature = &temp
 	}
 	return e.provider.Stream(ctx, req)
 }
 
-// providerDefaultTemperature returns a model-specific temperature.
-// Coding tasks benefit from lower temperatures for consistency.
-func providerDefaultTemperature(model string) float64 {
+// providerDefaultTemperature returns a model-specific temperature and
+// whether to send it. Some providers (altllm, some reasoning models)
+// reject the temperature parameter entirely.
+func providerDefaultTemperature(model string) (float64, bool) {
 	lower := strings.ToLower(model)
 	switch {
+	case strings.HasPrefix(lower, "altllm"):
+		return 0, false // altllm rejects the parameter
 	case strings.HasPrefix(lower, "deepseek"):
-		return 0.3 // DeepSeek is deterministic and clean at low temp
+		return 0.3, true
 	case strings.HasPrefix(lower, "qwen"):
-		return 0.3
+		return 0.3, true
 	case strings.HasPrefix(lower, "moonshot"), strings.HasPrefix(lower, "kimi"):
-		return 0.5 // Kimi needs a bit more variance
+		return 0.5, true
 	case strings.HasPrefix(lower, "zhipu"), strings.HasPrefix(lower, "glm"):
-		return 0.4
+		return 0.4, true
 	case strings.HasPrefix(lower, "minimax"):
-		return 0.4
+		return 0.4, true
 	case strings.HasPrefix(lower, "anthropic"):
-		return 0.2 // Claude handles low temp well
+		return 0.2, true
 	default:
-		return 0.3 // OpenAI/Codex default
+		return 0.3, true
 	}
 }
 
@@ -903,6 +907,8 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 		return newOpenAICompat(cfg, "moonshot", "https://api.moonshot.cn/v1"), nil
 	case "minimax":
 		return newOpenAICompat(cfg, "minimax", "https://api.minimax.chat/v1"), nil
+	case "altllm":
+		return newOpenAICompat(cfg, "altllm", "https://api.altllm.ai"), nil
 	case "qwen", "dashscope":
 		return newOpenAICompat(cfg, "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"), nil
 	case "ollama":

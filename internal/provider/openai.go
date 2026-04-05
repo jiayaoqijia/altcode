@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -65,8 +66,83 @@ func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan Strea
 	}
 
 	ch := make(chan StreamEvent, 32)
-	go processOpenAISSE(resp.Body, ch)
+	// Some providers (e.g. altllm) ignore stream:true and return plain JSON.
+	// Detect by content-type and convert to synthetic events.
+	ct := resp.Header.Get("Content-Type")
+	if strings.Contains(ct, "application/json") && !strings.Contains(ct, "event-stream") {
+		go processOpenAINonStream(resp.Body, ch)
+	} else {
+		go processOpenAISSE(resp.Body, ch)
+	}
 	return ch, nil
+}
+
+// processOpenAINonStream handles providers that return a full JSON response
+// instead of SSE. Converts the single response into synthetic stream events.
+func processOpenAINonStream(body io.ReadCloser, ch chan<- StreamEvent) {
+	defer body.Close()
+	defer close(ch)
+
+	data, err := io.ReadAll(body)
+	if err != nil {
+		ch <- StreamEvent{Type: StreamError, Error: err}
+		return
+	}
+
+	var resp struct {
+		Choices []struct {
+			Message struct {
+				Content   string           `json:"content"`
+				ToolCalls []openaiToolCall `json:"tool_calls"`
+			} `json:"message"`
+			FinishReason string `json:"finish_reason"`
+		} `json:"choices"`
+		Usage struct {
+			PromptTokens     int `json:"prompt_tokens"`
+			CompletionTokens int `json:"completion_tokens"`
+		} `json:"usage"`
+	}
+	if err := json.Unmarshal(data, &resp); err != nil {
+		ch <- StreamEvent{Type: StreamError, Error: fmt.Errorf("parse json: %w", err)}
+		return
+	}
+	if len(resp.Choices) == 0 {
+		ch <- StreamEvent{Type: StreamDone}
+		return
+	}
+
+	choice := resp.Choices[0]
+	if choice.Message.Content != "" {
+		ch <- StreamEvent{Type: StreamTextDelta, Delta: choice.Message.Content}
+	}
+	for _, tc := range choice.Message.ToolCalls {
+		ch <- StreamEvent{
+			Type:    StreamToolCallStart,
+			ToolUse: &ToolCallEvent{ID: tc.ID, Name: tc.Function.Name},
+		}
+		ch <- StreamEvent{
+			Type:    StreamToolCallDelta,
+			ToolUse: &ToolCallEvent{ID: tc.ID, Delta: tc.Function.Arguments},
+		}
+		ch <- StreamEvent{
+			Type:    StreamToolCallEnd,
+			ToolUse: &ToolCallEvent{ID: tc.ID},
+		}
+	}
+	ch <- StreamEvent{
+		Type: StreamUsage,
+		Usage: &UsageInfo{
+			InputTokens:  resp.Usage.PromptTokens,
+			OutputTokens: resp.Usage.CompletionTokens,
+		},
+	}
+	stopReason := "end_turn"
+	if choice.FinishReason == "tool_calls" {
+		stopReason = "tool_use"
+	} else if choice.FinishReason == "length" {
+		stopReason = "max_tokens"
+	}
+	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
 
 // --- request types ---

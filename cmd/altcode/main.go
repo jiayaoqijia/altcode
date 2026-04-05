@@ -502,6 +502,8 @@ func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
 		{"MOONSHOT_API_KEY", "moonshot"},
 		{"MINIMAX_API_KEY", "minimax"},
 		{"DASHSCOPE_API_KEY", "qwen"},
+		{"ALTLLM_API_KEY", "altllm"},
+		{"ALTLLM", "altllm"},
 	} {
 		if key := os.Getenv(ep.env); key != "" {
 			if p, ok := cfg.Provider[ep.provider]; !ok || p.APIKey == "" {
