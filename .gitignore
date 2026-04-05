@@ -127,3 +127,13 @@ internal/stringxor.go
 internal/main.go
 internal/hascloseelements.go
 internal/prime.go
+
+# Model-generated benchmark junk
+internal/ratelimit/
+internal/counter*.go
+internal/filter.go
+internal/generics*.go
+internal/math*.go
+internal/reverse.go
+internal/user*.go
+/middleware*.go

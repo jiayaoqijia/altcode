@@ -15,8 +15,17 @@ func main() {
 	flag.Parse()
 
 	// Print the configuration
+	printConfig(*port, *host, *verbose)
+}
+
+func printConfig(port int, host string, verbose bool) {
 	fmt.Println("=== Configuration ===")
-	fmt.Printf("Host:    %s\n", *host)
-	fmt.Printf("Port:    %d\n", *port)
-	fmt.Printf("Verbose: %v\n", *verbose)
+	fmt.Printf("Host:    %s\n", host)
+	fmt.Printf("Port:    %d\n", port)
+	fmt.Printf("Verbose: %v\n", verbose)
+
+	if verbose {
+		fmt.Println("\n=== Additional Info ===")
+		fmt.Printf("Server will listen at: %s:%d\n", host, port)
+	}
 }
