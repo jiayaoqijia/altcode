@@ -56,7 +56,7 @@ func Run(ctx context.Context, p Params) error {
 	}
 
 	if !p.JSON && !p.Quiet && isTerminal(w) {
-		printFooter(w, time.Since(start))
+		printFooter(w, time.Since(start), eng)
 	}
 	return err
 }
@@ -94,7 +94,7 @@ func printBanner(w io.Writer, p Params) {
 	fmt.Fprintf(w, "\n%s│%s\n", dim, reset)
 }
 
-func printFooter(w io.Writer, elapsed time.Duration) {
+func printFooter(w io.Writer, elapsed time.Duration, eng *engine.Engine) {
 	ms := elapsed.Milliseconds()
 	var timing string
 	if ms < 1000 {
@@ -102,8 +102,22 @@ func printFooter(w io.Writer, elapsed time.Duration) {
 	} else {
 		timing = fmt.Sprintf("%.1fs", elapsed.Seconds())
 	}
+	cost := ""
+	if eng != nil {
+		if ct := eng.CostTracker(); ct != nil {
+			in, out := ct.TotalTokens()
+			total := ct.TotalCost()
+			if in+out > 0 {
+				if total > 0 {
+					cost = fmt.Sprintf(" %s· %d in / %d out · $%.4f%s", dim, in, out, total, reset)
+				} else {
+					cost = fmt.Sprintf(" %s· %d in / %d out%s", dim, in, out, reset)
+				}
+			}
+		}
+	}
 	fmt.Fprintf(w, "%s│%s\n", dim, reset)
-	fmt.Fprintf(w, "%s╰─ %s%s%s %s\n", dim, green, timing, reset, dim+reset)
+	fmt.Fprintf(w, "%s╰─ %s%s%s%s\n", dim, green, timing, reset, cost)
 }
 
 func truncatePrompt(s string, n int) string {
@@ -116,10 +130,19 @@ func truncatePrompt(s string, n int) string {
 
 func drainText(ch <-chan event.Event, w io.Writer) error {
 	var lastErr string
+	showProgress := isTerminal(w)
 	for ev := range ch {
 		switch ev.Type {
 		case event.TextDelta:
 			fmt.Fprint(w, ev.Text)
+		case event.ToolStart:
+			if showProgress && ev.ToolCall != nil {
+				fmt.Fprintf(os.Stderr, "%s[%s]%s ", dim, ev.ToolCall.Name, reset)
+			}
+		case event.ToolResultEvent:
+			if showProgress && ev.ToolResult != nil {
+				fmt.Fprintf(os.Stderr, "%s✓%s\n", dim, reset)
+			}
 		case event.ErrorEvent:
 			lastErr = ev.Error
 		case event.Done:

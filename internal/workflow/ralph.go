@@ -25,6 +25,11 @@ func RalphPrompt(task string, iteration, maxIter int) string {
 5. Only stop when ALL of the above are verified.
 6. If you cannot complete the task after %d iterations, report what's done and what's blocking.
 
+## Test writing (when adding tests)
+- Write ONE test function per distinct case: TestName_ValidInput, TestName_MissingField, TestName_EdgeCase.
+- Include happy path + each error path + edge cases + concurrency if applicable.
+- Prefer many small tests over one big table-driven test (unless asked to use tables).
+
 ## Verification Checklist
 Before declaring complete, confirm:
 - [ ] All code compiles without errors
@@ -41,7 +46,13 @@ If a step fails:
 4. Re-verify
 5. Continue to next step
 
-Never skip verification. Never declare "done" without evidence.`, task, iteration, maxIter, maxIter)
+Never skip verification. Never declare "done" without evidence.
+
+## Completion Signal (REQUIRED)
+End your response with EXACTLY this JSON on its own line:
+{"done": true, "reason": "all tests pass"}
+Or if blocked after genuine effort:
+{"done": false, "reason": "why you're stuck"}`, task, iteration, maxIter, maxIter)
 }
 
 // PlanPrompt returns the system prompt for consensus planning mode.

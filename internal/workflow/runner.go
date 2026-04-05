@@ -2,6 +2,7 @@ package workflow
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -129,8 +130,25 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 }
 
 // isRalphComplete checks if the model's response indicates the task is done.
-// Looks for verification language in the output.
+// Primary: looks for structured JSON signal {"done": true|false}.
+// Fallback: text-based signals for models that don't emit JSON.
 func isRalphComplete(text string) bool {
+	// Primary: parse JSON signal
+	for _, line := range strings.Split(text, "\n") {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "{") || !strings.Contains(line, "\"done\"") {
+			continue
+		}
+		var sig struct {
+			Done   bool   `json:"done"`
+			Reason string `json:"reason"`
+		}
+		if json.Unmarshal([]byte(line), &sig) == nil {
+			return sig.Done
+		}
+	}
+
+	// Fallback: text signals for models that didn't emit JSON
 	lower := strings.ToLower(text)
 	signals := []string{
 		"all tests pass",
@@ -142,7 +160,6 @@ func isRalphComplete(text string) bool {
 		"everything passes",
 		"no issues found",
 		"already green",
-		"verified",
 		"output is exactly",
 		"no code changes were needed",
 		"completed successfully",

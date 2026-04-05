@@ -228,7 +228,7 @@ func TestAllModels_SWEBench(t *testing.T) {
 			"Infinite loop when target not found. Fix the lo update.",
 			func(s string) bool { return strings.Contains(s, "mid+1") || strings.Contains(s, "mid + 1") }},
 		{"SWE_NilDeref",
-			"type User struct { Name string }\nfunc GetName(u *User) string { if u == nil { return \"\" }; return u.Name }",
+			"type User struct { Name string }\nfunc GetName(u *User) string { return u.Name }",
 			"Panics when u is nil. Add nil check.",
 			func(s string) bool { return strings.Contains(s, "nil") }},
 		{"SWE_DataRace",

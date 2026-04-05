@@ -317,7 +317,8 @@ func TestIsRalphComplete(t *testing.T) {
 	}{
 		{"All tests pass.", true},
 		{"Nothing to fix.", true},
-		{"Verified: output correct.", true},
+		{`Done.` + "\n" + `{"done": true, "reason": "verified"}`, true},
+		{`{"done": false, "reason": "stuck"}`, false},
 		{"Still working on it.", false},
 		{"", false},
 	}

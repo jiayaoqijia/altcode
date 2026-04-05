@@ -34,6 +34,7 @@ func Spawn(
 	params := engine.EngineParams{
 		Config:       &childCfg,
 		Instructions: instructions,
+		TokenBudget:  parent.TokenBudget(), // share with parent
 	}
 
 	child, err := engine.NewWithRegistry(params, tools)

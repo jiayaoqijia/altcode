@@ -5,7 +5,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
+	"path/filepath"
 	"strings"
+	"sync/atomic"
+	"time"
 
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/config"
@@ -45,6 +49,44 @@ type EngineParams struct {
 	Sandbox      *sandbox.Sandbox       // nil = no sandboxing
 	TaskQueue    *task.Queue            // nil = auto-created
 	Skills       []Skill                // discovered slash commands/skills
+	TokenBudget  *TokenBudget           // nil = unlimited (session-wide cap)
+}
+
+// TokenBudget is a session-wide cap shared across parent engine + subagents.
+// Thread-safe via atomic operations.
+type TokenBudget struct {
+	used  int64 // atomic
+	limit int64 // 0 = unlimited
+}
+
+// NewTokenBudget returns a budget with the given limit. limit <= 0 means unlimited.
+func NewTokenBudget(limit int) *TokenBudget {
+	return &TokenBudget{limit: int64(limit)}
+}
+
+// Consume adds n tokens. Returns true if the budget is still within limit.
+func (b *TokenBudget) Consume(n int) bool {
+	if b == nil || b.limit <= 0 {
+		return true
+	}
+	used := atomic.AddInt64(&b.used, int64(n))
+	return used <= b.limit
+}
+
+// Used returns the current token count.
+func (b *TokenBudget) Used() int {
+	if b == nil {
+		return 0
+	}
+	return int(atomic.LoadInt64(&b.used))
+}
+
+// Limit returns the configured limit (0 = unlimited).
+func (b *TokenBudget) Limit() int {
+	if b == nil {
+		return 0
+	}
+	return int(b.limit)
 }
 
 // Engine orchestrates conversation turns between the user and an AI provider.
@@ -66,6 +108,7 @@ type Engine struct {
 	totalTokens  int // running token count
 	cost         *cost.Tracker
 	journal      *history.Journal
+	tokenBudget  *TokenBudget
 }
 
 // New creates an Engine from the given parameters.
@@ -131,11 +174,15 @@ func New(params EngineParams) (*Engine, error) {
 		skills:       params.Skills,
 		cost:         cost.NewTracker(),
 		journal:      history.NewJournal(),
+		tokenBudget:  params.TokenBudget,
 	}, nil
 }
 
 // Skills returns the discovered skills.
 func (e *Engine) Skills() []Skill { return e.skills }
+
+// TokenBudget returns the engine's shared token budget (may be nil).
+func (e *Engine) TokenBudget() *TokenBudget { return e.tokenBudget }
 
 // Sandbox returns the engine's command sandbox.
 func (e *Engine) Sandbox() *sandbox.Sandbox {
@@ -338,6 +385,7 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		skills:       params.Skills,
 		cost:         cost.NewTracker(),
 		journal:      history.NewJournal(),
+		tokenBudget:  params.TokenBudget,
 	}, nil
 }
 
@@ -457,14 +505,38 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 		}
 	}
 
+	temp := providerDefaultTemperature(e.cfg.Model)
 	req := &provider.Request{
-		Model:     e.model,
-		Messages:  e.messages,
-		System:    system,
-		Tools:     e.toolSchemas(),
-		MaxTokens: 16384,
+		Model:       e.model,
+		Messages:    e.messages,
+		System:      system,
+		Tools:       e.toolSchemas(),
+		MaxTokens:   16384,
+		Temperature: &temp,
 	}
 	return e.provider.Stream(ctx, req)
+}
+
+// providerDefaultTemperature returns a model-specific temperature.
+// Coding tasks benefit from lower temperatures for consistency.
+func providerDefaultTemperature(model string) float64 {
+	lower := strings.ToLower(model)
+	switch {
+	case strings.HasPrefix(lower, "deepseek"):
+		return 0.3 // DeepSeek is deterministic and clean at low temp
+	case strings.HasPrefix(lower, "qwen"):
+		return 0.3
+	case strings.HasPrefix(lower, "moonshot"), strings.HasPrefix(lower, "kimi"):
+		return 0.5 // Kimi needs a bit more variance
+	case strings.HasPrefix(lower, "zhipu"), strings.HasPrefix(lower, "glm"):
+		return 0.4
+	case strings.HasPrefix(lower, "minimax"):
+		return 0.4
+	case strings.HasPrefix(lower, "anthropic"):
+		return 0.2 // Claude handles low temp well
+	default:
+		return 0.3 // OpenAI/Codex default
+	}
 }
 
 func (e *Engine) appendAssistantWithTools(turn *turnResult) {
@@ -615,10 +687,17 @@ func (e *Engine) askPermission(tc collectedToolCall, out chan<- event.Event) too
 func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool.Result) {
 	providerName, _ := parseModel(e.cfg.Model)
 
+	// Auto-verify: if any edit/write touched a .go file, append go build result
+	autoCheck := e.goAutoVerify(toolCalls, results)
+
 	for i, tc := range toolCalls {
 		output := results[i].Output
 		if results[i].Error != nil {
 			output = fmt.Sprintf("Error: %v", results[i].Error)
+		}
+		if autoCheck != "" && (tc.Name == "edit" || tc.Name == "write") {
+			output += "\n\n[auto-verify] " + autoCheck
+			autoCheck = "" // only append once
 		}
 
 		switch providerName {
@@ -639,16 +718,72 @@ func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool
 	// Anthropic: batch all results into one user message
 	provName, _ := parseModel(e.cfg.Model)
 	if provName == "anthropic" || provName == "" {
+		autoCheckAnth := e.goAutoVerify(toolCalls, results)
 		var parts []provider.ContentPart
 		for i, tc := range toolCalls {
 			output := results[i].Output
 			if results[i].Error != nil {
 				output = fmt.Sprintf("Error: %v", results[i].Error)
 			}
+			if autoCheckAnth != "" && (tc.Name == "edit" || tc.Name == "write") {
+				output += "\n\n[auto-verify] " + autoCheckAnth
+				autoCheckAnth = ""
+			}
 			parts = append(parts, provider.NewToolResultPart(tc.ID, output))
 		}
 		e.messages = append(e.messages, provider.ToolResultMessage(parts))
 	}
+}
+
+// goAutoVerify runs 'go build' on the package containing any edited .go files.
+// Returns a short status string, or empty if no Go files were edited.
+func (e *Engine) goAutoVerify(toolCalls []collectedToolCall, results []tool.Result) string {
+	pkgDirs := map[string]bool{}
+	for i, tc := range toolCalls {
+		if tc.Name != "edit" && tc.Name != "write" {
+			continue
+		}
+		if results[i].Error != nil {
+			continue
+		}
+		var input map[string]any
+		if json.Unmarshal(tc.Input, &input) != nil {
+			continue
+		}
+		filePath, _ := input["file_path"].(string)
+		if filePath == "" {
+			filePath, _ = input["path"].(string)
+		}
+		if !strings.HasSuffix(filePath, ".go") {
+			continue
+		}
+		pkgDirs[filepath.Dir(filePath)] = true
+	}
+	if len(pkgDirs) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	for dir := range pkgDirs {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		cmd := exec.CommandContext(ctx, "go", "build", "./...")
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
+		out, err := cmd.CombinedOutput()
+		cancel()
+		if err != nil {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(fmt.Sprintf("go build in %s FAILED:\n%s", dir, strings.TrimSpace(string(out))))
+		} else {
+			if sb.Len() > 0 {
+				sb.WriteString("\n")
+			}
+			sb.WriteString(fmt.Sprintf("go build in %s OK", dir))
+		}
+	}
+	return sb.String()
 }
 
 func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string {
@@ -692,7 +827,18 @@ func (e *Engine) fireStopHooks(ctx context.Context) string {
 func (e *Engine) recordTurnCost(turn *turnResult) {
 	if turn.InputTokens > 0 || turn.OutputTokens > 0 {
 		e.cost.RecordTurn(e.model, turn.InputTokens, turn.OutputTokens)
+		if e.tokenBudget != nil {
+			e.tokenBudget.Consume(turn.InputTokens + turn.OutputTokens)
+		}
 	}
+}
+
+// BudgetExceeded reports whether the session-wide token budget has been hit.
+func (e *Engine) BudgetExceeded() bool {
+	if e.tokenBudget == nil || e.tokenBudget.Limit() <= 0 {
+		return false
+	}
+	return e.tokenBudget.Used() >= e.tokenBudget.Limit()
 }
 
 func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result) {

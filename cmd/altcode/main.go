@@ -212,12 +212,21 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 // needsMCP returns true if the prompt likely requires MCP tools.
 func needsMCP(prompt string) bool {
 	lower := strings.ToLower(prompt)
-	return strings.Contains(lower, "mcp") ||
-		strings.Contains(lower, "playwright") ||
-		strings.Contains(lower, "browser") ||
-		strings.Contains(lower, "language-server") ||
-		strings.Contains(lower, "lsp") ||
-		strings.Contains(lower, "chrome")
+	keywords := []string{
+		"mcp__", "mcp ", "mcp:",
+		"playwright", "browser", "chrome", "devtools",
+		"language-server", "lsp", "gopls", "pyright",
+		"screenshot", "navigate to", "visit http",
+		"memory graph", "knowledge graph",
+		"filesystem mcp", "read_multiple",
+		"sequential-thinking", "sequentialthinking",
+	}
+	for _, k := range keywords {
+		if strings.Contains(lower, k) {
+			return true
+		}
+	}
+	return false
 }
 
 func runTUI(params engine.EngineParams) error {
