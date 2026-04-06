@@ -33,7 +33,9 @@ func (a *App) renderMessage(msg chatMessage) string {
 	}
 
 	var rendered string
-	if a.mdRenderer != nil && msg.role != roleTool {
+	if msg.role == roleTool && looksLikeDiff(msg.content) {
+		rendered = renderInlineDiff(msg.content, a.theme, 15)
+	} else if a.mdRenderer != nil && msg.role != roleTool {
 		rendered = a.mdRenderer.Render(msg.content)
 	} else {
 		rendered = msg.content
@@ -85,6 +87,14 @@ func (a *App) renderMessage(msg chatMessage) string {
 		PaddingLeft(1).
 		Width(width).
 		Render(body)
+}
+
+// looksLikeDiff checks if content appears to be a unified diff.
+func looksLikeDiff(s string) bool {
+	return strings.HasPrefix(s, "---") ||
+		strings.HasPrefix(s, "+++") ||
+		strings.HasPrefix(s, "@@") ||
+		(strings.Contains(s, "\n+") && strings.Contains(s, "\n-"))
 }
 
 // renderToolActivity returns a styled tool call indicator.
