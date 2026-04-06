@@ -137,32 +137,32 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 		Args: cobra.MinimumNArgs(1),
 	}
 
-	var loginNoBrowser, loginDeviceCode bool
+	var loginBrowser bool
 	codexLogin := &cobra.Command{
 		Use:     "codex",
 		Aliases: []string{"chatgpt", "openai"},
 		Short:   "Log in with ChatGPT/Codex subscription",
-		Long: `Two login methods:
-  altcode login codex               Browser OAuth (opens a browser)
-  altcode login codex --no-browser  Print URL only (copy to another device)
-  altcode login codex --device-code Enter a short code on auth.openai.com (best for SSH/headless)`,
+		Long: `Login methods:
+  altcode login codex            Device code flow (default — works everywhere)
+  altcode login codex --browser  Browser OAuth (opens a browser on desktop)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 			path := oauth.DefaultAuthFile()
 
-			if loginDeviceCode {
-				return runDeviceCodeLogin(ctx, path)
+			if loginBrowser {
+				_, err := oauth.Login(ctx, path, oauth.LoginOptions{
+					OpenBrowser: true,
+					Stdout:      os.Stdout,
+				})
+				return err
 			}
-			_, err := oauth.Login(ctx, path, oauth.LoginOptions{
-				OpenBrowser: !loginNoBrowser,
-				Stdout:      os.Stdout,
-			})
-			return err
+			// Default: device code flow (works over SSH, no port binding needed)
+			return runDeviceCodeLogin(ctx, path)
 		},
 	}
-	codexLogin.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not auto-open a browser")
-	codexLogin.Flags().BoolVar(&loginDeviceCode, "device-code", false, "Use device code flow (enter code in browser)")
+	codexLogin.Flags().BoolVar(&loginBrowser, "browser", false, "Use browser OAuth instead of device code")
+	// loginDeviceCode flag removed — device code is now the default
 	loginRoot.AddCommand(codexLogin)
 	root.AddCommand(loginRoot)
 
