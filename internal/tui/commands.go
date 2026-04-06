@@ -5,6 +5,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
 	"github.com/altcode-ai/altcode/internal/workflow"
 )
@@ -155,11 +156,37 @@ func (a *App) builtinStatusText() string {
 func (a *App) builtinContextText() string {
 	var sb strings.Builder
 	sb.WriteString("Context breakdown:\n")
-	sb.WriteString(fmt.Sprintf("  Messages: %d\n", a.engineMessageCount()))
-	sb.WriteString(fmt.Sprintf("  System prompt sections: %d\n",
-		a.engineInstructionCount()))
-	memCount := a.engineMemoryCount()
-	sb.WriteString(fmt.Sprintf("  Memories loaded: %d", memCount))
+	msgCount := a.engineMessageCount()
+	sb.WriteString(fmt.Sprintf("  Messages:       %d\n", msgCount))
+	sb.WriteString(fmt.Sprintf("  Instructions:   %d\n", a.engineInstructionCount()))
+	sb.WriteString(fmt.Sprintf("  Memories:       %d\n", a.engineMemoryCount()))
+
+	// Token estimate
+	if a.engine != nil {
+		tokens := compact.EstimateTokens(a.engine.Messages())
+		limit := 128000 // default context window
+		pct := 0
+		if limit > 0 {
+			pct = tokens * 100 / limit
+		}
+		sb.WriteString(fmt.Sprintf("  Tokens (est):   %s / %s (%d%%)\n",
+			formatTokens(tokens), formatTokens(limit), pct))
+
+		// Visual bar
+		barWidth := 30
+		filled := pct * barWidth / 100
+		if filled > barWidth {
+			filled = barWidth
+		}
+		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+		status := "OK"
+		if pct >= 90 {
+			status = "CRITICAL — compact recommended"
+		} else if pct >= 70 {
+			status = "HIGH — auto-compact soon"
+		}
+		sb.WriteString(fmt.Sprintf("  Window:         [%s] %s", bar, status))
+	}
 	return sb.String()
 }
 

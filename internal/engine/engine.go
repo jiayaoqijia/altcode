@@ -801,14 +801,27 @@ func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string 
 }
 
 func (e *Engine) maybeCompact(ctx context.Context) {
-	if len(e.messages) < 100 {
+	// Token-based trigger (like Codex's model_auto_compact_token_limit)
+	tokens := compact.EstimateTokens(e.messages)
+	threshold := 80000 // default ~80K tokens triggers compact
+	if tokens < threshold && len(e.messages) < 100 {
 		return
 	}
+
 	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
 		Event: hooks.PreCompact, SessionID: e.sessionID,
 	})
-	mc := compact.NewMicrocompactor(20)
-	e.messages = mc.Apply(e.messages)
+
+	// Try LLM-summarized compaction first (like Codex)
+	summarizer := compact.NewSummarizer(e.provider, e.model)
+	compacted, err := summarizer.Compact(ctx, e.messages, 5)
+	if err != nil {
+		// Fallback to mechanical compaction
+		mc := compact.NewMicrocompactor(20)
+		e.messages = mc.Apply(e.messages)
+		return
+	}
+	e.messages = compacted
 }
 
 func (e *Engine) fireStopHooks(ctx context.Context) string {
