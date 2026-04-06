@@ -125,7 +125,7 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
 
 	// Provider-specific login commands under "altcode login <provider>"
 	loginRoot := &cobra.Command{
-		Use:   "login",
+		Use:   "login <provider>",
 		Short: "Log in with a provider subscription",
 		Long: `Log in to use a provider's subscription directly.
 
@@ -133,6 +133,7 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
   altcode login codex --no-browser Print URL only (useful over SSH)
 
 More providers will be added (e.g. altcode login claude, altcode login altllm).`,
+		Args: cobra.MinimumNArgs(1),
 	}
 
 	var loginNoBrowser bool
