@@ -118,7 +118,7 @@ func TestWelcomeViewUsesCompactLayoutInSmallViewport(t *testing.T) {
 func TestAuthErrorRepromptsForReplacementKey(t *testing.T) {
 	app := New(nil, DefaultTheme, "test", "")
 	app.viewport = viewport.New(80, 20)
-	app.messages = []string{"> hello"}
+	app.messages = []chatMessage{{role: roleUser, content: "hello"}}
 
 	model, _ := app.handleEvent(event.Event{
 		Type:  event.ErrorEvent,
