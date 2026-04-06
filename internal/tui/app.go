@@ -46,6 +46,7 @@ type App struct {
 	vimPendingG bool
 	tools       *toolTree
 	toolStart   time.Time
+	sidebar     *sidebar
 
 	messages         []chatMessage
 	streaming        string
@@ -97,6 +98,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sessionSwitcher: sw,
 		projectRoot:     detectProjectRoot(),
 		tools:           newToolTree(),
+		sidebar:         newSidebar(theme),
 	}
 }
 
@@ -113,8 +115,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		a.viewport = viewport.New(msg.Width, max(1, msg.Height-6))
-		a.mdRenderer = NewMarkdownRenderer(msg.Width - 2)
+		// Split: sidebar gets 25% on wide terminals, hidden on narrow
+		sidebarWidth := 0
+		mainWidth := msg.Width
+		if msg.Width >= 100 {
+			sidebarWidth = msg.Width / 4
+			if sidebarWidth > 30 {
+				sidebarWidth = 30
+			}
+			mainWidth = msg.Width - sidebarWidth
+		}
+		a.viewport = viewport.New(mainWidth, max(1, msg.Height-6))
+		a.mdRenderer = NewMarkdownRenderer(mainWidth - 4)
+		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
 		a.palette.SetWidth(msg.Width)
@@ -433,6 +446,13 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		}
 		a.tools.Done(title, time.Since(a.toolStart))
 		a.activeToolName = ""
+		// Track file changes for sidebar
+		if ev.ToolCall != nil && (ev.ToolCall.Name == "edit" || ev.ToolCall.Name == "write") {
+			path := title
+			if path != "" {
+				a.sidebar.AddFile(path, 1, 0)
+			}
+		}
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.UsageEvent:
@@ -514,11 +534,17 @@ func (a *App) View() string {
 
 	popupView := a.filePopupView()
 
-	body := a.viewport.View()
+	mainBody := a.viewport.View()
 	if a.palette.IsVisible() {
-		body = a.palette.View()
+		mainBody = a.palette.View()
 	} else if a.sessionSwitcher.IsVisible() {
-		body = a.sessionSwitcher.View()
+		mainBody = a.sessionSwitcher.View()
+	}
+
+	// Side-by-side: main content | sidebar (if wide enough)
+	body := mainBody
+	if a.sidebar.width > 0 {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, mainBody, a.sidebar.View())
 	}
 
 	// Rich status bar at the bottom
