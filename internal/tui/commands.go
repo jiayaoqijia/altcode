@@ -73,44 +73,57 @@ func (a *App) handleBuiltinCommand(text string) bool {
 
 // appendInfo adds an info message and refreshes the viewport.
 func (a *App) appendInfo(text string) {
-	a.messages = append(a.messages, text)
+	a.messages = append(a.messages, chatMessage{role: roleInfo, content: text})
 	a.updateViewport()
 }
 
 func builtinHelpText() string {
-	return `Available commands:
-  /help      — show this help
-  /status    — model, session, message count
-  /context   — context size breakdown
-  /model     — show current model
-  /clear     — clear conversation history
-  /tools     — list available tools
-  /sessions  — list recent sessions
-  /memory    — show loaded memories
-  /version   — show altcode version
-  /cost      — cost breakdown per turn
-  /history   — file change history this session
-  /compact   — manually trigger context compaction
-  /diff      — show files changed this session
-  /plan      — enter plan mode
-  /stats     — combined status + cost + history
-  /tasks     — list background tasks
-  /wf-status — show active workflow state
-  /wf-cancel — clear workflow state
-  /wf-pause  — pause running workflows
-  /wf-resume — resume paused workflows
-  /team      — show multi-AI team configuration
-  /undo      — stash changes (git-backed undo)
-  /redo      — restore stashed changes
+	type row struct{ cmd, desc string }
+	commands := []row{
+		{"/help", "show this help"},
+		{"/status", "model, session, tokens"},
+		{"/model", "current model"},
+		{"/clear", "clear conversation"},
+		{"/tools", "list tools"},
+		{"/cost", "cost breakdown"},
+		{"/history", "file changes this session"},
+		{"/diff", "diff of changed files"},
+		{"/compact", "trigger context compaction"},
+		{"/sessions", "list sessions"},
+		{"/memory", "loaded memories"},
+		{"/version", "version info"},
+		{"/stats", "status + cost + history"},
+		{"/tasks", "background tasks"},
+		{"/wf-status", "workflow state"},
+		{"/wf-pause", "pause workflows"},
+		{"/wf-resume", "resume workflows"},
+		{"/wf-cancel", "clear workflow state"},
+		{"/team", "multi-AI team config"},
+		{"/undo", "git-backed undo"},
+		{"/redo", "restore undo"},
+	}
+	keys := []row{
+		{"Enter", "send prompt"},
+		{"Ctrl+J", "newline"},
+		{"Ctrl+K", "command palette"},
+		{"Ctrl+A", "switch sessions"},
+		{"@file", "file completion"},
+		{"Esc", "vim mode"},
+		{"Esc Esc", "quit"},
+	}
 
-Keyboard shortcuts:
-  Enter      — submit prompt
-  Ctrl+J     — insert newline
-  Ctrl+K     — command palette
-  Ctrl+A     — session switcher
-  @file      — file completion popup
-  Esc        — vim mode (j/k/G/gg/ctrl+d/ctrl+u)
-  Esc Esc    — quit`
+	var sb strings.Builder
+	sb.WriteString("```\n") // code block prevents Glamour word-wrapping
+	sb.WriteString("Commands\n")
+	for _, r := range commands {
+		sb.WriteString(fmt.Sprintf("  %-12s %s\n", r.cmd, r.desc))
+	}
+	sb.WriteString("\nShortcuts\n")
+	for _, r := range keys {
+		sb.WriteString(fmt.Sprintf("  %-12s %s\n", r.cmd, r.desc))
+	}
+	sb.WriteString("```")
+	return sb.String()
 }
 
 func (a *App) builtinStatusText() string {
@@ -146,7 +159,7 @@ func (a *App) builtinClear() {
 	if a.engine != nil {
 		a.engine.ClearMessages()
 	}
-	a.messages = append(a.messages, "Conversation cleared.")
+	a.messages = append(a.messages, chatMessage{role: roleInfo, content: "Conversation cleared."})
 	a.updateViewport()
 }
 

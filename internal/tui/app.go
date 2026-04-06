@@ -44,7 +44,7 @@ type App struct {
 	vimMode     bool
 	vimPendingG bool
 
-	messages         []string
+	messages         []chatMessage
 	streaming        string
 	busy             bool
 	thinking         bool
@@ -426,7 +426,7 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		a.activeToolName = ""
 		a.activeToolDetail = ""
 		if ev.ToolResult != nil && ev.ToolResult.Title != "" {
-			a.messages = append(a.messages, "⚙ "+ev.ToolResult.Title)
+			a.messages = append(a.messages, chatMessage{role: roleTool, content: ev.ToolResult.Title})
 		}
 		a.updateViewport()
 		return a, a.waitForEvent()
@@ -449,14 +449,14 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		a.messages = append(a.messages,
-			fmt.Sprintf("[error] %s", ev.Error))
+			chatMessage{role: roleInfo, content: ev.Error, meta: "error"})
 		a.streaming = ""
 		a.busy = false
 		a.updateViewport()
 		return a, nil
 	case event.Done:
 		if a.streaming != "" {
-			a.messages = append(a.messages, a.streaming)
+			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming})
 			a.streaming = ""
 		}
 		a.busy = false
@@ -485,27 +485,7 @@ func (a *App) View() string {
 		Foreground(a.theme.Border).
 		Render(strings.Repeat("─", a.width))
 
-	// Activity indicator below header
-	status := ""
-	if a.busy {
-		if a.thinking && a.thinkingText != "" {
-			status = lipgloss.NewStyle().
-				Foreground(a.theme.Secondary).
-				Italic(true).
-				Render("  ◆ " + a.thinkingText)
-		} else if a.thinking {
-			status = lipgloss.NewStyle().
-				Foreground(a.theme.Secondary).
-				Italic(true).
-				Render("  ◆ thinking...")
-		} else if a.activeToolName != "" {
-			status = a.renderToolActivity(a.activeToolName, a.activeToolDetail)
-		} else {
-			status = lipgloss.NewStyle().
-				Foreground(a.theme.Warning).
-				Render("  ● streaming...")
-		}
-	}
+	// All status is in the bottom bar now — no duplicate activity text here
 
 	inputView := a.input.View()
 	if a.setupProvider != "" {
@@ -539,6 +519,13 @@ func (a *App) View() string {
 	if a.activeToolName != "" {
 		toolActive = a.activeToolName
 	}
+	if toolActive == "" && a.busy {
+		if a.thinking {
+			toolActive = "thinking"
+		} else {
+			toolActive = "streaming"
+		}
+	}
 	statusBar := a.renderStatusBar(statusBarInfo{
 		Model:      model,
 		TokensIn:   a.tokensIn,
@@ -547,8 +534,8 @@ func (a *App) View() string {
 		ToolActive: toolActive,
 	})
 
-	result := fmt.Sprintf("%s\n%s\n%s%s\n%s\n%s",
-		header, sep, body, status, statusBar, inputView)
+	result := fmt.Sprintf("%s\n%s\n%s\n%s\n%s",
+		header, sep, body, statusBar, inputView)
 	if popupView != "" {
 		result += "\n" + popupView
 	}
@@ -558,7 +545,7 @@ func (a *App) View() string {
 func (a *App) submit() tea.Cmd {
 	text := strings.TrimSpace(a.input.Value())
 	a.input.Reset()
-	a.messages = append(a.messages, fmt.Sprintf("> %s", text))
+	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
 
 	if a.handleBuiltinCommand(text) {
@@ -626,19 +613,11 @@ func (a *App) updateViewport() {
 
 	var sb strings.Builder
 	for _, m := range a.messages {
-		if a.mdRenderer != nil {
-			sb.WriteString(a.mdRenderer.Render(m))
-		} else {
-			sb.WriteString(m)
-		}
+		sb.WriteString(a.renderMessage(m))
 		sb.WriteString("\n")
 	}
 	if a.streaming != "" {
-		if a.mdRenderer != nil {
-			sb.WriteString(a.mdRenderer.Render(a.streaming))
-		} else {
-			sb.WriteString(a.streaming)
-		}
+		sb.WriteString(a.renderMessage(chatMessage{role: roleAssistant, content: a.streaming}))
 	}
 	a.viewport.SetContent(sb.String())
 	a.viewport.GotoBottom()
@@ -717,26 +696,13 @@ func (a *App) welcomeView() string {
 		)
 	}
 
+	// Minimal shortcuts — rest is in /help and Ctrl+K palette
 	lines = append(lines,
 		"",
-		titleStyle.Render("How to use"),
-		mutedStyle.Render("• Type a prompt below and press ")+codeStyle.Render("Enter")+mutedStyle.Render(" to send"),
-		mutedStyle.Render("• Press ")+codeStyle.Render("Ctrl+J")+mutedStyle.Render(" for a newline"),
-		mutedStyle.Render("• Press ")+codeStyle.Render("Ctrl+K")+mutedStyle.Render(" for the command palette"),
-		mutedStyle.Render("• Press ")+codeStyle.Render("Ctrl+A")+mutedStyle.Render(" to switch sessions"),
-		mutedStyle.Render("• Use ")+codeStyle.Render("/command")+mutedStyle.Render(" for discovered slash commands"),
-		mutedStyle.Render("• Press ")+codeStyle.Render("Esc")+mutedStyle.Render(" to quit"),
+		codeStyle.Render("Enter")+mutedStyle.Render(" send  ")+
+			codeStyle.Render("Ctrl+K")+mutedStyle.Render(" commands  ")+
+			codeStyle.Render("/help")+mutedStyle.Render(" all shortcuts"),
 	)
-
-	if strings.TrimSpace(a.startupPrompt) == "" {
-		lines = append(lines,
-			"",
-			titleStyle.Render("Try asking"),
-			mutedStyle.Render("• summarize this repository"),
-			mutedStyle.Render("• find where auth is loaded"),
-			mutedStyle.Render("• add a test for the billing route"),
-		)
-	}
 
 	return strings.Join(lines, "\n")
 }
