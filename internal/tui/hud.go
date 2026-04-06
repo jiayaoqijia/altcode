@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -209,4 +210,22 @@ func detectGitInfo() (project, branch string) {
 		branch = strings.TrimSpace(string(out))
 	}
 	return
+}
+
+// detectTerminal returns info about the terminal environment.
+func detectTerminal() string {
+	if os.Getenv("TMUX") != "" {
+		return "tmux"
+	}
+	if os.Getenv("ZELLIJ") != "" {
+		return "zellij"
+	}
+	if os.Getenv("STY") != "" {
+		return "screen"
+	}
+	term := os.Getenv("TERM_PROGRAM")
+	if term != "" {
+		return term
+	}
+	return os.Getenv("TERM")
 }
