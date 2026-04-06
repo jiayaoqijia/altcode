@@ -61,6 +61,10 @@ type App struct {
 	tokensIn         int
 	tokensOut        int
 	costUSD          float64
+	sessionStart     time.Time
+	toolCounts       map[string]int
+	gitProject       string
+	gitBranch        string
 }
 
 // New creates a new App backed by the given engine and theme.
@@ -99,10 +103,13 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		projectRoot:     detectProjectRoot(),
 		tools:           newToolTree(),
 		sidebar:         newSidebar(theme),
+		sessionStart:    time.Now(),
+		toolCounts:      make(map[string]int),
 	}
 }
 
 func (a *App) Init() tea.Cmd {
+	a.gitProject, a.gitBranch = detectGitInfo()
 	return textarea.Blink
 }
 
@@ -445,6 +452,9 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 			title = ev.ToolResult.Title
 		}
 		a.tools.Done(title, time.Since(a.toolStart))
+		if ev.ToolCall != nil && ev.ToolCall.Name != "" {
+			a.toolCounts[ev.ToolCall.Name]++
+		}
 		a.activeToolName = ""
 		// Track file changes for sidebar
 		if ev.ToolCall != nil && (ev.ToolCall.Name == "edit" || ev.ToolCall.Name == "write") {
@@ -563,13 +573,22 @@ func (a *App) View() string {
 			toolActive = "streaming"
 		}
 	}
-	statusBar := a.renderStatusBar(statusBarInfo{
+	info := statusBarInfo{
 		Model:      model,
 		TokensIn:   a.tokensIn,
 		TokensOut:  a.tokensOut,
 		CostUSD:    a.costUSD,
 		ToolActive: toolActive,
-	})
+	}
+	hs := hudState{
+		ContextTokens: a.tokensIn + a.tokensOut,
+		ContextLimit:  128000, // default, TODO: read from model config
+		SessionStart:  a.sessionStart,
+		GitProject:    a.gitProject,
+		GitBranch:     a.gitBranch,
+		ToolCounts:    a.toolCounts,
+	}
+	statusBar := renderHUD(hs, info, a.theme, a.width, a.vimMode)
 
 	result := fmt.Sprintf("%s\n%s\n%s\n%s\n%s",
 		header, sep, body, statusBar, inputView)
