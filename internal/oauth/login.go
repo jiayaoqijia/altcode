@@ -38,6 +38,13 @@ func Login(ctx context.Context, path string, opts LoginOptions) (*AuthJSON, erro
 
 	authURL := BuildAuthURL(pkce, state)
 
+	// Bind the callback server BEFORE printing the URL or opening the browser.
+	// This ensures port 1455 is available; if not, fail fast with a clear error.
+	lis, err := BindCallbackServer()
+	if err != nil {
+		return nil, fmt.Errorf("could not start login server on port %d (another altcode login running?): %w", DefaultPort, err)
+	}
+
 	fmt.Fprintln(opts.Stdout, "altcode login")
 	fmt.Fprintln(opts.Stdout)
 	fmt.Fprintln(opts.Stdout, "Open this URL in a browser if one does not open automatically:")
@@ -49,7 +56,7 @@ func Login(ctx context.Context, path string, opts LoginOptions) (*AuthJSON, erro
 		_ = openBrowser(authURL)
 	}
 
-	cb, err := RunCallbackServer(ctx, state, opts.Timeout)
+	cb, err := WaitForCallback(ctx, lis, state, opts.Timeout)
 	if err != nil {
 		return nil, err
 	}

@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/auth"
@@ -136,15 +137,23 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 		Args: cobra.MinimumNArgs(1),
 	}
 
-	var loginNoBrowser bool
+	var loginNoBrowser, loginDeviceCode bool
 	codexLogin := &cobra.Command{
 		Use:     "codex",
 		Aliases: []string{"chatgpt", "openai"},
-		Short:   "Log in with ChatGPT/Codex subscription (browser OAuth + PKCE)",
+		Short:   "Log in with ChatGPT/Codex subscription",
+		Long: `Two login methods:
+  altcode login codex               Browser OAuth (opens a browser)
+  altcode login codex --no-browser  Print URL only (copy to another device)
+  altcode login codex --device-code Enter a short code on auth.openai.com (best for SSH/headless)`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
 			path := oauth.DefaultAuthFile()
+
+			if loginDeviceCode {
+				return runDeviceCodeLogin(ctx, path)
+			}
 			_, err := oauth.Login(ctx, path, oauth.LoginOptions{
 				OpenBrowser: !loginNoBrowser,
 				Stdout:      os.Stdout,
@@ -153,6 +162,7 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 		},
 	}
 	codexLogin.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not auto-open a browser")
+	codexLogin.Flags().BoolVar(&loginDeviceCode, "device-code", false, "Use device code flow (enter code in browser)")
 	loginRoot.AddCommand(codexLogin)
 	root.AddCommand(loginRoot)
 
@@ -399,6 +409,42 @@ func loadSession(db *store.DB, params *engine.EngineParams, last bool, sessionID
 			params.SessionID = sess.ID
 		}
 	}
+	return nil
+}
+
+func runDeviceCodeLogin(ctx context.Context, path string) error {
+	dc, err := oauth.RequestDeviceCode(ctx)
+	if err != nil {
+		return err
+	}
+
+	fmt.Println("altcode login (device code)")
+	fmt.Println()
+	fmt.Println("1. Open this link in your browser:")
+	fmt.Printf("   \033[94m%s\033[0m\n", dc.VerificationURL)
+	fmt.Println()
+	fmt.Println("2. Enter this code (expires in 15 minutes):")
+	fmt.Printf("   \033[94m%s\033[0m\n", dc.UserCode)
+	fmt.Println()
+	fmt.Println("\033[90mDevice codes are a phishing target. Never share this code.\033[0m")
+	fmt.Println()
+	fmt.Println("Waiting for authorization...")
+
+	td, err := dc.PollForToken(ctx, 15*time.Minute)
+	if err != nil {
+		return err
+	}
+
+	now := time.Now().UTC()
+	auth := &oauth.AuthJSON{
+		AuthMode:    "Chatgpt",
+		Tokens:      td,
+		LastRefresh: &now,
+	}
+	if err := oauth.Save(path, auth); err != nil {
+		return fmt.Errorf("save: %w", err)
+	}
+	fmt.Println("Login successful. Credentials saved to " + path)
 	return nil
 }
 

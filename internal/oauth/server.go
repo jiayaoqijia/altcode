@@ -16,15 +16,27 @@ type CallbackResult struct {
 	Err   error
 }
 
-// RunCallbackServer starts an HTTP listener on 127.0.0.1:1455, waits for
-// the /auth/callback hit, and returns the code + state. Times out after
-// the given duration.
-func RunCallbackServer(ctx context.Context, expectedState string, timeout time.Duration) (*CallbackResult, error) {
+// BindCallbackServer binds the HTTP listener on 127.0.0.1:1455 without
+// starting to serve. Call WaitForCallback to start serving and wait for
+// the OAuth redirect. Splitting bind from serve lets the caller check
+// for port conflicts before printing the auth URL to the user.
+func BindCallbackServer() (net.Listener, error) {
 	addr := fmt.Sprintf("127.0.0.1:%d", DefaultPort)
-	lis, err := net.Listen("tcp", addr)
+	return net.Listen("tcp", addr)
+}
+
+// RunCallbackServer binds + serves in one call (convenience for tests).
+func RunCallbackServer(ctx context.Context, expectedState string, timeout time.Duration) (*CallbackResult, error) {
+	lis, err := BindCallbackServer()
 	if err != nil {
-		return nil, fmt.Errorf("listen %s: %w", addr, err)
+		return nil, err
 	}
+	return WaitForCallback(ctx, lis, expectedState, timeout)
+}
+
+// WaitForCallback starts serving on a pre-bound listener, waits for
+// the /auth/callback hit, and returns the code + state.
+func WaitForCallback(ctx context.Context, lis net.Listener, expectedState string, timeout time.Duration) (*CallbackResult, error) {
 
 	resultCh := make(chan *CallbackResult, 1)
 	mux := http.NewServeMux()
