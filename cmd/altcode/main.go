@@ -326,7 +326,7 @@ func runTUI(params engine.EngineParams) error {
 
 	theme := tui.GetTheme(params.Config.Theme)
 	app := tui.New(eng, theme, Version, auth.MissingCredentialPrompt(params.Config), cmds...)
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
 }

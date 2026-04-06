@@ -59,6 +59,20 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinWorkflowResumeText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
+	case "/workflow":
+		if len(parts) < 2 {
+			a.appendInfo("Usage: /workflow <mode> <prompt>\nModes: interview, plan, ralph\nExample: /workflow ralph fix all tests")
+			return true
+		}
+		mode := parts[1]
+		prompt := strings.Join(parts[2:], " ")
+		if prompt == "" {
+			a.appendInfo("Usage: /workflow " + mode + " <prompt>")
+			return true
+		}
+		a.appendInfo(fmt.Sprintf("Starting workflow: %s — %s", mode, prompt))
+		// Submit as regular prompt with workflow prefix so the model sees it
+		return false // let it fall through to normal submit with the workflow instruction
 	case "/backends":
 		a.appendInfo(a.builtinBackendsText())
 	case "/undo":

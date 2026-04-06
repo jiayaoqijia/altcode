@@ -115,7 +115,27 @@ func (a *App) Init() tea.Cmd {
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		// Always pass mouse events to viewport for scroll wheel support
+		var cmd tea.Cmd
+		a.viewport, cmd = a.viewport.Update(msg)
+		return a, cmd
 	case tea.KeyMsg:
+		// Global scroll keys that work even while busy/typing
+		switch msg.String() {
+		case "ctrl+up":
+			a.viewport.LineUp(3)
+			return a, nil
+		case "ctrl+down":
+			a.viewport.LineDown(3)
+			return a, nil
+		case "pgup":
+			a.viewport.HalfViewUp()
+			return a, nil
+		case "pgdown":
+			a.viewport.HalfViewDown()
+			return a, nil
+		}
 		if model, cmd, handled := a.handleKey(msg); handled {
 			return model, cmd
 		}
@@ -132,7 +152,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			mainWidth = msg.Width - sidebarWidth
 		}
-		a.viewport = viewport.New(mainWidth, max(1, msg.Height-6))
+		// Height: header(1) + sep(1) + body + HUD(2) + input(3) = 7 lines overhead
+		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
 		a.mdRenderer = NewMarkdownRenderer(mainWidth - 4)
 		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
 		a.input.SetWidth(msg.Width - 2)
