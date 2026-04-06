@@ -44,14 +44,19 @@ type App struct {
 	vimMode     bool
 	vimPendingG bool
 
-	messages     []string
-	streaming    string
-	busy         bool
-	thinking     bool
-	thinkingText string
-	cancel       context.CancelFunc
-	events       <-chan event.Event
-	tokenInfo    string
+	messages         []string
+	streaming        string
+	busy             bool
+	thinking         bool
+	thinkingText     string
+	activeToolName   string // tool currently executing
+	activeToolDetail string // e.g. file path
+	cancel           context.CancelFunc
+	events           <-chan event.Event
+	tokenInfo        string
+	tokensIn         int
+	tokensOut        int
+	costUSD          float64
 }
 
 // New creates a new App backed by the given engine and theme.
@@ -408,21 +413,32 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		return a, a.waitForEvent()
 	case event.ToolStart:
 		a.thinking = true
-		name := ""
+		a.activeToolName = ""
+		a.activeToolDetail = ""
 		if ev.ToolCall != nil {
-			name = ev.ToolCall.Name
+			a.activeToolName = ev.ToolCall.Name
 		}
-		a.thinkingText = "using " + name + "..."
+		a.thinkingText = "using " + a.activeToolName + "..."
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.ToolResultEvent:
 		a.thinking = false
+		a.activeToolName = ""
+		a.activeToolDetail = ""
+		if ev.ToolResult != nil && ev.ToolResult.Title != "" {
+			a.messages = append(a.messages, "⚙ "+ev.ToolResult.Title)
+		}
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.UsageEvent:
 		if ev.Usage != nil {
+			a.tokensIn += ev.Usage.InputTokens
+			a.tokensOut += ev.Usage.OutputTokens
 			a.tokenInfo = fmt.Sprintf("tokens: %d in / %d out",
-				ev.Usage.InputTokens, ev.Usage.OutputTokens)
+				a.tokensIn, a.tokensOut)
+		}
+		if a.engine != nil {
+			a.costUSD = a.engine.CostTracker().TotalCost()
 		}
 		return a, a.waitForEvent()
 	case event.ErrorEvent:
@@ -455,18 +471,21 @@ func (a *App) View() string {
 		return "Loading..."
 	}
 
-	header := lipgloss.NewStyle().
+	// Rich header
+	logo := lipgloss.NewStyle().
 		Foreground(a.theme.Primary).
 		Bold(true).
-		Render("altcode") +
-		lipgloss.NewStyle().
-			Foreground(a.theme.Muted).
-			Render("  "+a.headerMeta())
+		Render("⌬ altcode")
+	meta := lipgloss.NewStyle().
+		Foreground(a.theme.Muted).
+		Render("  " + a.headerMeta())
+	header := logo + meta
 
 	sep := lipgloss.NewStyle().
 		Foreground(a.theme.Border).
 		Render(strings.Repeat("─", a.width))
 
+	// Activity indicator below header
 	status := ""
 	if a.busy {
 		if a.thinking && a.thinkingText != "" {
@@ -479,6 +498,8 @@ func (a *App) View() string {
 				Foreground(a.theme.Secondary).
 				Italic(true).
 				Render("  ◆ thinking...")
+		} else if a.activeToolName != "" {
+			status = a.renderToolActivity(a.activeToolName, a.activeToolDetail)
 		} else {
 			status = lipgloss.NewStyle().
 				Foreground(a.theme.Warning).
@@ -509,8 +530,25 @@ func (a *App) View() string {
 		body = a.sessionSwitcher.View()
 	}
 
+	// Rich status bar at the bottom
+	model := ""
+	if a.engine != nil {
+		model = a.engine.Config().Model
+	}
+	toolActive := ""
+	if a.activeToolName != "" {
+		toolActive = a.activeToolName
+	}
+	statusBar := a.renderStatusBar(statusBarInfo{
+		Model:      model,
+		TokensIn:   a.tokensIn,
+		TokensOut:  a.tokensOut,
+		CostUSD:    a.costUSD,
+		ToolActive: toolActive,
+	})
+
 	result := fmt.Sprintf("%s\n%s\n%s%s\n%s\n%s",
-		header, sep, body, status, sep, inputView)
+		header, sep, body, status, statusBar, inputView)
 	if popupView != "" {
 		result += "\n" + popupView
 	}

@@ -14,6 +14,9 @@ type Theme struct {
 	Background lipgloss.Color
 	Foreground lipgloss.Color
 	Border     lipgloss.Color
+	HeaderBg   lipgloss.Color // status bar background
+	DiffAdd    lipgloss.Color // diff added lines
+	DiffDel    lipgloss.Color // diff removed lines
 }
 
 // DefaultTheme is a dark theme with purple accents.
@@ -28,6 +31,9 @@ var DefaultTheme = Theme{
 	Background: lipgloss.Color(""),
 	Foreground: lipgloss.Color(""),
 	Border:     lipgloss.Color("#374151"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // CatppuccinMocha is the Catppuccin Mocha palette.
@@ -42,6 +48,9 @@ var CatppuccinMocha = Theme{
 	Background: lipgloss.Color("#1E1E2E"),
 	Foreground: lipgloss.Color("#CDD6F4"),
 	Border:     lipgloss.Color("#313244"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // Dracula is the Dracula color scheme.
@@ -56,6 +65,9 @@ var Dracula = Theme{
 	Background: lipgloss.Color("#282A36"),
 	Foreground: lipgloss.Color("#F8F8F2"),
 	Border:     lipgloss.Color("#44475A"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // Nord is the Nord color scheme.
@@ -70,6 +82,9 @@ var Nord = Theme{
 	Background: lipgloss.Color("#2E3440"),
 	Foreground: lipgloss.Color("#ECEFF4"),
 	Border:     lipgloss.Color("#3B4252"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // TokyoNight is the Tokyo Night color scheme.
@@ -84,6 +99,9 @@ var TokyoNight = Theme{
 	Background: lipgloss.Color("#1A1B26"),
 	Foreground: lipgloss.Color("#C0CAF5"),
 	Border:     lipgloss.Color("#292E42"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // SolarizedDark is the Solarized Dark color scheme.
@@ -98,6 +116,9 @@ var SolarizedDark = Theme{
 	Background: lipgloss.Color("#002B36"),
 	Foreground: lipgloss.Color("#839496"),
 	Border:     lipgloss.Color("#073642"),
+	HeaderBg:   lipgloss.Color("#1A1E26"),
+	DiffAdd:    lipgloss.Color("#10B981"),
+	DiffDel:    lipgloss.Color("#EF4444"),
 }
 
 // Themes maps theme names to their definitions.
