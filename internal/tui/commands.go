@@ -7,6 +7,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/workflow"
 )
 
@@ -157,40 +158,79 @@ func (a *App) builtinStatusText() string {
 }
 
 func (a *App) builtinContextText() string {
-	var sb strings.Builder
-	sb.WriteString("Context breakdown:\n")
-	msgCount := a.engineMessageCount()
-	sb.WriteString(fmt.Sprintf("  Messages:       %d\n", msgCount))
-	sb.WriteString(fmt.Sprintf("  Instructions:   %d\n", a.engineInstructionCount()))
-	sb.WriteString(fmt.Sprintf("  Memories:       %d\n", a.engineMemoryCount()))
-
-	// Token estimate
-	if a.engine != nil {
-		tokens := compact.EstimateTokens(a.engine.Messages())
-		limit := 128000 // default context window
-		pct := 0
-		if limit > 0 {
-			pct = tokens * 100 / limit
-		}
-		sb.WriteString(fmt.Sprintf("  Tokens (est):   %s / %s (%d%%)\n",
-			formatTokens(tokens), formatTokens(limit), pct))
-
-		// Visual bar
-		barWidth := 30
-		filled := pct * barWidth / 100
-		if filled > barWidth {
-			filled = barWidth
-		}
-		bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-		status := "OK"
-		if pct >= 90 {
-			status = "CRITICAL — compact recommended"
-		} else if pct >= 70 {
-			status = "HIGH — auto-compact soon"
-		}
-		sb.WriteString(fmt.Sprintf("  Window:         [%s] %s", bar, status))
+	if a.engine == nil {
+		return "No engine available."
 	}
+	var sb strings.Builder
+	sb.WriteString("```\n")
+	sb.WriteString("Context Window\n\n")
+
+	// Per-section token breakdown
+	msgs := a.engine.Messages()
+	var systemTokens, userTokens, assistantTokens, toolTokens int
+	for _, m := range msgs {
+		t := estimateMessageTokens(m)
+		switch m.Role {
+		case "system":
+			systemTokens += t
+		case "user":
+			userTokens += t
+		case "assistant":
+			assistantTokens += t
+		case "tool":
+			toolTokens += t
+		}
+	}
+
+	limit := a.engine.ContextWindowSize()
+	totalTokens := compact.EstimateTokens(msgs)
+	pct := 0
+	if limit > 0 {
+		pct = totalTokens * 100 / limit
+	}
+
+	// Visual bar
+	barWidth := 30
+	filled := pct * barWidth / 100
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	status := "OK"
+	if pct >= 90 {
+		status = "CRITICAL"
+	} else if pct >= 70 {
+		status = "HIGH"
+	}
+
+	sb.WriteString(fmt.Sprintf("  [%s] %d%% %s\n\n", bar, pct, status))
+	sb.WriteString(fmt.Sprintf("  Total:        %s / %s\n", formatTokens(totalTokens), formatTokens(limit)))
+	sb.WriteString(fmt.Sprintf("  System:       %s  (persona + tools + instructions)\n", formatTokens(systemTokens)))
+	sb.WriteString(fmt.Sprintf("  User:         %s  (%d messages)\n", formatTokens(userTokens), countRole(msgs, "user")))
+	sb.WriteString(fmt.Sprintf("  Assistant:    %s  (%d messages)\n", formatTokens(assistantTokens), countRole(msgs, "assistant")))
+	sb.WriteString(fmt.Sprintf("  Tool results: %s  (%d results)\n", formatTokens(toolTokens), countRole(msgs, "tool")))
+	sb.WriteString(fmt.Sprintf("  Instructions: %d sections\n", a.engineInstructionCount()))
+	sb.WriteString(fmt.Sprintf("  Memories:     %d loaded\n", a.engineMemoryCount()))
+	sb.WriteString("```")
 	return sb.String()
+}
+
+func estimateMessageTokens(m provider.Message) int {
+	t := len(m.Content) / 4
+	for _, p := range m.Parts {
+		t += len(p.Text)/4 + len(p.Content)/4
+	}
+	return t
+}
+
+func countRole(msgs []provider.Message, role string) int {
+	n := 0
+	for _, m := range msgs {
+		if m.Role == role {
+			n++
+		}
+	}
+	return n
 }
 
 func (a *App) builtinModelText() string {
@@ -440,13 +480,20 @@ func (a *App) builtinWorkflowResumeText() string {
 func (a *App) builtinAgentsText() string {
 	var sb strings.Builder
 	sb.WriteString("```\n")
-	sb.WriteString("Agent Management\n")
-	sb.WriteString(fmt.Sprintf("  Skills discovered:  %d\n", len(a.engine.Skills())))
-	sb.WriteString(fmt.Sprintf("  Session tokens:     %s in / %s out\n",
+	sb.WriteString("Agent & Session Dashboard\n\n")
+
+	// Session info
+	sb.WriteString(fmt.Sprintf("  Model:          %s\n", a.activeModel()))
+	sb.WriteString(fmt.Sprintf("  Session:        %s\n", formatDuration(time.Since(a.sessionStart))))
+	sb.WriteString(fmt.Sprintf("  Tokens:         %s in / %s out\n",
 		formatTokens(a.tokensIn), formatTokens(a.tokensOut)))
+	if a.costUSD > 0 {
+		sb.WriteString(fmt.Sprintf("  Cost:           $%.4f\n", a.costUSD))
+	}
+
 	// Context window
 	tokens := compact.EstimateTokens(a.engine.Messages())
-	limit := 128000
+	limit := a.engine.ContextWindowSize()
 	pct := 0
 	if limit > 0 {
 		pct = tokens * 100 / limit
@@ -457,8 +504,26 @@ func (a *App) builtinAgentsText() string {
 		filled = barWidth
 	}
 	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
-	sb.WriteString(fmt.Sprintf("  Context window:     [%s] %d%%\n", bar, pct))
-	sb.WriteString(fmt.Sprintf("  Tool calls:         %d this session\n", a.totalToolCalls()))
+	sb.WriteString(fmt.Sprintf("  Context:        [%s] %d%% (%s/%s)\n", bar, pct,
+		formatTokens(tokens), formatTokens(limit)))
+
+	// Tool usage
+	sb.WriteString(fmt.Sprintf("\n  Tool calls:     %d\n", a.totalToolCalls()))
+	if len(a.toolCounts) > 0 {
+		for name, count := range a.toolCounts {
+			sb.WriteString(fmt.Sprintf("    %-14s ×%d\n", name, count))
+		}
+	}
+
+	// Skills
+	sb.WriteString(fmt.Sprintf("\n  Skills:         %d discovered\n", len(a.engine.Skills())))
+
+	// Workflow state
+	wfStatus := workflow.StatusText(a.projectRoot)
+	if wfStatus != "No active workflows." {
+		sb.WriteString(fmt.Sprintf("\n  Workflows:\n    %s\n", wfStatus))
+	}
+
 	sb.WriteString("```")
 	return sb.String()
 }

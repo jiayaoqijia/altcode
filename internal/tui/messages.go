@@ -61,14 +61,13 @@ func (a *App) renderMessage(msg chatMessage) string {
 		icon = "ℹ"
 	}
 
-	// Meta line (model name, duration, tool name)
+	// Meta line below message (model · duration · token count)
 	metaLine := ""
 	if msg.meta != "" {
-		metaLine = lipgloss.NewStyle().
+		metaLine = "\n" + lipgloss.NewStyle().
 			Foreground(a.theme.Muted).
 			Italic(true).
-			Render(msg.meta)
-		metaLine = "\n" + metaLine
+			Render("╰ "+msg.meta)
 	}
 
 	// Icon + content
