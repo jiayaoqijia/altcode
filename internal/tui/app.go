@@ -38,6 +38,7 @@ type App struct {
 	palette         *Palette
 	sessionSwitcher *SessionSwitcher
 	projectRoot     string
+	mdRenderer      *MarkdownRenderer
 
 	filePopup   filePopup
 	vimMode     bool
@@ -104,6 +105,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.viewport = viewport.New(msg.Width, max(1, msg.Height-6))
+		a.mdRenderer = NewMarkdownRenderer(msg.Width - 2)
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
 		a.palette.SetWidth(msg.Width)
@@ -586,11 +588,19 @@ func (a *App) updateViewport() {
 
 	var sb strings.Builder
 	for _, m := range a.messages {
-		sb.WriteString(m)
-		sb.WriteString("\n\n")
+		if a.mdRenderer != nil {
+			sb.WriteString(a.mdRenderer.Render(m))
+		} else {
+			sb.WriteString(m)
+		}
+		sb.WriteString("\n")
 	}
 	if a.streaming != "" {
-		sb.WriteString(a.streaming)
+		if a.mdRenderer != nil {
+			sb.WriteString(a.mdRenderer.Render(a.streaming))
+		} else {
+			sb.WriteString(a.streaming)
+		}
 	}
 	a.viewport.SetContent(sb.String())
 	a.viewport.GotoBottom()
