@@ -123,15 +123,23 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
 	workflowCmd.Flags().IntVar(&wfMaxIter, "max-iter", 10, "Max iterations for ralph mode")
 	root.AddCommand(workflowCmd)
 
-	var loginNoBrowser bool
-	loginCmd := &cobra.Command{
+	// Provider-specific login commands under "altcode login <provider>"
+	loginRoot := &cobra.Command{
 		Use:   "login",
-		Short: "Log in with your ChatGPT subscription (browser OAuth + PKCE)",
-		Long: `Authenticate with OpenAI using the ChatGPT (Plus/Pro/Team/Enterprise)
-subscription via browser OAuth. Stores credentials in ~/.altcode/auth.json.
+		Short: "Log in with a provider subscription",
+		Long: `Log in to use a provider's subscription directly.
 
-  altcode login              Open browser and complete login
-  altcode login --no-browser Print URL only (useful over SSH)`,
+  altcode login codex              ChatGPT subscription (browser OAuth)
+  altcode login codex --no-browser Print URL only (useful over SSH)
+
+More providers will be added (e.g. altcode login claude, altcode login altllm).`,
+	}
+
+	var loginNoBrowser bool
+	codexLogin := &cobra.Command{
+		Use:     "codex",
+		Aliases: []string{"chatgpt", "openai"},
+		Short:   "Log in with ChatGPT/Codex subscription (browser OAuth + PKCE)",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 			defer stop()
@@ -143,22 +151,40 @@ subscription via browser OAuth. Stores credentials in ~/.altcode/auth.json.
 			return err
 		},
 	}
-	loginCmd.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not auto-open a browser; print the URL only")
-	root.AddCommand(loginCmd)
+	codexLogin.Flags().BoolVar(&loginNoBrowser, "no-browser", false, "Do not auto-open a browser")
+	loginRoot.AddCommand(codexLogin)
+	root.AddCommand(loginRoot)
 
-	logoutCmd := &cobra.Command{
+	logoutRoot := &cobra.Command{
 		Use:   "logout",
-		Short: "Remove stored altcode login credentials",
+		Short: "Remove stored login credentials",
+		Long: `Remove stored credentials for a provider.
+
+  altcode logout codex    Remove ChatGPT/Codex credentials
+  altcode logout          Remove all altcode credentials`,
+	}
+	codexLogout := &cobra.Command{
+		Use:     "codex",
+		Aliases: []string{"chatgpt", "openai"},
+		Short:   "Remove ChatGPT/Codex credentials",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			path := oauth.DefaultAuthFile()
-			if err := oauth.Logout(path); err != nil {
+			if err := oauth.Logout(oauth.DefaultAuthFile()); err != nil {
 				return err
 			}
-			fmt.Println("Logged out.")
+			fmt.Println("Codex credentials removed.")
 			return nil
 		},
 	}
-	root.AddCommand(logoutCmd)
+	logoutRoot.AddCommand(codexLogout)
+	logoutRoot.RunE = func(cmd *cobra.Command, args []string) error {
+		// No subcommand → remove all
+		if err := oauth.Logout(oauth.DefaultAuthFile()); err != nil {
+			return err
+		}
+		fmt.Println("All credentials removed.")
+		return nil
+	}
+	root.AddCommand(logoutRoot)
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
