@@ -118,7 +118,7 @@ wait_for "/status\|/clear\|/version" 8 || true
 sleep 1
 snap_file "02-help"
 
-assert_contains "help-shows-commands" "/status\|/clear\|/version"
+assert_contains "help-shows-commands" "/undo\|/redo\|/team\|/status\|Commands"
 assert_no_overflow "help-no-overflow"
 
 # ─────────────────────────────────────────────

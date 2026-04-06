@@ -126,11 +126,21 @@ func (p *Palette) View() string {
 		return ""
 	}
 
+	// Capped width — never wider than 72, centered in viewport
+	boxWidth := p.width - 8
+	if boxWidth > 72 {
+		boxWidth = 72
+	}
+	if boxWidth < 32 {
+		boxWidth = 32
+	}
+
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(p.theme.Primary).
+		Background(p.theme.HeaderBg).
 		Padding(0, 1).
-		Width(p.width - 4)
+		Width(boxWidth)
 
 	var sb strings.Builder
 	sb.WriteString(p.input.View())
@@ -143,13 +153,15 @@ func (p *Palette) View() string {
 		nameStyle := lipgloss.NewStyle().Foreground(p.theme.Primary).Bold(true)
 		descStyle := lipgloss.NewStyle().Foreground(p.theme.Muted)
 		if i == p.cursor {
-			nameStyle = nameStyle.Background(p.theme.Border)
-			descStyle = descStyle.Background(p.theme.Border)
+			nameStyle = nameStyle.Background(p.theme.Primary).Foreground(lipgloss.Color("#000000"))
+			descStyle = descStyle.Background(p.theme.Primary).Foreground(lipgloss.Color("#000000"))
 		}
 		name := nameStyle.Render(cmd.Name)
 		desc := descStyle.Render("  " + cmd.Description)
 		sb.WriteString(name + desc + "\n")
 	}
 
-	return border.Render(sb.String())
+	box := border.Render(sb.String())
+	// Center the palette box in the available width
+	return lipgloss.PlaceHorizontal(p.width, lipgloss.Center, box)
 }

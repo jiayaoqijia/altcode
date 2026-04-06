@@ -16,8 +16,11 @@ type MarkdownRenderer struct {
 
 // NewMarkdownRenderer creates a renderer for the given terminal width.
 func NewMarkdownRenderer(width int) *MarkdownRenderer {
+	// Use explicit dark style — WithAutoStyle() sends OSC 11 to query
+	// the terminal background color, and the response can leak into the
+	// viewport as "]11;rgb:1e1e/1e1e/1e1e\" on some terminals.
 	r, _ := glamour.NewTermRenderer(
-		glamour.WithAutoStyle(),
+		glamour.WithStandardStyle("dark"),
 		glamour.WithWordWrap(width),
 	)
 	return &MarkdownRenderer{

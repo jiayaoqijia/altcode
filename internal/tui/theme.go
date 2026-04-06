@@ -19,21 +19,21 @@ type Theme struct {
 	DiffDel    lipgloss.Color // diff removed lines
 }
 
-// DefaultTheme is a dark theme with purple accents.
+// DefaultTheme — warm amber/teal palette (distinctive, not generic AI purple).
 var DefaultTheme = Theme{
 	Name:       "default",
-	Primary:    lipgloss.Color("#7C3AED"),
-	Secondary:  lipgloss.Color("#06B6D4"),
-	Error:      lipgloss.Color("#EF4444"),
-	Warning:    lipgloss.Color("#F59E0B"),
-	Success:    lipgloss.Color("#10B981"),
-	Muted:      lipgloss.Color("#6B7280"),
-	Background: lipgloss.Color(""),
-	Foreground: lipgloss.Color(""),
-	Border:     lipgloss.Color("#374151"),
-	HeaderBg:   lipgloss.Color("#1A1E26"),
-	DiffAdd:    lipgloss.Color("#10B981"),
-	DiffDel:    lipgloss.Color("#EF4444"),
+	Primary:    lipgloss.Color("#E0A458"), // warm amber — distinctive identity
+	Secondary:  lipgloss.Color("#5BA8A0"), // teal — calm contrast
+	Error:      lipgloss.Color("#E06C75"),
+	Warning:    lipgloss.Color("#D19A66"),
+	Success:    lipgloss.Color("#98C379"),
+	Muted:      lipgloss.Color("#5C6370"),
+	Background: lipgloss.Color("#1E2127"),
+	Foreground: lipgloss.Color("#ABB2BF"),
+	Border:     lipgloss.Color("#3E4451"),
+	HeaderBg:   lipgloss.Color("#1A1D23"),
+	DiffAdd:    lipgloss.Color("#98C379"),
+	DiffDel:    lipgloss.Color("#E06C75"),
 }
 
 // CatppuccinMocha is the Catppuccin Mocha palette.
