@@ -105,10 +105,11 @@ type Engine struct {
 	messages     []provider.Message
 	instructions []config.Instruction
 	skills       []Skill
-	totalTokens  int // running token count
-	cost         *cost.Tracker
-	journal      *history.Journal
-	tokenBudget  *TokenBudget
+	totalTokens        int // running token count
+	cost               *cost.Tracker
+	journal            *history.Journal
+	tokenBudget        *TokenBudget
+	cachedContextWindow int // cached from /v1/models API, 0 = not fetched
 }
 
 // New creates an Engine from the given parameters.
@@ -825,24 +826,37 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 	e.messages = compacted
 }
 
-// contextWindowSize returns the model's context window in estimated tokens.
-// Checks config first, then falls back to model-based defaults.
+// contextWindowSize returns the model's context window in tokens.
+// Priority: config override > cached API query > model-name heuristic.
 func (e *Engine) contextWindowSize() int {
 	if e.cfg.ContextWindow > 0 {
 		return e.cfg.ContextWindow
 	}
+
+	// Try to get from provider API (cached after first call)
+	if e.cachedContextWindow > 0 {
+		return e.cachedContextWindow
+	}
+
+	// Query provider's /v1/models endpoint (skip for localhost test servers)
+	provName, _ := parseModel(e.cfg.Model)
+	if pcfg, ok := e.cfg.Provider[provName]; ok && !strings.Contains(pcfg.BaseURL, "127.0.0.1") {
+		info := provider.FetchModelInfo(pcfg.BaseURL, pcfg.APIKey, e.model)
+		if info != nil && info.ContextSize() > 0 {
+			e.cachedContextWindow = info.ContextSize()
+			return e.cachedContextWindow
+		}
+	}
+
+	// Fallback: model-name heuristic
 	model := strings.ToLower(e.model)
 	switch {
 	case strings.Contains(model, "gpt-5"):
-		return 1000000 // GPT-5.4 has 1M context
+		return 1000000
 	case strings.Contains(model, "claude"):
 		return 200000
 	case strings.Contains(model, "deepseek"):
 		return 64000
-	case strings.Contains(model, "gpt-4"):
-		return 128000
-	case strings.Contains(model, "kimi"):
-		return 128000
 	default:
 		return 128000
 	}
