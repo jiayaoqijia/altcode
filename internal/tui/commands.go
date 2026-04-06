@@ -58,6 +58,8 @@ func (a *App) handleBuiltinCommand(text string) bool {
 		a.appendInfo(a.builtinWorkflowPauseText())
 	case "/wf-resume":
 		a.appendInfo(a.builtinWorkflowResumeText())
+	case "/agents":
+		a.appendInfo(a.builtinAgentsText())
 	case "/team":
 		a.appendInfo(a.builtinTeamText())
 	case "/workflow":
@@ -109,6 +111,7 @@ func builtinHelpText() string {
 		{"/version", "version info"},
 		{"/stats", "status + cost + history"},
 		{"/tasks", "background tasks"},
+		{"/agents", "agent + context overview"},
 		{"/wf-status", "workflow state"},
 		{"/wf-pause", "pause workflows"},
 		{"/wf-resume", "resume workflows"},
@@ -429,6 +432,40 @@ func (a *App) builtinWorkflowResumeText() string {
 		return "No paused workflows to resume."
 	}
 	return fmt.Sprintf("Resumed %d workflow(s).", n)
+}
+
+func (a *App) builtinAgentsText() string {
+	var sb strings.Builder
+	sb.WriteString("```\n")
+	sb.WriteString("Agent Management\n")
+	sb.WriteString(fmt.Sprintf("  Skills discovered:  %d\n", len(a.engine.Skills())))
+	sb.WriteString(fmt.Sprintf("  Session tokens:     %s in / %s out\n",
+		formatTokens(a.tokensIn), formatTokens(a.tokensOut)))
+	// Context window
+	tokens := compact.EstimateTokens(a.engine.Messages())
+	limit := 128000
+	pct := 0
+	if limit > 0 {
+		pct = tokens * 100 / limit
+	}
+	barWidth := 20
+	filled := pct * barWidth / 100
+	if filled > barWidth {
+		filled = barWidth
+	}
+	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	sb.WriteString(fmt.Sprintf("  Context window:     [%s] %d%%\n", bar, pct))
+	sb.WriteString(fmt.Sprintf("  Tool calls:         %d this session\n", a.totalToolCalls()))
+	sb.WriteString("```")
+	return sb.String()
+}
+
+func (a *App) totalToolCalls() int {
+	total := 0
+	for _, n := range a.toolCounts {
+		total += n
+	}
+	return total
 }
 
 func (a *App) builtinTeamText() string {
