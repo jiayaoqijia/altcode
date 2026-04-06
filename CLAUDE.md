@@ -60,6 +60,22 @@ GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s
 **If ANY step fails, fix it before committing.** Do not push broken code
 and hope CI catches it — CI runs on 3 platforms and failures block everyone.
 
+### TUI Testing Rule (HARD RULE)
+
+**Every TUI change must be tested visually, not just with unit tests.**
+Unit tests only verify data flow. They miss rendering bugs (word wrap, overflow,
+alignment, color, viewport scrolling) that only appear in a real terminal.
+
+How to test TUI changes:
+1. Use `script -qc './dist/altcode' /dev/null` to capture TTY output
+2. Use `tmux` to run altcode in a controlled terminal size: `tmux new-session -x 80 -y 24 ./dist/altcode`
+3. For automated TUI testing, use `expect` or `go-expect` to script terminal interactions
+4. Always test at small viewport sizes (80x24) — most rendering bugs surface there
+5. Record the terminal output and check alignment by eye or with a snapshot comparison
+
+If a TUI change passes unit tests but breaks visual rendering, the unit tests
+are insufficient. Add a visual recording to the PR description.
+
 Common CI failures and how to avoid them:
 - `found packages internal (bench_test.go) and main (main.go)` → model-generated `main.go` in internal/. Delete it.
 - `fmt.Println arg list ends with redundant newline` → remove `\n` from Println.
