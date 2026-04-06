@@ -826,24 +826,25 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 }
 
 // contextWindowSize returns the model's context window in estimated tokens.
+// Checks config first, then falls back to model-based defaults.
 func (e *Engine) contextWindowSize() int {
+	if e.cfg.ContextWindow > 0 {
+		return e.cfg.ContextWindow
+	}
 	model := strings.ToLower(e.model)
 	switch {
-	case strings.Contains(model, "gpt-5"), strings.Contains(model, "gpt-4"):
-		return 128000
 	case strings.Contains(model, "claude"):
 		return 200000
 	case strings.Contains(model, "deepseek"):
 		return 64000
-	case strings.Contains(model, "altllm"):
-		return 128000
-	case strings.Contains(model, "qwen"), strings.Contains(model, "kimi"):
-		return 128000
-	case strings.Contains(model, "glm"), strings.Contains(model, "minimax"):
-		return 128000
 	default:
 		return 128000
 	}
+}
+
+// ContextWindowSize exposes the context window size for TUI/HUD use.
+func (e *Engine) ContextWindowSize() int {
+	return e.contextWindowSize()
 }
 
 func (e *Engine) maybeCompact(ctx context.Context) {

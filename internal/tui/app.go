@@ -512,7 +512,19 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		return a, nil
 	case event.Done:
 		if a.streaming != "" {
-			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming})
+			// Add response time + model info (like OpenCode)
+			meta := ""
+			if a.engine != nil {
+				elapsed := time.Since(a.toolStart)
+				if elapsed > 100*time.Millisecond {
+					model := a.engine.Config().Model
+					if i := strings.LastIndex(model, "/"); i >= 0 {
+						model = model[i+1:]
+					}
+					meta = fmt.Sprintf("%s · %dms", model, elapsed.Milliseconds())
+				}
+			}
+			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming, meta: meta})
 			a.streaming = ""
 		}
 		// Append tool tree as a tool message if there were tool calls

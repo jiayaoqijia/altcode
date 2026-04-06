@@ -315,12 +315,15 @@ func (a *App) builtinCompactText() string {
 	if a.engine == nil {
 		return "No engine available."
 	}
-	before := a.engineMessageCount()
+	beforeMsgs := a.engineMessageCount()
+	beforeTokens := compact.EstimateTokens(a.engine.Messages())
 	a.engine.Compact()
-	after := a.engineMessageCount()
+	afterMsgs := a.engineMessageCount()
+	afterTokens := compact.EstimateTokens(a.engine.Messages())
 	return fmt.Sprintf(
-		"Compaction complete: %d messages (removed %d stale tool results).",
-		after, before-after)
+		"Compaction complete:\n  Messages: %d → %d (-%d)\n  Tokens:   %s → %s (-%s)",
+		beforeMsgs, afterMsgs, beforeMsgs-afterMsgs,
+		formatTokens(beforeTokens), formatTokens(afterTokens), formatTokens(beforeTokens-afterTokens))
 }
 
 func (a *App) builtinDiffText() string {

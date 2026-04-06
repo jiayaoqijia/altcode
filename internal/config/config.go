@@ -11,14 +11,16 @@ const DefaultModel = "anthropic/claude-sonnet-4-20250514"
 
 // Config holds the full application configuration.
 type Config struct {
-	Model      string                         `json:"model"`
-	Provider   map[string]ProviderConfig      `json:"provider"`
-	Permission []PermissionRule               `json:"permission"`
-	MCP        map[string]MCPServerConfig     `json:"mcp"`
-	Theme      string                         `json:"theme"`
-	Agent      map[string]AgentConfig         `json:"agent"`
-	Hooks      map[string][]HookMatcherConfig `json:"hooks"`
-	Team       *TeamConfig                    `json:"team,omitempty"`
+	Model            string                         `json:"model"`
+	ContextWindow    int                            `json:"context_window,omitempty"`    // override context window size
+	CompactThreshold int                            `json:"compact_threshold,omitempty"` // token count to trigger auto-compact
+	Provider         map[string]ProviderConfig      `json:"provider"`
+	Permission       []PermissionRule               `json:"permission"`
+	MCP              map[string]MCPServerConfig     `json:"mcp"`
+	Theme            string                         `json:"theme"`
+	Agent            map[string]AgentConfig         `json:"agent"`
+	Hooks            map[string][]HookMatcherConfig `json:"hooks"`
+	Team             *TeamConfig                    `json:"team,omitempty"`
 }
 
 // TeamConfig defines a multi-AI orchestration team.
