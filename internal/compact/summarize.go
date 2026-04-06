@@ -58,25 +58,36 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 	copy(summaryMessages, old)
 	summaryMessages[len(old)] = provider.TextMessage("user", SummarizationPrompt)
 
-	// Call the model to produce the summary
-	stream, err := s.provider.Stream(ctx, &provider.Request{
-		Model:     s.model,
-		Messages:  summaryMessages,
-		MaxTokens: 2048,
-	})
-	if err != nil {
-		return messages, fmt.Errorf("compact stream: %w", err)
-	}
-
+	// Call the model to produce the summary — retry with trimming on overflow
 	var summary strings.Builder
-	for ev := range stream {
-		if ev.Type == provider.StreamTextDelta {
-			summary.WriteString(ev.Delta)
+	maxRetries := 3
+	for attempt := 0; attempt < maxRetries; attempt++ {
+		summary.Reset()
+		stream, err := s.provider.Stream(ctx, &provider.Request{
+			Model:     s.model,
+			Messages:  summaryMessages,
+			MaxTokens: 2048,
+		})
+		if err != nil {
+			// If context overflow, trim oldest messages and retry
+			if isOverflow(err.Error()) && len(summaryMessages) > 4 {
+				summaryMessages = trimOldest(summaryMessages, len(summaryMessages)/3)
+				continue
+			}
+			return messages, fmt.Errorf("compact stream: %w", err)
+		}
+		for ev := range stream {
+			if ev.Type == provider.StreamTextDelta {
+				summary.WriteString(ev.Delta)
+			}
+		}
+		if summary.Len() > 0 {
+			break
 		}
 	}
 
 	if summary.Len() == 0 {
-		return messages, fmt.Errorf("compact produced empty summary")
+		return messages, fmt.Errorf("compact produced empty summary after %d attempts", maxRetries)
 	}
 
 	// Build compacted history:
@@ -96,6 +107,24 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 	compacted = append(compacted, recent...)
 
 	return compacted, nil
+}
+
+// isOverflow checks if an error indicates context length exceeded.
+func isOverflow(msg string) bool {
+	lower := strings.ToLower(msg)
+	return strings.Contains(lower, "context_length") ||
+		strings.Contains(lower, "context length") ||
+		strings.Contains(lower, "too many tokens") ||
+		strings.Contains(lower, "token limit") ||
+		strings.Contains(lower, "request too large")
+}
+
+// trimOldest removes the first n messages (preserving the last ones).
+func trimOldest(messages []provider.Message, n int) []provider.Message {
+	if n >= len(messages)-1 {
+		n = len(messages) / 2
+	}
+	return messages[n:]
 }
 
 // EstimateTokens gives a rough token count for the message list.

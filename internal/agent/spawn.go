@@ -7,16 +7,46 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/provider"
 )
 
+// ForkMode controls how much parent history a subagent inherits.
+type ForkMode int
+
+const (
+	// ForkFresh creates a clean child with no parent history (default).
+	ForkFresh ForkMode = iota
+	// ForkFullHistory gives the child the complete parent conversation.
+	ForkFullHistory
+	// ForkLastNTurns gives the child the last N user turns from the parent.
+	ForkLastNTurns
+)
+
+// SpawnOptions configures how a subagent is created.
+type SpawnOptions struct {
+	ForkMode  ForkMode
+	ForkTurns int // for ForkLastNTurns — how many recent turns to include
+	Mailbox   *Mailbox // optional shared mailbox for inter-agent comms
+}
+
 // Spawn creates a child engine with the agent's restrictions and runs it.
-// The child has its own message history, restricted tools, and optional
-// model override. It returns an event channel just like Engine.Run.
+// Supports history forking so subagents can inherit parent context.
 func Spawn(
 	ctx context.Context,
 	parent *engine.Engine,
 	ag *Agent,
 	input string,
+) <-chan event.Event {
+	return SpawnWithOptions(ctx, parent, ag, input, SpawnOptions{})
+}
+
+// SpawnWithOptions creates a child engine with configurable fork mode.
+func SpawnWithOptions(
+	ctx context.Context,
+	parent *engine.Engine,
+	ag *Agent,
+	input string,
+	opts SpawnOptions,
 ) <-chan event.Event {
 	childCfg := *parent.Config()
 	resolveModel(&childCfg, ag.Model)
@@ -31,10 +61,33 @@ func Spawn(
 		tools = tools.Subset(ag.Tools)
 	}
 
+	// History forking: inherit parent messages based on fork mode
+	var messages []provider.Message
+	switch opts.ForkMode {
+	case ForkFullHistory:
+		src := parent.Messages()
+		messages = make([]provider.Message, len(src))
+		copy(messages, src)
+		// Inject forked-context message
+		messages = append(messages, provider.TextMessage("user",
+			"You are a newly spawned agent. The prior conversation was forked from your parent. Treat the next message as your new task."))
+	case ForkLastNTurns:
+		src := parent.Messages()
+		n := opts.ForkTurns * 2 // approximate: each turn = user + assistant
+		if n > len(src) {
+			n = len(src)
+		}
+		messages = make([]provider.Message, n)
+		copy(messages, src[len(src)-n:])
+	default:
+		// ForkFresh — no history
+	}
+
 	params := engine.EngineParams{
 		Config:       &childCfg,
 		Instructions: instructions,
-		TokenBudget:  parent.TokenBudget(), // share with parent
+		Messages:     messages,
+		TokenBudget:  parent.TokenBudget(),
 	}
 
 	child, err := engine.NewWithRegistry(params, tools)
