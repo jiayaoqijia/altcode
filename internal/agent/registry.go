@@ -68,13 +68,13 @@ func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string
 	return ra, true
 }
 
-// Release marks an agent as completed and removes it.
+// Release marks an agent as completed and removes it from the registry.
+// Does NOT close Done channel — the Team is responsible for that.
 func (r *Registry) Release(name string, status AgentStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if ra, ok := r.agents[name]; ok {
 		ra.Status = status
-		close(ra.Done)
 		delete(r.agents, name)
 	}
 }

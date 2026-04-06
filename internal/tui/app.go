@@ -55,6 +55,7 @@ type App struct {
 	thinkingText     string
 	activeToolName   string // tool currently executing
 	activeToolDetail string // e.g. file path
+	turnStart        time.Time // when the current turn began (for response timing)
 	cancel           context.CancelFunc
 	events           <-chan event.Event
 	tokenInfo        string
@@ -512,17 +513,15 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		return a, nil
 	case event.Done:
 		if a.streaming != "" {
-			// Add response time + model info (like OpenCode)
+			// Add response time + model info (using real turn timing)
 			meta := ""
-			if a.engine != nil {
-				elapsed := time.Since(a.toolStart)
-				if elapsed > 100*time.Millisecond {
-					model := a.engine.Config().Model
-					if i := strings.LastIndex(model, "/"); i >= 0 {
-						model = model[i+1:]
-					}
-					meta = fmt.Sprintf("%s · %dms", model, elapsed.Milliseconds())
+			if a.engine != nil && !a.turnStart.IsZero() {
+				elapsed := time.Since(a.turnStart)
+				model := a.engine.Config().Model
+				if i := strings.LastIndex(model, "/"); i >= 0 {
+					model = model[i+1:]
 				}
+				meta = fmt.Sprintf("%s (%s)", model, formatDuration(elapsed))
 			}
 			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming, meta: meta})
 			a.streaming = ""
@@ -613,9 +612,13 @@ func (a *App) View() string {
 		CostUSD:    a.costUSD,
 		ToolActive: toolActive,
 	}
+	ctxLimit := 128000
+	if a.engine != nil {
+		ctxLimit = a.engine.ContextWindowSize()
+	}
 	hs := hudState{
 		ContextTokens: a.tokensIn + a.tokensOut,
-		ContextLimit:  128000, // default, TODO: read from model config
+		ContextLimit:  ctxLimit,
 		SessionStart:  a.sessionStart,
 		GitProject:    a.gitProject,
 		GitBranch:     a.gitBranch,
@@ -645,6 +648,7 @@ func (a *App) submit() tea.Cmd {
 	a.busy = true
 	a.thinking = true
 	a.thinkingText = ""
+	a.turnStart = time.Now() // track real turn start for response timing
 
 	text = a.expandSlashCommand(text)
 	a.updateViewport()

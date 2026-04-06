@@ -73,29 +73,28 @@ func (t *Team) runAgent(
 	ag *Agent,
 	id, input string,
 ) {
-	defer t.markDone(id)
 	// Use ForkFullHistory for team workers so they share context
 	ch := SpawnWithOptions(ctx, parent, ag, input, SpawnOptions{
 		ForkMode: ForkFullHistory,
 		Mailbox:  t.mailbox,
 	})
-	output := collectOutput(ch)
-	t.storeResult(id, output)
+	result := collectOutput(ch)
+	t.storeResult(id, result.text)
+	t.markDoneWithStatus(id, result.status)
 }
 
-func (t *Team) markDone(id string) {
+func (t *Team) markDoneWithStatus(id string, status AgentStatus) {
 	t.mu.Lock()
 	if ra, ok := t.agents[id]; ok {
-		ra.Status = StatusSucceeded
+		ra.Status = status
 		select {
 		case <-ra.Done:
-			// already closed
 		default:
 			close(ra.Done)
 		}
 	}
 	t.mu.Unlock()
-	// Registry.Release closes its own copy — safe because it checks internally
+	t.registry.Release(id, status)
 }
 
 func (t *Team) storeResult(id, output string) {
@@ -104,15 +103,26 @@ func (t *Team) storeResult(id, output string) {
 	t.results[id] = output
 }
 
-// collectOutput drains an event channel and extracts text.
-func collectOutput(ch <-chan event.Event) string {
+// agentResult holds the output + status from an agent run.
+type agentResult struct {
+	text   string
+	status AgentStatus
+}
+
+// collectOutput drains an event channel, extracts text, and detects errors.
+func collectOutput(ch <-chan event.Event) agentResult {
 	var text string
+	status := StatusSucceeded
 	for ev := range ch {
-		if ev.Type == event.TextDelta {
+		switch ev.Type {
+		case event.TextDelta:
 			text += ev.Text
+		case event.ErrorEvent:
+			status = StatusFailed
+			text += "\n[error] " + ev.Error
 		}
 	}
-	return text
+	return agentResult{text: text, status: status}
 }
 
 // SendMessage sends a message to another agent via the shared mailbox.

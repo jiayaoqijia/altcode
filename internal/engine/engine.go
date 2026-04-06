@@ -833,10 +833,16 @@ func (e *Engine) contextWindowSize() int {
 	}
 	model := strings.ToLower(e.model)
 	switch {
+	case strings.Contains(model, "gpt-5"):
+		return 1000000 // GPT-5.4 has 1M context
 	case strings.Contains(model, "claude"):
 		return 200000
 	case strings.Contains(model, "deepseek"):
 		return 64000
+	case strings.Contains(model, "gpt-4"):
+		return 128000
+	case strings.Contains(model, "kimi"):
+		return 128000
 	default:
 		return 128000
 	}
@@ -848,9 +854,12 @@ func (e *Engine) ContextWindowSize() int {
 }
 
 func (e *Engine) maybeCompact(ctx context.Context) {
-	// Token-based trigger (like Codex's model_auto_compact_token_limit)
+	// Token-based trigger using model-specific context window (like Codex)
 	tokens := compact.EstimateTokens(e.messages)
-	threshold := 80000 // default ~80K tokens triggers compact
+	threshold := e.contextWindowSize() * 7 / 10 // 70% of context window
+	if e.cfg.CompactThreshold > 0 {
+		threshold = e.cfg.CompactThreshold
+	}
 	if tokens < threshold && len(e.messages) < 100 {
 		return
 	}
