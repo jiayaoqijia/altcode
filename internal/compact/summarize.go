@@ -79,8 +79,18 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 		return messages, fmt.Errorf("compact produced empty summary")
 	}
 
-	// Build compacted history: summary as assistant message + recent turns
-	compacted := make([]provider.Message, 0, len(recent)+2)
+	// Build compacted history:
+	// 1. Preserve any system/initial context from the beginning of the conversation
+	// 2. Summary as context handoff
+	// 3. Recent turns verbatim
+	compacted := make([]provider.Message, 0, len(recent)+4)
+
+	// Reinject initial context: keep first system message if present
+	// (like Codex's insert_initial_context_before_last_real_user_or_summary)
+	if len(old) > 0 && old[0].Role == "system" {
+		compacted = append(compacted, old[0])
+	}
+
 	compacted = append(compacted, provider.TextMessage("user", SummaryPrefix))
 	compacted = append(compacted, provider.TextMessage("assistant", summary.String()))
 	compacted = append(compacted, recent...)

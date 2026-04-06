@@ -425,9 +425,12 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 			return
 		}
 
+		// Pre-turn compaction: proactively compact before sending to avoid overflow
+		e.maybePreTurnCompact(ctx)
+
 		stream, err := e.callProvider(ctx)
 		if err != nil {
-			// Auto-compact and retry on context overflow
+			// Reactive compact on overflow (fallback if pre-turn didn't catch it)
 			if isContextOverflow(err.Error()) && len(e.messages) > 4 {
 				e.Compact()
 				stream, err = e.callProvider(ctx)
@@ -798,6 +801,49 @@ func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string 
 		}
 	}
 	return input
+}
+
+// maybePreTurnCompact runs BEFORE sending a request to the provider.
+// Uses a higher threshold than post-tool compact to proactively prevent overflow.
+func (e *Engine) maybePreTurnCompact(ctx context.Context) {
+	tokens := compact.EstimateTokens(e.messages)
+	limit := e.contextWindowSize()
+	// Trigger at 90% of context window (pre-turn is proactive)
+	if tokens < limit*9/10 {
+		return
+	}
+	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
+		Event: hooks.PreCompact, SessionID: e.sessionID,
+	})
+	summarizer := compact.NewSummarizer(e.provider, e.model)
+	compacted, err := summarizer.Compact(ctx, e.messages, 5)
+	if err != nil {
+		mc := compact.NewMicrocompactor(10)
+		e.messages = mc.Apply(e.messages)
+		return
+	}
+	e.messages = compacted
+}
+
+// contextWindowSize returns the model's context window in estimated tokens.
+func (e *Engine) contextWindowSize() int {
+	model := strings.ToLower(e.model)
+	switch {
+	case strings.Contains(model, "gpt-5"), strings.Contains(model, "gpt-4"):
+		return 128000
+	case strings.Contains(model, "claude"):
+		return 200000
+	case strings.Contains(model, "deepseek"):
+		return 64000
+	case strings.Contains(model, "altllm"):
+		return 128000
+	case strings.Contains(model, "qwen"), strings.Contains(model, "kimi"):
+		return 128000
+	case strings.Contains(model, "glm"), strings.Contains(model, "minimax"):
+		return 128000
+	default:
+		return 128000
+	}
 }
 
 func (e *Engine) maybeCompact(ctx context.Context) {

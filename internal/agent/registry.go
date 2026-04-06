@@ -9,11 +9,25 @@ type Registry struct {
 	maxDepth int
 }
 
+// AgentStatus tracks the lifecycle state of a running agent.
+type AgentStatus string
+
+const (
+	StatusRunning   AgentStatus = "running"
+	StatusSucceeded AgentStatus = "succeeded"
+	StatusFailed    AgentStatus = "failed"
+	StatusCanceled  AgentStatus = "canceled"
+)
+
 // RunningAgent tracks a spawned agent's state.
 type RunningAgent struct {
-	Agent *Agent
-	Depth int
-	Done  chan struct{}
+	Agent    *Agent
+	Depth    int
+	Path     string      // e.g. "/root/worker/researcher"
+	Nickname string      // human-friendly name
+	Status   AgentStatus
+	Task     string      // current task description
+	Done     chan struct{}
 }
 
 // NewRegistry creates an agent registry with a max spawn depth.
@@ -27,8 +41,11 @@ func NewRegistry(maxDepth int) *Registry {
 	}
 }
 
+// nicknames are assigned to agents for human-friendly identification.
+var nicknames = []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Hank"}
+
 // Register adds a running agent. Returns false if depth exceeded.
-func (r *Registry) Register(name string, ag *Agent, depth int) (*RunningAgent, bool) {
+func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string) (*RunningAgent, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -36,19 +53,41 @@ func (r *Registry) Register(name string, ag *Agent, depth int) (*RunningAgent, b
 		return nil, false
 	}
 
-	ra := &RunningAgent{Agent: ag, Depth: depth, Done: make(chan struct{})}
+	path := parentPath + "/" + name
+	nick := nicknames[len(r.agents)%len(nicknames)]
+
+	ra := &RunningAgent{
+		Agent:    ag,
+		Depth:    depth,
+		Path:     path,
+		Nickname: nick,
+		Status:   StatusRunning,
+		Done:     make(chan struct{}),
+	}
 	r.agents[name] = ra
 	return ra, true
 }
 
-// Release removes a running agent.
-func (r *Registry) Release(name string) {
+// Release marks an agent as completed and removes it.
+func (r *Registry) Release(name string, status AgentStatus) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if ra, ok := r.agents[name]; ok {
+		ra.Status = status
 		close(ra.Done)
 		delete(r.agents, name)
 	}
+}
+
+// LiveAgents returns all running agents with their metadata.
+func (r *Registry) LiveAgents() []RunningAgent {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	result := make([]RunningAgent, 0, len(r.agents))
+	for _, ra := range r.agents {
+		result = append(result, *ra)
+	}
+	return result
 }
 
 // Get returns a running agent by name.
