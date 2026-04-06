@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/altcode-ai/altcode/internal/auth"
 	"github.com/altcode-ai/altcode/internal/command"
@@ -43,6 +44,8 @@ type App struct {
 	filePopup   filePopup
 	vimMode     bool
 	vimPendingG bool
+	tools       *toolTree
+	toolStart   time.Time
 
 	messages         []chatMessage
 	streaming        string
@@ -93,6 +96,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		palette:         pal,
 		sessionSwitcher: sw,
 		projectRoot:     detectProjectRoot(),
+		tools:           newToolTree(),
 	}
 }
 
@@ -414,20 +418,21 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 	case event.ToolStart:
 		a.thinking = true
 		a.activeToolName = ""
-		a.activeToolDetail = ""
 		if ev.ToolCall != nil {
 			a.activeToolName = ev.ToolCall.Name
+			a.tools.Start(ev.ToolCall.Name, "")
+			a.toolStart = time.Now()
 		}
-		a.thinkingText = "using " + a.activeToolName + "..."
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.ToolResultEvent:
 		a.thinking = false
-		a.activeToolName = ""
-		a.activeToolDetail = ""
-		if ev.ToolResult != nil && ev.ToolResult.Title != "" {
-			a.messages = append(a.messages, chatMessage{role: roleTool, content: ev.ToolResult.Title})
+		title := ""
+		if ev.ToolResult != nil {
+			title = ev.ToolResult.Title
 		}
+		a.tools.Done(title, time.Since(a.toolStart))
+		a.activeToolName = ""
 		a.updateViewport()
 		return a, a.waitForEvent()
 	case event.UsageEvent:
@@ -458,6 +463,12 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		if a.streaming != "" {
 			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming})
 			a.streaming = ""
+		}
+		// Append tool tree as a tool message if there were tool calls
+		if len(a.tools.entries) > 0 {
+			tree := a.tools.Render(a.theme, a.width-6)
+			a.messages = append(a.messages, chatMessage{role: roleTool, content: tree})
+			a.tools.Clear()
 		}
 		a.busy = false
 		a.updateViewport()
@@ -616,6 +627,10 @@ func (a *App) updateViewport() {
 		sb.WriteString(a.renderMessage(m))
 		sb.WriteString("\n")
 	}
+	// Show live tool tree during tool execution
+	if len(a.tools.entries) > 0 {
+		sb.WriteString(a.tools.Render(a.theme, a.width-6))
+	}
 	if a.streaming != "" {
 		sb.WriteString(a.renderMessage(chatMessage{role: roleAssistant, content: a.streaming}))
 	}
@@ -719,19 +734,11 @@ func (a *App) repromptForAPIKey(provider string) {
 }
 
 func (a *App) welcomeHeader(logoStyle, mutedStyle lipgloss.Style, version string) []string {
-	if a.width < 70 || a.viewport.Height < 10 {
-		return []string{
-			logoStyle.Render("altcode") + lipgloss.NewStyle().Foreground(a.theme.Muted).Render("  v"+displayVersion(version)),
-			"",
-			mutedStyle.Render("Fast AI coding CLI for Claude, Codex, and local models."),
-		}
-	}
-
+	// Always 1-line logo — no ASCII art. Saves 8 lines of viewport.
 	return []string{
-		logoStyle.Render(welcomeWordmark()),
-		"",
-		mutedStyle.Render("A blazing-fast AI coding CLI with TUI and headless modes."),
-		mutedStyle.Render("Works with Claude, Codex, local models, and existing repo instructions."),
+		logoStyle.Render("⌬ altcode") +
+			lipgloss.NewStyle().Foreground(a.theme.Muted).Render("  v"+displayVersion(version)) +
+			lipgloss.NewStyle().Foreground(a.theme.Secondary).Render("  "+a.activeModel()),
 	}
 }
 
