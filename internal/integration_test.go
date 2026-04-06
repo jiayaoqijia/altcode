@@ -1062,13 +1062,35 @@ func TestMarkdown_StreamingNotCached(t *testing.T) {
 func TestMarkdown_BulletPoints(t *testing.T) {
 	r := tui.NewMarkdownRenderer(80)
 	result := r.Render("- item 1\n* item 2\n- item 3")
-	// Bullets should be indented
-	lines := strings.Split(result, "\n")
-	for _, line := range lines {
-		if strings.Contains(line, "item") && !strings.HasPrefix(line, "  ") {
-			t.Errorf("Bullet should be indented: %q", line)
+	// Strip ANSI codes before checking content (Glamour wraps each char in color codes)
+	stripped := stripANSI(result)
+	for _, item := range []string{"item 1", "item 2", "item 3"} {
+		if !strings.Contains(stripped, item) {
+			t.Errorf("Missing bullet item %q in stripped: %q", item, stripped)
 		}
 	}
+}
+
+func stripANSI(s string) string {
+	var out strings.Builder
+	i := 0
+	for i < len(s) {
+		if s[i] == '\x1b' && i+1 < len(s) && s[i+1] == '[' {
+			// Skip CSI sequence
+			j := i + 2
+			for j < len(s) && !((s[j] >= 'A' && s[j] <= 'Z') || (s[j] >= 'a' && s[j] <= 'z')) {
+				j++
+			}
+			if j < len(s) {
+				j++ // skip final char
+			}
+			i = j
+		} else {
+			out.WriteByte(s[i])
+			i++
+		}
+	}
+	return out.String()
 }
 
 // =============================================================================
