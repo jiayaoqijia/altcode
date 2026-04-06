@@ -19,3 +19,6 @@
 [submodule "vendor/oh-my-codex"]
 	path = vendor/oh-my-codex
 	url = https://github.com/Yeachan-Heo/oh-my-codex.git
+[submodule "vendor/openharness"]
+	path = vendor/openharness
+	url = https://github.com/HKUDS/OpenHarness.git
