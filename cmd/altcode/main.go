@@ -158,7 +158,16 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 				return err
 			}
 			// Default: device code flow (works over SSH, no port binding needed)
-			return runDeviceCodeLogin(ctx, path)
+			// Falls back to browser OAuth if device code is disabled on the account
+			err := runDeviceCodeLogin(ctx, path)
+			if err != nil && strings.Contains(err.Error(), "not enabled") {
+				fmt.Fprintln(os.Stderr, "Device code login not enabled. Falling back to browser OAuth...")
+				_, err = oauth.Login(ctx, path, oauth.LoginOptions{
+					OpenBrowser: true,
+					Stdout:      os.Stdout,
+				})
+			}
+			return err
 		},
 	}
 	codexLogin.Flags().BoolVar(&loginBrowser, "browser", false, "Use browser OAuth instead of device code")

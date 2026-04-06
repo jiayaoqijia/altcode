@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -134,8 +135,9 @@ func (dc *DeviceCode) PollForToken(ctx context.Context, timeout time.Duration) (
 			}
 			resp.Body.Close()
 
-			// Exchange the authorization code for tokens
-			return ExchangeCode(ctx, result.AuthorizationCode, result.CodeVerifier)
+			// Exchange using the DEVICE redirect URI (not browser's localhost:1455)
+			// and the server-provided code_verifier
+			return exchangeDeviceCode(ctx, result.AuthorizationCode, result.CodeVerifier)
 		}
 
 		resp.Body.Close()
@@ -147,4 +149,22 @@ func (dc *DeviceCode) PollForToken(ctx context.Context, timeout time.Duration) (
 
 		return nil, fmt.Errorf("device auth failed with status %d", resp.StatusCode)
 	}
+}
+
+// exchangeDeviceCode swaps the authorization code from device flow
+// using the device-specific redirect URI and server-provided verifier.
+func exchangeDeviceCode(ctx context.Context, code, verifier string) (*TokenData, error) {
+	issuer := DefaultIssuer
+	if issuerOverride != "" {
+		issuer = issuerOverride
+	}
+	redirectURI := issuer + "/deviceauth/callback"
+
+	form := url.Values{}
+	form.Set("grant_type", "authorization_code")
+	form.Set("code", code)
+	form.Set("redirect_uri", redirectURI)
+	form.Set("client_id", DefaultClientID)
+	form.Set("code_verifier", verifier)
+	return postToken(ctx, form)
 }
