@@ -88,8 +88,8 @@ td.num{color:var(--yellow);font-family:var(--font)}
 
     <!-- Header -->
     <div class="logo">alt<span>code</span></div>
-    <div class="subtitle">Multi-AI coding CLI — Claude, GPT, altllm, DeepSeek, Kimi, Qwen, GLM, MiniMax & more</div>
-    <div class="tagline">5ms startup · 10MB binary · 13 providers · 100+ models · Workflow mode</div>
+    <div class="subtitle">The open agent harness for coding</div>
+    <div class="tagline">One binary · Any model · 13 providers · Production-grade agent infrastructure</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -156,16 +156,15 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
     <!-- vs Claude Code -->
-    <h2>vs Claude Code CLI</h2>
+    <h2>Why a harness?</h2>
     <table>
-      <tr><th></th><th>Claude Code</th><th>altcode</th></tr>
-      <tr><td>Providers</td><td>1</td><td class="win">13 (Anthropic, OpenAI, altllm, DeepSeek, GLM, Kimi, MiniMax, Qwen, Ollama...)</td></tr>
-      <tr><td>Startup</td><td>~200ms</td><td class="win">5ms (40× faster)</td></tr>
-      <tr><td>Binary</td><td>~50MB</td><td class="win">10MB (5× smaller)</td></tr>
-      <tr><td>Hooks</td><td>~10</td><td class="win">13 events</td></tr>
-      <tr><td>Plugins</td><td class="tie">Claude format</td><td class="win">Loads Claude Code plugins natively</td></tr>
-      <tr><td>Auth</td><td>Anthropic only</td><td class="win">Claude sub + Codex sub + API keys</td></tr>
-      <tr><td>Source</td><td>Closed</td><td class="win">Fully open</td></tr>
+      <tr><th></th><th>Coding CLI</th><th>altcode (Harness)</th></tr>
+      <tr><td>Agent loop</td><td>Run once</td><td class="win">Multi-turn + verification gates</td></tr>
+      <tr><td>Context</td><td>Send & hope</td><td class="win">Token tracking + auto-compact + LLM summarization</td></tr>
+      <tr><td>Tools</td><td>Call & pray</td><td class="win">Permissions + hooks + auto-verify</td></tr>
+      <tr><td>Agents</td><td>Single model</td><td class="win">Multi-agent + mailbox IPC + roles</td></tr>
+      <tr><td>Workflow</td><td>Ad-hoc</td><td class="win">Interview → plan → persistent execution</td></tr>
+      <tr><td>Providers</td><td>1 vendor</td><td class="win">13 providers, any model</td></tr>
     </table>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
@@ -192,11 +191,11 @@ td.num{color:var(--yellow);font-family:var(--font)}
       <span style="color:var(--green)">●</span> 7 tools: read, glob, grep, ls, bash, edit, write<br>
       <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events<br>
       <span style="color:var(--green)">●</span> Slash commands · Plugin system · Marketplace<br>
-      <span style="color:var(--green)">●</span> Subagents · Persistent memory · Auto-compact<br>
-      <span style="color:var(--green)">●</span> Session resume (--last) · JSON exec mode<br>
-      <span style="color:var(--green)">●</span> Workflow mode — interview, plan, ralph (persistent execution)<br>
-      <span style="color:var(--green)">●</span> Claude Code compat — .mcp.json, skills, plugins, hooks, agents<br>
-      <span style="color:var(--green)">●</span> 47 skills · Streaming TUI · 6 themes
+      <span style="color:var(--green)">●</span> Context harness — auto-compact, LLM summarization, pre-turn compaction<br>
+      <span style="color:var(--green)">●</span> Agent harness — multi-agent, mailbox IPC, history forking, roles<br>
+      <span style="color:var(--green)">●</span> Workflow harness — interview → plan → persistent execution (ralph)<br>
+      <span style="color:var(--green)">●</span> Tool harness — permissions, hooks (command + HTTP), auto-verify<br>
+      <span style="color:var(--green)">●</span> 47 skills · OAuth login · Persistent memory · Claude Code compat
     </p>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
