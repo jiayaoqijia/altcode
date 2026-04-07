@@ -124,6 +124,8 @@ Classic "altcode" behavior is completely unaffected by this subcommand.`,
 	workflowCmd.Flags().IntVar(&wfMaxIter, "max-iter", 10, "Max iterations for ralph mode")
 	root.AddCommand(workflowCmd)
 
+	addWorkspaceCmd(root)
+
 	// Provider-specific login commands under "altcode login <provider>"
 	loginRoot := &cobra.Command{
 		Use:   "login <provider>",
