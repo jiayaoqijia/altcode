@@ -520,10 +520,15 @@ func attachInlineComments(
 				break
 			}
 		}
-		if !attached && len(reviews) > 0 {
-			reviews[len(reviews)-1].Comments = append(
-				reviews[len(reviews)-1].Comments, rc,
-			)
+		if !attached {
+			if len(reviews) > 0 {
+				reviews[len(reviews)-1].Comments = append(
+					reviews[len(reviews)-1].Comments, rc,
+				)
+			}
+			// Orphan comments with no matching review are silently dropped.
+			// This is acceptable: inline comments without a review body
+			// are rare and the lifecycle manager still sees the review decision.
 		}
 	}
 }

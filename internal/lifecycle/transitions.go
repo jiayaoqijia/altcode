@@ -77,9 +77,17 @@ func advancePROpen(
 		rec.HeadSHA = pr.HeadSHA
 		rec.CIStatus = pr.CIStatus
 		rec.ReviewStatus = pr.ReviewStatus
-		if pr.CIStatus == workspace.CIRunning || pr.CIStatus == workspace.CIPending {
-			rec.LastCheckedSHA = pr.HeadSHA
+		rec.LastCheckedSHA = pr.HeadSHA
+		switch pr.CIStatus {
+		case workspace.CIRunning, workspace.CIPending:
 			sess.Status = workspace.WSSCIChecking
+			return nil
+		case workspace.CIPass:
+			// CI already passed before we polled — skip to review check
+			return onCIPass(ctx, sess, rec, plugins)
+		case workspace.CIFail:
+			// CI already failed before we polled
+			sess.Status = workspace.WSSCIFailed
 			return nil
 		}
 	}
@@ -106,6 +114,8 @@ func advanceCIChecking(
 			return fmt.Errorf("ci status %s: %w", rec.HeadSHA, err)
 		}
 		rec.CIStatus = status
+		// Mark SHA as checked to prevent infinite re-entry (spec R3-3)
+		rec.LastCheckedSHA = rec.HeadSHA
 		if status == workspace.CIFail {
 			sess.Status = workspace.WSSCIFailed
 			return nil
