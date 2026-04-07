@@ -58,7 +58,13 @@ func (b *OpenCodeBackend) ActivityState(
 			Source:    "process_dead",
 		}, nil
 	}
+	// Check JSONL for actionable states (waiting_input/blocked) before fallback
 	jsonlPath := filepath.Join(sess.WorkspacePath, "agents", sess.Role+".jsonl")
+	if entry, err := readLastJSONLEntry(jsonlPath); err == nil {
+		if state := checkActionableState(entry); state != nil {
+			return state, nil
+		}
+	}
 	return jsonlFallbackState(jsonlPath, ActiveWindow, ReadyThreshold)
 }
 

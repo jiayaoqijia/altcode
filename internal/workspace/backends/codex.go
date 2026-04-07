@@ -2,6 +2,8 @@ package backends
 
 import (
 	"context"
+	"io"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -37,7 +39,65 @@ func (b *CodexBackend) Environment(sess *workspace.AgentSession) (map[string]str
 }
 
 func (b *CodexBackend) SetupWorkspaceHooks(sess *workspace.AgentSession) error {
+	// 1. Set up per-task CODEX_HOME (multica pattern A9)
+	codexHome := filepath.Join(sess.WorkspacePath, "codex-home")
+	if err := prepareCodexHome(codexHome); err != nil {
+		return err
+	}
+	// 2. Install PATH wrappers
 	return installPathWrappers(sess.WorkspacePath)
+}
+
+// prepareCodexHome creates a per-task CODEX_HOME directory.
+// auth.json is symlinked (shared), config files are copied (isolated).
+func prepareCodexHome(codexHome string) error {
+	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+		return err
+	}
+	sharedHome := resolveSharedCodexHome()
+
+	// Symlink auth (shared across tasks)
+	authSrc := filepath.Join(sharedHome, "auth.json")
+	authDst := filepath.Join(codexHome, "auth.json")
+	if _, err := os.Stat(authSrc); err == nil {
+		os.Remove(authDst) // remove stale
+		os.Symlink(authSrc, authDst)
+	}
+
+	// Copy config files (isolated per task)
+	for _, name := range []string{"config.json", "config.toml", "instructions.md"} {
+		src := filepath.Join(sharedHome, name)
+		dst := filepath.Join(codexHome, name)
+		if _, err := os.Stat(src); err == nil {
+			if _, err := os.Stat(dst); os.IsNotExist(err) {
+				copyFile(src, dst)
+			}
+		}
+	}
+	return nil
+}
+
+func resolveSharedCodexHome() string {
+	if v := os.Getenv("CODEX_HOME"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".codex")
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+	_, err = io.Copy(out, in)
+	return err
 }
 
 func (b *CodexBackend) ActivityState(

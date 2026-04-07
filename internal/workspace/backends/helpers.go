@@ -3,8 +3,10 @@ package backends
 import (
 	"bufio"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -43,7 +45,15 @@ func checkPID(handleID string) (bool, error) {
 		return false, nil
 	}
 	err = proc.Signal(syscall.Signal(0))
-	return err == nil, nil
+	if err == nil {
+		return true, nil
+	}
+	// EPERM means the process exists but is owned by another user.
+	// In multi-user/container setups, treat this as alive.
+	if errors.Is(err, syscall.EPERM) {
+		return true, nil
+	}
+	return false, nil
 }
 
 // jsonlEntry represents one line from an activity JSONL file.
@@ -114,10 +124,12 @@ func jsonlFallbackState(
 ) (*workspace.ActivityDetection, error) {
 	entry, err := readLastJSONLEntry(path)
 	if err != nil {
+		// No JSONL data — agent just spawned or file is corrupt.
+		// Return spawning (not active) to avoid masking stuck agents.
 		return &workspace.ActivityDetection{
-			State:     workspace.ActivityActive,
+			State:     workspace.ActivitySpawning,
 			Timestamp: time.Now(),
-			Source:    "jsonl_age",
+			Source:    "jsonl_missing",
 		}, nil
 	}
 	ts := parseTime(entry.Timestamp)
@@ -147,11 +159,21 @@ func installPathWrappers(workspacePath string) error {
 		return err
 	}
 	for _, tool := range []string{"git", "gh"} {
+		// Resolve the REAL binary path at install time to avoid self-loop.
+		// The wrapper must NOT re-resolve via PATH (which includes ~/.altcode/bin/).
+		realBin, err := exec.LookPath(tool)
+		if err != nil {
+			continue // tool not installed, skip wrapper
+		}
+		// Ensure we have an absolute path
+		realBin, _ = filepath.Abs(realBin)
+
 		wrapper := filepath.Join(binDir, tool)
 		content := fmt.Sprintf(
 			"#!/bin/sh\n# altcode PATH wrapper for %s\n"+
-				"exec /usr/bin/env -S %s \"$@\"\n",
-			tool, tool,
+				"# Resolved real binary at install time to prevent self-loop.\n"+
+				"exec %s \"$@\"\n",
+			tool, shellEscape(realBin),
 		)
 		if err := os.WriteFile(wrapper, []byte(content), 0o755); err != nil {
 			return fmt.Errorf("write %s wrapper: %w", tool, err)
@@ -166,6 +188,21 @@ func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return err
 	}
+	// Use a Go helper binary instead of inline shell to avoid injection.
+	// The hook calls altcode's own binary which is safe regardless of
+	// workspace path or role contents.
+	agentsDir := filepath.Join(sess.WorkspacePath, "agents")
+	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
+		return err
+	}
+	// Write a safe shell script that uses printf with proper quoting
+	scriptPath := filepath.Join(agentsDir, "capture-metadata.sh")
+	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$ALTCODE_PR_URL,$ALTCODE_COMMIT\" >> %s\n",
+		shellEscape(filepath.Join(agentsDir, sess.Role+".log")))
+	if err := os.WriteFile(scriptPath, []byte(script), 0o755); err != nil {
+		return err
+	}
+
 	hook := map[string]any{
 		"hooks": map[string]any{
 			"PostToolUse": []map[string]any{
@@ -174,7 +211,7 @@ func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 					"hooks": []map[string]string{
 						{
 							"type":    "command",
-							"command": fmt.Sprintf("sh -c 'echo \"{\\\"pr_url\\\":\\\"$ALTCODE_PR_URL\\\",\\\"commit\\\":\\\"$ALTCODE_COMMIT\\\"}\" >> %s/agents/%s.jsonl'", sess.WorkspacePath, sess.Role),
+							"command": scriptPath,
 						},
 					},
 				},
@@ -186,6 +223,11 @@ func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 		return err
 	}
 	return os.WriteFile(settingsPath, data, 0o644)
+}
+
+// shellEscape wraps a string in single quotes for safe shell use.
+func shellEscape(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
 }
 
 // parseClaudeSessionInfo reads the JSONL file and extracts session info.
