@@ -62,6 +62,9 @@ type WorkspaceSession struct {
 	UpdatedAt    time.Time              `json:"updated_at"`
 	CompletedAt  *time.Time             `json:"completed_at,omitempty"`
 	Error        string                 `json:"error,omitempty"`
+	AutoMerge    bool                   `json:"auto_merge,omitempty"`
+	MergeMethod  MergeMethod            `json:"merge_method,omitempty"`
+	Reviewers    []string               `json:"reviewers,omitempty"`
 
 	mu sync.Mutex `json:"-"` //nolint:unused // guards in-memory mutations
 }
