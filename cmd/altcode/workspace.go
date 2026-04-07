@@ -162,32 +162,44 @@ func runWorkspaceStart(
 		return fmt.Errorf("save session: %w", err)
 	}
 
-	// Create worktrees and inject context
+	// Create worktrees and inject context.
+	// Track created worktrees for cleanup on partial failure.
 	wksp := workspace.NewWorktreeWorkspace()
 	home, _ := os.UserHomeDir()
-	for _, rec := range sess.Agents {
-		wtPath := filepath.Join(
-			home, ".altcode", "worktrees", id, rec.Role)
-		result, serr := wksp.Setup(ctx,
-			workspace.WorkspaceSetupRequest{
-				GitRoot:      gitRoot,
-				WorktreePath: wtPath,
-				Branch:       rec.Branch,
-				BaseRef:      base,
-			})
-		if serr != nil {
-			return fmt.Errorf(
-				"setup worktree %s: %w", rec.Role, serr)
-		}
-		rec.WorktreePath = result.Path
+	var createdWorktrees []string
+	setupErr := func() error {
+		for _, rec := range sess.Agents {
+			wtPath := filepath.Join(
+				home, ".altcode", "worktrees", id, rec.Role)
+			result, serr := wksp.Setup(ctx,
+				workspace.WorkspaceSetupRequest{
+					GitRoot:      gitRoot,
+					WorktreePath: wtPath,
+					Branch:       rec.Branch,
+					BaseRef:      base,
+				})
+			if serr != nil {
+				return fmt.Errorf(
+					"setup worktree %s: %w", rec.Role, serr)
+			}
+			createdWorktrees = append(createdWorktrees, result.Path)
+			rec.WorktreePath = result.Path
 
-		// Inject shared context
-		if ierr := wsctl.InjectWorkspaceContext(
-			wtPath, rec.Backend, rec.Role, task, sess,
-		); ierr != nil {
-			return fmt.Errorf(
-				"inject context %s: %w", rec.Role, ierr)
+			if ierr := wsctl.InjectWorkspaceContext(
+				wtPath, rec.Backend, rec.Role, task, sess,
+			); ierr != nil {
+				return fmt.Errorf(
+					"inject context %s: %w", rec.Role, ierr)
+			}
 		}
+		return nil
+	}()
+	if setupErr != nil {
+		// Cleanup any worktrees created before the failure
+		for _, wt := range createdWorktrees {
+			wksp.Teardown(ctx, wt) //nolint:errcheck
+		}
+		return setupErr
 	}
 
 	// Spawn agents

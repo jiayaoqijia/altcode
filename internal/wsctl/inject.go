@@ -25,9 +25,6 @@ func InjectWorkspaceContext(
 	sess *workspace.WorkspaceSession,
 ) error {
 	content := buildContent(role, task, sess)
-	if err := SecretGuard(content); err != nil {
-		return fmt.Errorf("secret guard: %w", err)
-	}
 
 	filename := targetFile(provider)
 	path := filepath.Join(workDir, filename)
@@ -38,6 +35,11 @@ func InjectWorkspaceContext(
 		merged += "\n"
 	}
 	merged += "\n" + content
+
+	// Scan FULL merged content (not just new block) before writing
+	if err := SecretGuard(merged); err != nil {
+		return fmt.Errorf("secret guard: %w", err)
+	}
 
 	return os.WriteFile(path, []byte(merged), 0o644)
 }
@@ -100,10 +102,11 @@ func agentTable(sess *workspace.WorkspaceSession) string {
 // readSharedContext reads the workspace's context.md, capped at
 // maxContextSize bytes. Returns empty string on any error.
 func readSharedContext(sess *workspace.WorkspaceSession) string {
-	if sess.ID == "" {
+	if sess.ID == "" || sess.GitRoot == "" {
 		return ""
 	}
-	ctxDir := filepath.Join(".altcode", "workspace", sess.ID)
+	// Use absolute path from sess.GitRoot, not relative CWD
+	ctxDir := filepath.Join(sess.GitRoot, ".altcode", "workspace", sess.ID)
 	data, err := os.ReadFile(filepath.Join(ctxDir, "context.md"))
 	if err != nil {
 		return ""
