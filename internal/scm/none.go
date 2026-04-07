@@ -53,3 +53,9 @@ func (n *NoopSCM) CIStatus(
 ) (workspace.CICheckStatus, error) {
 	return workspace.CIUnknown, nil
 }
+
+func (n *NoopSCM) CILogs(
+	_ context.Context, _ string,
+) (string, error) {
+	return "", nil
+}

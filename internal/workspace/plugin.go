@@ -177,6 +177,9 @@ type SCM interface {
 	MergePR(ctx context.Context, prID int, method MergeMethod) error
 	// CIStatus polls the combined CI status for a commit.
 	CIStatus(ctx context.Context, sha string) (CICheckStatus, error)
+	// CILogs fetches combined log output from failing CI checks (max 8KB).
+	// Returns empty string if no failures or logs unavailable.
+	CILogs(ctx context.Context, sha string) (string, error)
 	// Name returns "github", "gitlab", etc.
 	Name() string
 }

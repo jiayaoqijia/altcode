@@ -23,7 +23,6 @@ func DispatchCIFix(
 		return fmt.Errorf(
 			"ci fix: retry limit %d reached", sess.MaxCIRetries)
 	}
-	sess.CIRetries++
 	primary := primaryAgent(sess)
 	if primary == nil {
 		return fmt.Errorf("ci fix: no primary agent in session")
@@ -31,10 +30,15 @@ func DispatchCIFix(
 	log := truncateLog(ciLog, maxCILogBytes)
 	prompt := buildCIFixPrompt(
 		primary.Role, sess.Task, log,
-		sess.CIRetries, sess.MaxCIRetries,
+		sess.CIRetries+1, sess.MaxCIRetries,
 	)
 	primary.ActivityState = workspace.ActivitySpawning
-	return store.SendMessage(ctx, sess.ID, primary.Role, prompt)
+	if err := store.SendMessage(ctx, sess.ID, primary.Role, prompt); err != nil {
+		return fmt.Errorf("ci fix: send message: %w", err)
+	}
+	// Only increment AFTER successful send — prevents eating retries on transient errors
+	sess.CIRetries++
+	return nil
 }
 
 // RestartAgent kills and relaunches an agent with --resume.

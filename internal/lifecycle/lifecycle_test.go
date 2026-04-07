@@ -128,6 +128,10 @@ func (m *mockSCM) CIStatus(_ context.Context, _ string) (workspace.CICheckStatus
 	return m.ciStatus, nil
 }
 
+func (m *mockSCM) CILogs(_ context.Context, _ string) (string, error) {
+	return "mock CI failure: test_foo.go:42 expected 1 got 2", nil
+}
+
 func (m *mockSCM) Name() string { return "mock" }
 
 type mockTracker struct{}

@@ -77,11 +77,16 @@ func advancePROpen(
 		rec.HeadSHA = pr.HeadSHA
 		rec.CIStatus = pr.CIStatus
 		rec.ReviewStatus = pr.ReviewStatus
-		if pr.CIStatus == workspace.CIRunning {
+		if pr.CIStatus == workspace.CIRunning || pr.CIStatus == workspace.CIPending {
 			rec.LastCheckedSHA = pr.HeadSHA
 			sess.Status = workspace.WSSCIChecking
 			return nil
 		}
+	}
+	// Stuck timeout: if PR has been open with no CI for too long
+	if time.Since(sess.UpdatedAt) > StuckThreshold {
+		sess.Status = workspace.WSSFailed
+		sess.Error = "pr_open stuck: CI never started within timeout"
 	}
 	return nil
 }
@@ -155,7 +160,8 @@ func advanceCIFailed(
 	return nil
 }
 
-// fetchCILog gets the CI failure log for the primary agent's HEAD.
+// fetchCILog gets the actual CI failure output for the primary agent's HEAD.
+// Uses SCM.CILogs to retrieve real test/build errors for the agent to fix.
 func fetchCILog(
 	ctx context.Context,
 	sess *workspace.WorkspaceSession,
@@ -165,11 +171,11 @@ func fetchCILog(
 	if primary == nil {
 		return "(no primary agent)"
 	}
-	status, err := plugins.SCM.CIStatus(ctx, primary.HeadSHA)
-	if err != nil || status != workspace.CIFail {
-		return "(CI log unavailable)"
+	log, err := plugins.SCM.CILogs(ctx, primary.HeadSHA)
+	if err != nil || log == "" {
+		return fmt.Sprintf("CI failed for commit %s (logs unavailable)", primary.HeadSHA)
 	}
-	return fmt.Sprintf("CI failed for commit %s", primary.HeadSHA)
+	return log
 }
 
 // advanceChangesRequested sends review feedback to the agent.
