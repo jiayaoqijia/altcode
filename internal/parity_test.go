@@ -171,7 +171,7 @@ func TestParity_AgentRegistryLifecycle(t *testing.T) {
 	reg := agent.NewRegistry(5)
 	ag := &agent.Agent{Name: "worker"}
 
-	ra, ok := reg.Register("worker-1", ag, 0, "/root")
+	_, ok := reg.Register("worker-1", ag, 0, "/root")
 	if !ok {
 		t.Fatal("Register failed")
 	}
@@ -186,11 +186,10 @@ func TestParity_AgentRegistryLifecycle(t *testing.T) {
 	}
 
 	reg.Release("worker-1", agent.StatusSucceeded)
-	select {
-	case <-ra.Done:
-		// Good — channel closed
-	default:
-		t.Error("Done channel should be closed after Release")
+	// Release removes from registry but doesn't close Done channel
+	// (Team owns the Done channel lifecycle)
+	if reg.Count() != 0 {
+		t.Errorf("Count after Release: %d, want 0", reg.Count())
 	}
 
 	if reg.Count() != 0 {
