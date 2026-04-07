@@ -85,6 +85,9 @@ type AgentSession struct {
 	Env []string
 	// AOSessionID is the workspace session ID, injected as env var.
 	AOSessionID string
+	// RuntimeHandleID is the opaque runtime handle (e.g. "pid:1234") for
+	// process liveness checks. Set after spawn, empty before.
+	RuntimeHandleID string
 }
 
 // AgentSessionInfo holds extracted metadata from an agent's native data.

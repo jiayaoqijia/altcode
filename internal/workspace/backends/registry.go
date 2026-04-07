@@ -3,10 +3,30 @@ package backends
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/altcode-ai/altcode/internal/workspace"
 )
+
+// NewBackend returns the Agent implementation for the given backend name.
+// Supported: "claude", "codex", "opencode", "aider".
+func NewBackend(name string) (workspace.Agent, error) {
+	switch name {
+	case "claude":
+		return &ClaudeBackend{}, nil
+	case "codex":
+		return &CodexBackend{}, nil
+	case "opencode":
+		return &OpenCodeBackend{}, nil
+	case "aider":
+		return &AiderBackend{}, nil
+	default:
+		return nil, fmt.Errorf("unknown backend: %q", name)
+	}
+}
 
 // DetectedBackend describes a coding-agent binary found on PATH.
 type DetectedBackend struct {
