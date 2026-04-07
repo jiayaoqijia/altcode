@@ -87,8 +87,9 @@ func (p *wsAgentPane) Render(
 	}
 	var body []string
 	for _, l := range visible {
-		if len(l) > width-4 {
-			l = l[:width-7] + "..."
+		runes := []rune(l)
+		if len(runes) > width-4 {
+			l = string(runes[:width-7]) + "..."
 		}
 		body = append(body, l)
 	}

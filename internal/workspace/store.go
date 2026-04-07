@@ -50,7 +50,11 @@ func (s *Store) SaveSession(sess *WorkspaceSession) error {
 }
 
 // LoadSession reads {root}/{id}/session.json and returns the session.
+// Validates that the ID does not contain path separators to prevent traversal.
 func (s *Store) LoadSession(id string) (*WorkspaceSession, error) {
+	if strings.ContainsAny(id, "/\\..") || id != filepath.Base(id) {
+		return nil, fmt.Errorf("invalid session ID: %q", id)
+	}
 	p := filepath.Join(s.root, id, "session.json")
 	data, err := os.ReadFile(p)
 	if err != nil {

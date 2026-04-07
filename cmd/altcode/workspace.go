@@ -11,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -190,7 +191,9 @@ func runWorkspaceStart(
 	}
 
 	// Spawn agents
-	plugins := buildPluginSet(selected)
+	rt := &processRuntime{}
+	defer rt.KillAll() // ensure cleanup on exit/Ctrl+C
+	plugins := buildPluginSet(selected, rt)
 	for _, rec := range sess.Agents {
 		agent, ok := plugins.Agents[rec.Backend]
 		if !ok {
@@ -460,6 +463,7 @@ func filterBackends(
 // Runtime uses the process runtime. Other plugins are stubs.
 func buildPluginSet(
 	detected []backends.DetectedBackend,
+	rt *processRuntime,
 ) workspace.PluginSet {
 	agents := make(map[string]workspace.Agent)
 	for _, d := range detected {
@@ -469,13 +473,17 @@ func buildPluginSet(
 		}
 	}
 	return workspace.PluginSet{
-		Runtime: &processRuntime{},
+		Runtime: rt,
 		Agents:  agents,
 	}
 }
 
 // processRuntime is a minimal Runtime that spawns OS processes.
-type processRuntime struct{}
+// Tracks spawned processes for proper cleanup on shutdown.
+type processRuntime struct {
+	mu    sync.Mutex
+	procs map[string]*os.Process // handle ID → process
+}
 
 func (p *processRuntime) Name() string { return "process" }
 
@@ -502,7 +510,18 @@ func (p *processRuntime) Spawn(
 		ID:        fmt.Sprintf("pid:%d", cmd.Process.Pid),
 		StartedAt: time.Now(),
 	}
-	go cmd.Wait() //nolint:errcheck
+	p.mu.Lock()
+	if p.procs == nil {
+		p.procs = make(map[string]*os.Process)
+	}
+	p.procs[h.ID] = cmd.Process
+	p.mu.Unlock()
+	go func() {
+		cmd.Wait() //nolint:errcheck
+		p.mu.Lock()
+		delete(p.procs, h.ID)
+		p.mu.Unlock()
+	}()
 	return h, nil
 }
 
@@ -517,7 +536,22 @@ func (p *processRuntime) Attach(
 func (p *processRuntime) Kill(
 	h workspace.RuntimeHandle,
 ) error {
-	return nil // best-effort stub
+	p.mu.Lock()
+	proc, ok := p.procs[h.ID]
+	p.mu.Unlock()
+	if !ok {
+		return nil // already exited
+	}
+	return proc.Kill()
+}
+
+// KillAll terminates all tracked agent processes. Called on shutdown.
+func (p *processRuntime) KillAll() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, proc := range p.procs {
+		proc.Kill() //nolint:errcheck
+	}
 }
 
 func (p *processRuntime) IsRunning(
