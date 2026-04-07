@@ -17,6 +17,7 @@ const (
 	UsageEvent         EventType = "usage"
 	PermissionRequest  EventType = "permission_request"
 	PermissionResponse EventType = "permission_response"
+	InfoEvent          EventType = "info"
 	ErrorEvent         EventType = "error"
 	Done               EventType = "done"
 )
@@ -76,4 +77,5 @@ type Event struct {
 	Usage      *UsageInfo   `json:"usage,omitempty"`
 	Thinking   string       `json:"thinking,omitempty"`
 	Permission *PermReq     `json:"permission,omitempty"`
+	Info       string       `json:"info,omitempty"`
 }

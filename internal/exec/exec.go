@@ -143,6 +143,10 @@ func drainText(ch <-chan event.Event, w io.Writer) error {
 			if showProgress && ev.ToolResult != nil {
 				fmt.Fprintf(os.Stderr, "%s✓%s\n", dim, reset)
 			}
+		case event.InfoEvent:
+			if ev.Info != "" && showProgress {
+				fmt.Fprintf(os.Stderr, "%s%s%s\n", dim, ev.Info, reset)
+			}
 		case event.ErrorEvent:
 			lastErr = ev.Error
 		case event.Done:

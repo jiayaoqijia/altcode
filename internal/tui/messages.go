@@ -15,6 +15,7 @@ const (
 	roleAssistant
 	roleTool
 	roleInfo
+	roleThinking
 )
 
 // chatMessage holds a rendered message with its role for styling.
@@ -59,6 +60,16 @@ func (a *App) renderMessage(msg chatMessage) string {
 	case roleInfo:
 		borderColor = a.theme.Warning
 		icon = "ℹ"
+	case roleThinking:
+		borderColor = a.theme.Muted
+		icon = "💭"
+		// Collapse long thinking blocks
+		if len(rendered) > 200 {
+			lines := strings.SplitN(rendered, "\n", 4)
+			if len(lines) > 3 {
+				rendered = strings.Join(lines[:3], "\n") + "\n..."
+			}
+		}
 	}
 
 	// Meta line below message (model · duration · token count)

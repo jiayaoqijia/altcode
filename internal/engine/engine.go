@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -108,8 +107,9 @@ type Engine struct {
 	totalTokens        int // running token count
 	cost               *cost.Tracker
 	journal            *history.Journal
-	tokenBudget        *TokenBudget
+	tokenBudget         *TokenBudget
 	cachedContextWindow int // cached from /v1/models API, 0 = not fetched
+	compactCount        int // consecutive compactions (thrash detection)
 }
 
 // New creates an Engine from the given parameters.
@@ -414,11 +414,21 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 
 	input = e.fireUserPromptSubmit(ctx, input)
 
+	// Classify intent to auto-adjust engine behavior
+	intent := ClassifyIntent(input)
+
 	userMsg := provider.TextMessage("user", input)
 	e.messages = append(e.messages, userMsg)
 	e.persistMessage("user", userMsg)
 
-	defer func() { out <- event.Event{Type: event.Done} }()
+	defer func() {
+		// Emit final summary with intent + verification info
+		summary := e.buildTurnSummary(intent)
+		if summary != "" {
+			out <- event.Event{Type: event.InfoEvent, Info: summary}
+		}
+		out <- event.Event{Type: event.Done}
+	}()
 
 	for i := 0; i < maxIterations; i++ {
 		if ctx.Err() != nil {
@@ -692,57 +702,58 @@ func (e *Engine) askPermission(tc collectedToolCall, out chan<- event.Event) too
 	return tool.Result{}
 }
 
+// maxToolResultLen caps tool result text stored in context to prevent bloat.
+const maxToolResultLen = 30000
+
 func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool.Result) {
 	providerName, _ := parseModel(e.cfg.Model)
 
-	// Auto-verify: if any edit/write touched a .go file, append go build result
-	autoCheck := e.goAutoVerify(toolCalls, results)
+	// Auto-verify: run verification ladder on edited Go files (once)
+	autoCheck := e.runPostEditVerify(toolCalls, results)
 
+	// Build processed outputs (shared between Anthropic and OpenAI paths)
+	outputs := make([]string, len(toolCalls))
 	for i, tc := range toolCalls {
 		output := results[i].Output
 		if results[i].Error != nil {
 			output = fmt.Sprintf("Error: %v", results[i].Error)
 		}
 		if autoCheck != "" && (tc.Name == "edit" || tc.Name == "write") {
-			output += "\n\n[auto-verify] " + autoCheck
+			output += "\n\n[auto-verify]\n" + autoCheck
 			autoCheck = "" // only append once
 		}
+		// Truncate very long tool results to avoid context bloat
+		if len(output) > maxToolResultLen {
+			output = output[:maxToolResultLen] + "\n\n... [truncated, " +
+				fmt.Sprintf("%d", len(results[i].Output)) + " bytes total]"
+		}
+		outputs[i] = output
+	}
 
-		// Anthropic batches all results into one message (handled below).
-		// All other providers use OpenAI-compatible format: one role="tool" message per result.
-		if providerName != "anthropic" {
+	if providerName == "anthropic" {
+		// Anthropic: batch all results into one user message
+		var parts []provider.ContentPart
+		for i, tc := range toolCalls {
+			parts = append(parts, provider.NewToolResultPart(tc.ID, outputs[i]))
+		}
+		e.messages = append(e.messages, provider.ToolResultMessage(parts))
+	} else {
+		// OpenAI-compatible: one role="tool" message per result
+		for i, tc := range toolCalls {
 			e.messages = append(e.messages, provider.Message{
 				Role: "tool",
 				Parts: []provider.ContentPart{
-					provider.NewToolResultPart(tc.ID, output),
+					provider.NewToolResultPart(tc.ID, outputs[i]),
 				},
 			})
 		}
 	}
-
-	// Anthropic: batch all results into one user message
-	provName, _ := parseModel(e.cfg.Model)
-	if provName == "anthropic" {
-		autoCheckAnth := e.goAutoVerify(toolCalls, results)
-		var parts []provider.ContentPart
-		for i, tc := range toolCalls {
-			output := results[i].Output
-			if results[i].Error != nil {
-				output = fmt.Sprintf("Error: %v", results[i].Error)
-			}
-			if autoCheckAnth != "" && (tc.Name == "edit" || tc.Name == "write") {
-				output += "\n\n[auto-verify] " + autoCheckAnth
-				autoCheckAnth = ""
-			}
-			parts = append(parts, provider.NewToolResultPart(tc.ID, output))
-		}
-		e.messages = append(e.messages, provider.ToolResultMessage(parts))
-	}
 }
 
-// goAutoVerify runs 'go build' on the package containing any edited .go files.
-// Returns a short status string, or empty if no Go files were edited.
-func (e *Engine) goAutoVerify(toolCalls []collectedToolCall, results []tool.Result) string {
+// runPostEditVerify runs the verification ladder on directories containing
+// edited .go files. Uses build → vet (stops at first failure per dir).
+// Returns formatted results, or empty if no Go files were edited.
+func (e *Engine) runPostEditVerify(toolCalls []collectedToolCall, results []tool.Result) string {
 	pkgDirs := map[string]bool{}
 	for i, tc := range toolCalls {
 		if tc.Name != "edit" && tc.Name != "write" {
@@ -768,25 +779,15 @@ func (e *Engine) goAutoVerify(toolCalls []collectedToolCall, results []tool.Resu
 		return ""
 	}
 
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
 	var sb strings.Builder
 	for dir := range pkgDirs {
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		cmd := exec.CommandContext(ctx, "go", "build", "./...")
-		cmd.Dir = dir
-		cmd.Env = append(os.Environ(), "GOFLAGS=-mod=mod")
-		out, err := cmd.CombinedOutput()
-		cancel()
-		if err != nil {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(fmt.Sprintf("go build in %s FAILED:\n%s", dir, strings.TrimSpace(string(out))))
-		} else {
-			if sb.Len() > 0 {
-				sb.WriteString("\n")
-			}
-			sb.WriteString(fmt.Sprintf("go build in %s OK", dir))
-		}
+		// Quick ladder: build + vet (skip tests for speed during tool dispatch)
+		vResults := RunVerificationLadder(ctx, dir, []VerifyLevel{VerifyBuild, VerifyVet})
+		sb.WriteString(fmt.Sprintf("  %s:\n", dir))
+		sb.WriteString(FormatVerificationResults(vResults))
 	}
 	return sb.String()
 }
@@ -804,6 +805,11 @@ func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string 
 	return input
 }
 
+// maxConsecutiveCompactions is the thrash detection limit.
+// If context refills immediately after this many consecutive compactions,
+// we stop compacting to avoid infinite loops (matches Claude Code behavior).
+const maxConsecutiveCompactions = 3
+
 // maybePreTurnCompact runs BEFORE sending a request to the provider.
 // Uses a higher threshold than post-tool compact to proactively prevent overflow.
 func (e *Engine) maybePreTurnCompact(ctx context.Context) {
@@ -811,8 +817,21 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 	limit := e.contextWindowSize()
 	// Trigger at 90% of context window (pre-turn is proactive)
 	if tokens < limit*9/10 {
+		e.compactCount = 0 // reset thrash counter when below threshold
 		return
 	}
+
+	// Thrash detection: stop if we've compacted too many times consecutively
+	if e.compactCount >= maxConsecutiveCompactions {
+		if os.Getenv("ALTCODE_DEBUG") == "1" {
+			fmt.Fprintf(os.Stderr, "[debug] compaction thrash detected (%d consecutive), skipping\n", e.compactCount)
+		}
+		return
+	}
+
+	beforeMsgs := len(e.messages)
+	beforeTokens := tokens
+
 	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
 		Event: hooks.PreCompact, SessionID: e.sessionID,
 	})
@@ -821,9 +840,13 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 	if err != nil {
 		mc := compact.NewMicrocompactor(10)
 		e.messages = mc.Apply(e.messages)
+		e.logCompaction("micro", beforeMsgs, beforeTokens, len(e.messages))
+		e.compactCount++
 		return
 	}
 	e.messages = compacted
+	e.logCompaction("llm", beforeMsgs, beforeTokens, len(e.messages))
+	e.compactCount++
 }
 
 // contextWindowSize returns the model's context window in tokens.
@@ -878,6 +901,9 @@ func (e *Engine) maybeCompact(ctx context.Context) {
 		return
 	}
 
+	beforeMsgs := len(e.messages)
+	beforeTokens := tokens
+
 	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
 		Event: hooks.PreCompact, SessionID: e.sessionID,
 	})
@@ -889,9 +915,11 @@ func (e *Engine) maybeCompact(ctx context.Context) {
 		// Fallback to mechanical compaction
 		mc := compact.NewMicrocompactor(20)
 		e.messages = mc.Apply(e.messages)
+		e.logCompaction("micro", beforeMsgs, beforeTokens, len(e.messages))
 		return
 	}
 	e.messages = compacted
+	e.logCompaction("llm", beforeMsgs, beforeTokens, len(e.messages))
 }
 
 func (e *Engine) fireStopHooks(ctx context.Context) string {
@@ -1022,6 +1050,55 @@ func newOpenAICompat(cfg *config.Config, name, defaultBase string) provider.Prov
 	return provider.NewOpenAI(provider.OpenAIConfig{
 		APIKey: pcfg.APIKey, BaseURL: base,
 	})
+}
+
+// buildTurnSummary creates a structured summary for the completed turn.
+// Section 17.5 of the design doc: what changed, verification, risks.
+func (e *Engine) buildTurnSummary(intent TaskIntent) string {
+	entries := e.journal.Entries()
+	if len(entries) == 0 && intent.Class == TaskQA {
+		return "" // no summary needed for pure Q&A
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("[%s | risk:%s]", intent.Description, riskName(intent.Risk)))
+
+	if len(entries) > 0 {
+		sb.WriteString(fmt.Sprintf(" %d file(s) changed", len(entries)))
+	}
+
+	cost := e.cost.Summary()
+	if cost != "" {
+		sb.WriteString(" | " + cost)
+	}
+
+	return sb.String()
+}
+
+// logCompaction records a compaction event for debugging and audit.
+func (e *Engine) logCompaction(method string, beforeMsgs, beforeTokens, afterMsgs int) {
+	afterTokens := compact.EstimateTokens(e.messages)
+	if os.Getenv("ALTCODE_DEBUG") == "1" {
+		fmt.Fprintf(os.Stderr, "[debug] compaction (%s): %d→%d msgs, ~%d→~%d tokens\n",
+			method, beforeMsgs, afterMsgs, beforeTokens, afterTokens)
+	}
+	// Record in journal for /stats visibility
+	e.journal.Record("compact", method,
+		fmt.Sprintf("%d→%d msgs", beforeMsgs, afterMsgs),
+		fmt.Sprintf("~%d→~%d tokens", beforeTokens, afterTokens), "")
+}
+
+func riskName(r RiskLevel) string {
+	switch r {
+	case RiskLow:
+		return "low"
+	case RiskMedium:
+		return "medium"
+	case RiskHigh:
+		return "HIGH"
+	default:
+		return "unknown"
+	}
 }
 
 func parseModel(model string) (providerName, modelName string) {

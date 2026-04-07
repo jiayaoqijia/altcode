@@ -5,18 +5,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/workflow"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // handleBuiltinCommand checks if the input is a built-in slash command
-// and handles it locally without calling the model. Returns true if handled.
-func (a *App) handleBuiltinCommand(text string) bool {
+// and handles it locally without calling the model. Returns (handled, cmd).
+func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 	parts := strings.Fields(text)
 	if len(parts) == 0 {
-		return false
+		return false, nil
 	}
 	switch parts[0] {
 	case "/help":
@@ -62,37 +64,125 @@ func (a *App) handleBuiltinCommand(text string) bool {
 	case "/agents":
 		a.appendInfo(a.builtinAgentsText())
 	case "/team":
+		if len(parts) >= 3 && parts[1] == "run" {
+			task := strings.Join(parts[2:], " ")
+			a.startTeamRun(task)
+			return true, nil
+		}
 		a.appendInfo(a.builtinTeamText())
 	case "/workflow":
 		if len(parts) < 2 {
-			a.appendInfo("Usage: /workflow <mode> <prompt>\nModes: interview, plan, ralph\nExample: /workflow ralph fix all tests")
-			return true
+			a.appendInfo("Usage: /workflow <name> <prompt>\nBuilt-in: ship-feature, review, fix\nLegacy: interview, plan, ralph\nExample: /workflow ship-feature add user auth")
+			return true, nil
 		}
-		mode := parts[1]
+		name := parts[1]
 		prompt := strings.Join(parts[2:], " ")
 		if prompt == "" {
-			a.appendInfo("Usage: /workflow " + mode + " <prompt>")
-			return true
+			a.appendInfo("Usage: /workflow " + name + " <prompt>")
+			return true, nil
 		}
-		a.appendInfo(fmt.Sprintf("Starting workflow: %s — %s", mode, prompt))
-		// Submit as regular prompt with workflow prefix so the model sees it
-		return false // let it fall through to normal submit with the workflow instruction
+		switch name {
+		case "interview", "plan", "ralph":
+			a.appendInfo(fmt.Sprintf("Starting legacy workflow: %s — %s", name, prompt))
+			return false, nil
+		default:
+			cmd := a.discoverAndRunWorkflow(name, prompt)
+			return true, cmd
+		}
 	case "/backends":
 		a.appendInfo(a.builtinBackendsText())
 	case "/undo":
 		a.appendInfo(a.builtinUndoText())
 	case "/redo":
 		a.appendInfo(a.builtinRedoText())
+	case "/search":
+		if len(parts) < 2 {
+			a.appendInfo("Usage: /search <query>")
+		} else {
+			query := strings.Join(parts[1:], " ")
+			a.appendInfo(a.builtinSearchText(query))
+		}
 	default:
-		return false
+		return false, nil
 	}
-	return true
+	return true, nil
 }
 
 // appendInfo adds an info message and refreshes the viewport.
 func (a *App) appendInfo(text string) {
 	a.messages = append(a.messages, chatMessage{role: roleInfo, content: text})
 	a.updateViewport()
+}
+
+// slashCommandNames returns all known slash command names for tab completion.
+func (a *App) slashCommandNames() []string {
+	builtins := []string{
+		"/help", "/status", "/context", "/model", "/clear", "/tools",
+		"/cost", "/history", "/diff", "/compact", "/sessions", "/memory",
+		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
+		"/backends", "/undo", "/redo", "/search",
+		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
+		"/plan",
+	}
+	// Add discovered slash commands
+	for name := range a.commands {
+		builtins = append(builtins, "/"+name)
+	}
+	return builtins
+}
+
+// trySlashComplete attempts tab completion on a slash command prefix.
+// Returns true if completion was performed.
+func (a *App) trySlashComplete() bool {
+	val := a.input.Value()
+	if !strings.HasPrefix(val, "/") || strings.Contains(val, " ") {
+		return false
+	}
+
+	prefix := strings.ToLower(val)
+	cmds := a.slashCommandNames()
+
+	var matches []string
+	for _, c := range cmds {
+		if strings.HasPrefix(c, prefix) {
+			matches = append(matches, c)
+		}
+	}
+
+	if len(matches) == 0 {
+		return false
+	}
+	if len(matches) == 1 {
+		a.input.SetValue(matches[0] + " ")
+		return true
+	}
+
+	// Multiple matches: complete to longest common prefix
+	lcp := matches[0]
+	for _, m := range matches[1:] {
+		lcp = longestCommonPrefix(lcp, m)
+	}
+	if len(lcp) > len(val) {
+		a.input.SetValue(lcp)
+		return true
+	}
+
+	// Show available completions as info
+	a.appendInfo("Completions: " + strings.Join(matches, "  "))
+	return true
+}
+
+func longestCommonPrefix(a, b string) string {
+	n := len(a)
+	if len(b) < n {
+		n = len(b)
+	}
+	for i := 0; i < n; i++ {
+		if a[i] != b[i] {
+			return a[:i]
+		}
+	}
+	return a[:n]
 }
 
 func builtinHelpText() string {
@@ -107,6 +197,7 @@ func builtinHelpText() string {
 		{"/history", "file changes this session"},
 		{"/diff", "diff of changed files"},
 		{"/compact", "trigger context compaction"},
+		{"/search", "search in output"},
 		{"/sessions", "list sessions"},
 		{"/memory", "loaded memories"},
 		{"/version", "version info"},
@@ -124,6 +215,7 @@ func builtinHelpText() string {
 	keys := []row{
 		{"Enter", "send prompt"},
 		{"Ctrl+J", "newline"},
+		{"Tab", "complete /command"},
 		{"Ctrl+K", "command palette"},
 		{"Ctrl+A", "switch sessions"},
 		{"@file", "file completion"},
@@ -491,8 +583,8 @@ func (a *App) builtinAgentsText() string {
 		sb.WriteString(fmt.Sprintf("  Cost:           $%.4f\n", a.costUSD))
 	}
 
-	// Context window
-	tokens := compact.EstimateTokens(a.engine.Messages())
+	// Context window (use API-reported tokens for accuracy)
+	tokens := a.tokensIn + a.tokensOut
 	limit := a.engine.ContextWindowSize()
 	pct := 0
 	if limit > 0 {
@@ -528,6 +620,50 @@ func (a *App) builtinAgentsText() string {
 	return sb.String()
 }
 
+func (a *App) builtinSearchText(query string) string {
+	lower := strings.ToLower(query)
+	var matches []string
+	for i, msg := range a.messages {
+		if strings.Contains(strings.ToLower(msg.content), lower) {
+			// Show message number, role, and a snippet
+			snippet := msg.content
+			if len(snippet) > 120 {
+				idx := strings.Index(strings.ToLower(snippet), lower)
+				start := idx - 40
+				if start < 0 {
+					start = 0
+				}
+				end := idx + len(query) + 80
+				if end > len(snippet) {
+					end = len(snippet)
+				}
+				snippet = "..." + snippet[start:end] + "..."
+			}
+			role := "?"
+			switch msg.role {
+			case roleUser:
+				role = "user"
+			case roleAssistant:
+				role = "assistant"
+			case roleTool:
+				role = "tool"
+			case roleInfo:
+				role = "info"
+			}
+			matches = append(matches, fmt.Sprintf("  #%d [%s] %s", i+1, role, strings.ReplaceAll(snippet, "\n", " ")))
+		}
+	}
+	if len(matches) == 0 {
+		return fmt.Sprintf("No matches for %q", query)
+	}
+	header := fmt.Sprintf("Found %d match(es) for %q:\n", len(matches), query)
+	if len(matches) > 20 {
+		matches = matches[len(matches)-20:]
+		header = fmt.Sprintf("Found %d match(es) for %q (showing last 20):\n", len(matches), query)
+	}
+	return header + strings.Join(matches, "\n")
+}
+
 func (a *App) totalToolCalls() int {
 	total := 0
 	for _, n := range a.toolCounts {
@@ -537,12 +673,28 @@ func (a *App) totalToolCalls() int {
 }
 
 func (a *App) builtinTeamText() string {
+	// Show available backends
+	backends := agent.DetectAvailableBackends()
+	backendsStr := "none"
+	if len(backends) > 0 {
+		parts := make([]string, len(backends))
+		for i, b := range backends {
+			parts[i] = string(b)
+		}
+		backendsStr = strings.Join(parts, ", ")
+	}
+
 	if a.engine == nil {
-		return "No engine available."
+		return fmt.Sprintf("Available CLI backends: %s\n\nUsage: /team run <task>", backendsStr)
 	}
 	cfg := a.engine.Config()
 	if cfg == nil || cfg.Team == nil {
-		return `No multi-AI team configured.
+		return fmt.Sprintf(`Available CLI backends: %s
+
+Usage: /team run <task>
+  Spawns available backends in parallel with split-pane view.
+
+Or configure a team in config.json:`, backendsStr) + `
 
 Add a team to your config.json:
 

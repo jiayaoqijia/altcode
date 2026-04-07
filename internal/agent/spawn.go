@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"strings"
+	"time"
 
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
@@ -25,8 +26,9 @@ const (
 // SpawnOptions configures how a subagent is created.
 type SpawnOptions struct {
 	ForkMode  ForkMode
-	ForkTurns int // for ForkLastNTurns — how many recent turns to include
-	Mailbox   *Mailbox // optional shared mailbox for inter-agent comms
+	ForkTurns int           // for ForkLastNTurns — how many recent turns to include
+	Mailbox   *Mailbox      // optional shared mailbox for inter-agent comms
+	Timeout   time.Duration // 0 = no timeout; agent is cancelled after this duration
 }
 
 // Spawn creates a child engine with the agent's restrictions and runs it.
@@ -98,7 +100,15 @@ func SpawnWithOptions(
 		return ch
 	}
 
-	return child.Run(ctx, input)
+	// Apply timeout if configured
+	runCtx := ctx
+	if opts.Timeout > 0 {
+		var cancel context.CancelFunc
+		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
+		_ = cancel // child.Run manages its own goroutine; context propagates cancellation
+	}
+
+	return child.Run(runCtx, input)
 }
 
 func resolveModel(cfg *config.Config, model string) {

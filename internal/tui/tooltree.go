@@ -48,6 +48,18 @@ func (t *toolTree) Done(title string, elapsed time.Duration) {
 	t.active = -1
 }
 
+// DoneWithError marks the active tool as failed.
+func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
+	if t.active >= 0 && t.active < len(t.entries) {
+		t.entries[t.active].status = "error"
+		t.entries[t.active].elapsed = elapsed
+		if title != "" {
+			t.entries[t.active].detail = title
+		}
+	}
+	t.active = -1
+}
+
 // Clear resets the tree for the next turn.
 func (t *toolTree) Clear() {
 	t.entries = t.entries[:0]

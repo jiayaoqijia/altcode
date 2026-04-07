@@ -8,9 +8,9 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/auth"
 	"github.com/altcode-ai/altcode/internal/command"
-	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/orchestra"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -21,6 +21,8 @@ import (
 
 type eventMsg event.Event
 type streamDoneMsg struct{}
+type wfEventMsg orchestra.PhaseEvent  // workflow phase event from orchestra
+type wfDoneMsg struct{}               // workflow completed
 
 // App is the top-level Bubbletea model for altcode.
 type App struct {
@@ -69,6 +71,12 @@ type App struct {
 	toolCounts       map[string]int
 	gitProject       string
 	gitBranch        string
+
+	teamView       *teamView       // split-pane view for team mode
+	wfHeader       *workflowHeader // phase breadcrumb for workflow mode
+	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
+	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
+	wfRunning      bool
 }
 
 // New creates a new App backed by the given engine and theme.
@@ -110,6 +118,9 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sessionStart:    time.Now(),
 		toolCounts:      make(map[string]int),
 		spinner:         newSpinner(theme),
+		teamView:        newTeamView(),
+		wfHeader:        &workflowHeader{},
+		wfOverride:      make(chan orchestra.OverrideCmd, 4),
 	}
 }
 
@@ -183,6 +194,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a.handleEvent(event.Event(msg))
 	case streamDoneMsg:
 		return a, nil
+	case wfEventMsg:
+		return a.handleWorkflowEvent(orchestra.PhaseEvent(msg))
+	case wfDoneMsg:
+		a.wfRunning = false
+		a.busy = false
+		a.teamView.Stop()
+		a.appendInfo("[workflow] Complete.")
+		return a, nil
 	}
 
 	if a.setupProvider != "" {
@@ -235,6 +254,26 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, false
 	}
 
+	// Workflow override keys
+	if a.wfRunning {
+		switch msg.String() {
+		case "ctrl+p":
+			select {
+			case a.wfOverride <- orchestra.OverrideCmd{Op: orchestra.OpPause}:
+				a.appendInfo("[workflow] Paused.")
+			default:
+			}
+			return a, nil, true
+		case "ctrl+q":
+			select {
+			case a.wfOverride <- orchestra.OverrideCmd{Op: orchestra.OpAbort}:
+				a.appendInfo("[workflow] Aborting...")
+			default:
+			}
+			return a, nil, true
+		}
+	}
+
 	switch msg.String() {
 	case "ctrl+k":
 		a.togglePalette()
@@ -266,6 +305,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.beginSetup("anthropic")
 			return a, nil, true
 		}
+	case "tab":
+		if !a.busy {
+			if a.trySlashComplete() {
+				return a, nil, true
+			}
+		}
+		return a, nil, true
 	case "enter":
 		if strings.TrimSpace(a.startupPrompt) != "" {
 			a.startRecommendedSetup()
@@ -461,6 +507,13 @@ func (a *App) refreshEngine() error {
 func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 	switch ev.Type {
 	case event.TextDelta:
+		// Flush any accumulated thinking text as a collapsed message
+		if a.thinking && a.thinkingText != "" {
+			a.messages = append(a.messages, chatMessage{
+				role: roleThinking, content: a.thinkingText,
+			})
+			a.thinkingText = ""
+		}
 		a.thinking = false
 		a.streaming += ev.Text
 		a.updateViewport()
@@ -489,7 +542,12 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		if ev.ToolResult != nil {
 			title = ev.ToolResult.Title
 		}
-		a.tools.Done(title, time.Since(a.toolStart))
+		hasError := ev.ToolResult != nil && ev.ToolResult.Error != ""
+		if hasError {
+			a.tools.DoneWithError(title, time.Since(a.toolStart))
+		} else {
+			a.tools.Done(title, time.Since(a.toolStart))
+		}
 		if ev.ToolCall != nil && ev.ToolCall.Name != "" {
 			a.toolCounts[ev.ToolCall.Name]++
 		}
@@ -512,6 +570,13 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		}
 		if a.engine != nil {
 			a.costUSD = a.engine.CostTracker().TotalCost()
+		}
+		return a, a.waitForEvent()
+	case event.InfoEvent:
+		if ev.Info != "" {
+			a.messages = append(a.messages,
+				chatMessage{role: roleInfo, content: ev.Info})
+			a.updateViewport()
 		}
 		return a, a.waitForEvent()
 	case event.ErrorEvent:
@@ -599,9 +664,25 @@ func (a *App) View() string {
 		mainBody = a.sessionSwitcher.View()
 	}
 
+	// Team view: split-pane display when team mode is active
+	if a.teamView.IsActive() || a.wfRunning {
+		wfHeaderHeight := 0
+		if a.wfRunning && len(a.wfHeader.phases) > 0 {
+			wfHeaderHeight = 1
+		}
+		a.teamView.SetSize(a.width, a.height-6-wfHeaderHeight)
+		panes := a.teamView.Render(a.theme)
+		if wfHeaderHeight > 0 {
+			a.wfHeader.width = a.width
+			mainBody = a.wfHeader.Render(a.theme) + "\n" + panes
+		} else {
+			mainBody = panes
+		}
+	}
+
 	// Side-by-side: main content | sidebar (if wide enough)
 	body := mainBody
-	if a.sidebar.width > 0 {
+	if a.sidebar.width > 0 && !a.teamView.IsActive() {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, mainBody, a.sidebar.View())
 	}
 
@@ -633,8 +714,9 @@ func (a *App) View() string {
 		ctxLimit = a.engine.ContextWindowSize()
 	}
 	hs := hudState{
-		// Use API-reported tokens (accurate) + estimated local additions since last API call
-		ContextTokens: a.tokensIn + a.tokensOut + compact.EstimateTokens(a.engine.Messages())/3,
+		// API-reported input tokens = total context seen by model on last request.
+		// Add output tokens as they become part of context on next turn.
+		ContextTokens: a.tokensIn + a.tokensOut,
 		ContextLimit:  ctxLimit,
 		SessionStart:  a.sessionStart,
 		GitProject:    a.gitProject,
@@ -661,9 +743,11 @@ func (a *App) submit() tea.Cmd {
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
 
-	if a.handleBuiltinCommand(text) {
-		a.busy = false
-		return nil
+	if handled, cmd := a.handleBuiltinCommand(text); handled {
+		if cmd == nil {
+			a.busy = false
+		}
+		return cmd
 	}
 
 	a.busy = true

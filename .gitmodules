@@ -22,3 +22,18 @@
 [submodule "vendor/openharness"]
 	path = vendor/openharness
 	url = https://github.com/HKUDS/OpenHarness.git
+[submodule "vendor/multica"]
+	path = vendor/multica
+	url = https://github.com/multica-ai/multica.git
+[submodule "vendor/cline-kanban"]
+	path = vendor/cline-kanban
+	url = https://github.com/cline/kanban.git
+[submodule "vendor/agent-orchestrator"]
+	path = vendor/agent-orchestrator
+	url = https://github.com/ComposioHQ/agent-orchestrator.git
+[submodule "vendor/openhands"]
+	path = vendor/openhands
+	url = https://github.com/OpenHands/OpenHands.git
+[submodule "vendor/wshobson-agents"]
+	path = vendor/wshobson-agents
+	url = https://github.com/wshobson/agents.git

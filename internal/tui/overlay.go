@@ -63,11 +63,13 @@ func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.input.Focus()
 			cmdText := selected.Name
 			a.messages = append(a.messages, chatMessage{role: roleUser, content: cmdText})
-			if !a.handleBuiltinCommand(cmdText) {
+			if handled, cmd := a.handleBuiltinCommand(cmdText); !handled {
 				expanded := a.expandSlashCommand(cmdText)
 				if expanded != cmdText {
 					return a, a.submitText(expanded), true
 				}
+			} else if cmd != nil {
+				return a, cmd, true
 			}
 			a.updateViewport()
 		}

@@ -85,14 +85,20 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 	// Tool activity with animated spinner
 	if info.ToolActive != "" {
 		spinnerText := spinnerView + " "
-		parts1 = append(parts1, lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(spinnerText+info.ToolActive))
-	} else if len(h.ToolCounts) > 0 {
+		toolLabel := info.ToolActive
+		// Truncate long tool names on narrow terminals
+		if width < 80 && len(toolLabel) > 15 {
+			toolLabel = toolLabel[:12] + "..."
+		}
+		parts1 = append(parts1, lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(spinnerText+toolLabel))
+	} else if len(h.ToolCounts) > 0 && width >= 60 {
+		// Drop tool counts on very narrow terminals
 		toolStr := renderToolCounts(h.ToolCounts, theme)
 		parts1 = append(parts1, toolStr)
 	}
 
-	// Session duration
-	if !h.SessionStart.IsZero() {
+	// Session duration (drop on narrow terminals)
+	if !h.SessionStart.IsZero() && width >= 50 {
 		dur := time.Since(h.SessionStart).Truncate(time.Second)
 		parts1 = append(parts1, dim.Render(formatDuration(dur)))
 	}
@@ -102,13 +108,21 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 	// ── LINE 2 ──
 	parts2 := []string{}
 
-	// Context bar
+	// Context bar — adaptive width
 	if h.ContextLimit > 0 {
-		bar := renderContextBar(h.contextPercent(), theme, 20)
+		barWidth := 20
+		if width < 60 {
+			barWidth = 10 // shorter bar on narrow terminals
+		}
+		bar := renderContextBar(h.contextPercent(), theme, barWidth)
 		pct := fmt.Sprintf("%d%%", h.contextPercent())
-		tokens := fmt.Sprintf("%s/%s",
-			formatTokens(h.ContextTokens), formatTokens(h.ContextLimit))
-		parts2 = append(parts2, bar+" "+dim.Render(pct)+" "+dim.Render(tokens))
+		if width >= 80 {
+			tokens := fmt.Sprintf("%s/%s",
+				formatTokens(h.ContextTokens), formatTokens(h.ContextLimit))
+			parts2 = append(parts2, bar+" "+dim.Render(pct)+" "+dim.Render(tokens))
+		} else {
+			parts2 = append(parts2, bar+" "+dim.Render(pct))
+		}
 	} else if info.TokensIn+info.TokensOut > 0 {
 		parts2 = append(parts2, dim.Render(fmt.Sprintf("%s in / %s out",
 			formatTokens(info.TokensIn), formatTokens(info.TokensOut))))
