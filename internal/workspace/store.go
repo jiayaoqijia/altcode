@@ -102,12 +102,16 @@ func (s *Store) AppendActivity(id string, entry any) error {
 	if err != nil {
 		return fmt.Errorf("open activity: %w", err)
 	}
-	defer f.Close()
+	// Defer order: unlock THEN close (LIFO — close runs first, unlock second is wrong).
+	// We use an explicit closure to ensure correct ordering.
+	defer func() {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+		f.Close()
+	}()
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("flock: %w", err)
 	}
-	defer syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
 
 	if _, err := f.WriteString(line); err != nil {
 		return fmt.Errorf("write activity: %w", err)

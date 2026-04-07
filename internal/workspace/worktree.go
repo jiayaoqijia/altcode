@@ -39,7 +39,10 @@ func (w *WorktreeWorkspace) Setup(
 		return nil, fmt.Errorf("worktree setup: %w", err)
 	}
 
-	baseCommit, _ := runGit(ctx, req.WorktreePath, "rev-parse", "HEAD")
+	baseCommit, err := runGit(ctx, req.WorktreePath, "rev-parse", "HEAD")
+	if err != nil {
+		return nil, fmt.Errorf("rev-parse HEAD in worktree: %w", err)
+	}
 
 	if err := symlinkDeps(req.GitRoot, req.WorktreePath, req.SymlinkDeps); err != nil {
 		return nil, fmt.Errorf("symlink deps: %w", err)

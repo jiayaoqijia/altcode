@@ -19,6 +19,7 @@ type ActivityState = string
 
 const (
 	StateActive    ActivityState = "active"
+	StateReady     ActivityState = "ready"
 	StateIdle      ActivityState = "idle"
 	StateWaitInput ActivityState = "waiting_input"
 	StateBlocked   ActivityState = "blocked"
@@ -113,7 +114,7 @@ func GetActivityFallbackState(
 	}
 	if age <= thresholdMs {
 		return &Detection{
-			State:     StateActive,
+			State:     StateReady,
 			Timestamp: entry.Timestamp,
 			Source:    "jsonl_age",
 		}

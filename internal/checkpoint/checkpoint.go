@@ -28,8 +28,14 @@ func WriteCheckpoint(dir string, cp TurnCheckpoint) error {
 	if err != nil {
 		return fmt.Errorf("marshal checkpoint: %w", err)
 	}
-	if err := os.WriteFile(p, data, 0o644); err != nil {
-		return fmt.Errorf("write checkpoint: %w", err)
+	// Atomic write: tmp + rename (consistent with store.SaveSession)
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+		return fmt.Errorf("write checkpoint tmp: %w", err)
+	}
+	if err := os.Rename(tmp, p); err != nil {
+		os.Remove(tmp)
+		return fmt.Errorf("rename checkpoint: %w", err)
 	}
 	return nil
 }
