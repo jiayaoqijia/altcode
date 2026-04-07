@@ -127,8 +127,9 @@ func trimOldest(messages []provider.Message, n int) []provider.Message {
 	return messages[n:]
 }
 
-// EstimateTokens gives a rough token count for the message list.
-// Uses the 4-chars-per-token heuristic (same as Codex's approx_token_count).
+// EstimateTokens gives a conservative token count for the message list.
+// Uses 4-chars-per-token heuristic with 4/3 padding multiplier
+// (same conservative approach as OpenHarness's TOKEN_ESTIMATION_PADDING).
 func EstimateTokens(messages []provider.Message) int {
 	total := 0
 	for _, m := range messages {
@@ -138,5 +139,6 @@ func EstimateTokens(messages []provider.Message) int {
 			total += len(p.Content) / 4
 		}
 	}
-	return total
+	// Conservative padding: 4/3 multiplier to avoid underestimation
+	return total * 4 / 3
 }

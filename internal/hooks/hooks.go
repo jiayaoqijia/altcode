@@ -35,9 +35,10 @@ type MatcherConfig struct {
 
 // EntryConfig defines a single hook action.
 type EntryConfig struct {
-	Type    string `json:"type"`              // "command" or "prompt"
+	Type    string `json:"type"`              // "command", "prompt", or "http"
 	Command string `json:"command,omitempty"` // shell command (type=command)
 	Prompt  string `json:"prompt,omitempty"`  // LLM prompt template (type=prompt)
+	URL     string `json:"url,omitempty"`     // webhook URL (type=http)
 	Timeout int    `json:"timeout,omitempty"` // seconds (default 30)
 }
 
@@ -120,6 +121,8 @@ func (r *Runner) executeHookEntry(
 		return runCommandHook(ctx, entry, input)
 	case "prompt":
 		return runPromptHook(ctx, r.provider, r.model, entry, input)
+	case "http":
+		return runHTTPHook(ctx, entry, input)
 	default:
 		return &Result{Decision: "allow"}, nil
 	}
