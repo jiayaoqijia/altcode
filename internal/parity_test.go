@@ -153,15 +153,15 @@ func TestParity_AgentRegistryDepthLimit(t *testing.T) {
 	reg := agent.NewRegistry(3) // max depth 3
 
 	ag := &agent.Agent{Name: "test"}
-	_, ok := reg.Register("agent-1", ag, 1)
+	_, ok := reg.Register("agent-1", ag, 1, "/root")
 	if !ok {
 		t.Error("Depth 1 should be allowed")
 	}
-	_, ok = reg.Register("agent-2", ag, 3)
+	_, ok = reg.Register("agent-2", ag, 3, "/root")
 	if !ok {
 		t.Error("Depth 3 (max) should be allowed")
 	}
-	_, ok = reg.Register("agent-3", ag, 4)
+	_, ok = reg.Register("agent-3", ag, 4, "/root")
 	if ok {
 		t.Error("Depth 4 should be rejected (exceeds max 3)")
 	}
@@ -171,7 +171,7 @@ func TestParity_AgentRegistryLifecycle(t *testing.T) {
 	reg := agent.NewRegistry(5)
 	ag := &agent.Agent{Name: "worker"}
 
-	ra, ok := reg.Register("worker-1", ag, 0)
+	ra, ok := reg.Register("worker-1", ag, 0, "/root")
 	if !ok {
 		t.Fatal("Register failed")
 	}
@@ -185,7 +185,7 @@ func TestParity_AgentRegistryLifecycle(t *testing.T) {
 		t.Errorf("List: %v", names)
 	}
 
-	reg.Release("worker-1")
+	reg.Release("worker-1", agent.StatusSucceeded)
 	select {
 	case <-ra.Done:
 		// Good — channel closed

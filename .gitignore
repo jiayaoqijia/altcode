@@ -137,3 +137,13 @@ internal/math*.go
 internal/reverse.go
 internal/user*.go
 /middleware*.go
+internal/ratelimit/
+internal/reverse_test.go
+internal/stack*.go
+internal/lru_cache*.go
+internal/middleware*.go
+internal/cli.go
+internal/filter.go
+internal/math*.go
+internal/user*.go
+internal/example_*.go
