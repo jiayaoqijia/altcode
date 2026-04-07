@@ -46,7 +46,7 @@ func (h *hudState) contextPercent() int {
 // renderHUD builds the full 2-line HUD matching codex-hud/claude-hud style.
 // Line 1: [mode] model │ project@branch │ tools │ session time
 // Line 2: context bar [████████░░] 45% │ 12.3K/128K tokens │ $0.0123
-func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode bool) string {
+func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode bool, spinnerView string) string {
 	// ── LINE 1 ──
 	modeStyle := lipgloss.NewStyle().
 		Background(theme.Primary).
@@ -82,9 +82,10 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		parts1 = append(parts1, git)
 	}
 
-	// Tool activity with counts
+	// Tool activity with animated spinner
 	if info.ToolActive != "" {
-		parts1 = append(parts1, lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).Render("⟳ "+info.ToolActive))
+		spinnerText := spinnerView + " "
+		parts1 = append(parts1, lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(spinnerText+info.ToolActive))
 	} else if len(h.ToolCounts) > 0 {
 		toolStr := renderToolCounts(h.ToolCounts, theme)
 		parts1 = append(parts1, toolStr)

@@ -8,8 +8,10 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/auth"
 	"github.com/altcode-ai/altcode/internal/command"
+	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -47,6 +49,7 @@ type App struct {
 	tools       *toolTree
 	toolStart   time.Time
 	sidebar     *sidebar
+	spinner     spinner.Model
 
 	messages         []chatMessage
 	streaming        string
@@ -106,21 +109,34 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
 		toolCounts:      make(map[string]int),
+		spinner:         newSpinner(theme),
 	}
+}
+
+func newSpinner(theme Theme) spinner.Model {
+	s := spinner.New()
+	s.Spinner = spinner.Pulse
+	s.Style = lipgloss.NewStyle().Foreground(theme.Primary)
+	return s
 }
 
 func (a *App) Init() tea.Cmd {
 	a.gitProject, a.gitBranch = detectGitInfo()
-	return textarea.Blink
+	return tea.Batch(textarea.Blink, a.spinner.Tick)
 }
 
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		// Always pass mouse events to viewport for scroll wheel support
 		var cmd tea.Cmd
 		a.viewport, cmd = a.viewport.Update(msg)
 		return a, cmd
+	case spinner.TickMsg:
+		if a.busy {
+			var cmd tea.Cmd
+			a.spinner, cmd = a.spinner.Update(msg)
+			return a, cmd
+		}
 	case tea.KeyMsg:
 		// Global scroll keys that work even while busy/typing
 		switch msg.String() {
@@ -617,14 +633,19 @@ func (a *App) View() string {
 		ctxLimit = a.engine.ContextWindowSize()
 	}
 	hs := hudState{
-		ContextTokens: a.tokensIn + a.tokensOut,
+		// Use API-reported tokens (accurate) + estimated local additions since last API call
+		ContextTokens: a.tokensIn + a.tokensOut + compact.EstimateTokens(a.engine.Messages())/3,
 		ContextLimit:  ctxLimit,
 		SessionStart:  a.sessionStart,
 		GitProject:    a.gitProject,
 		GitBranch:     a.gitBranch,
 		ToolCounts:    a.toolCounts,
 	}
-	statusBar := renderHUD(hs, info, a.theme, a.width, a.vimMode)
+	spinView := ""
+	if a.busy {
+		spinView = a.spinner.View()
+	}
+	statusBar := renderHUD(hs, info, a.theme, a.width, a.vimMode, spinView)
 
 	result := fmt.Sprintf("%s\n%s\n%s\n%s\n%s",
 		header, sep, body, statusBar, inputView)
@@ -648,7 +669,7 @@ func (a *App) submit() tea.Cmd {
 	a.busy = true
 	a.thinking = true
 	a.thinkingText = ""
-	a.turnStart = time.Now() // track real turn start for response timing
+	a.turnStart = time.Now()
 
 	text = a.expandSlashCommand(text)
 	a.updateViewport()
@@ -657,7 +678,7 @@ func (a *App) submit() tea.Cmd {
 	a.cancel = cancel
 	a.events = a.engine.Run(ctx, text)
 
-	return a.waitForEvent()
+	return tea.Batch(a.waitForEvent(), a.spinner.Tick)
 }
 
 func (a *App) expandSlashCommand(text string) string {
