@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -25,8 +26,10 @@ func NewStore(root string) *Store {
 // It writes to a temporary file then renames, preventing corrupt reads
 // if the process is killed mid-write.
 func (s *Store) SaveSession(sess *WorkspaceSession) error {
+	sess.mu.Lock()
 	sess.UpdatedAt = time.Now()
 	data, err := json.MarshalIndent(sess, "", "  ")
+	sess.mu.Unlock()
 	if err != nil {
 		return fmt.Errorf("marshal session: %w", err)
 	}
@@ -117,6 +120,40 @@ func (s *Store) AppendActivity(id string, entry any) error {
 		return fmt.Errorf("write activity: %w", err)
 	}
 	return nil
+}
+
+// SendMessage sends a message to a running agent in a workspace session.
+// For claude backend: kills the running process and relaunches with --resume + message.
+// For codex/opencode/aider: appends to context.md and enqueues in agents/{role}.json.
+// Full implementation requires agent backends (Phase 3). This is the method signature
+// needed by the lifecycle manager's DispatchCIFix and review feedback routing.
+func (s *Store) SendMessage(ctx context.Context, sessionID, role, message string) error {
+	sess, err := s.LoadSession(sessionID)
+	if err != nil {
+		return fmt.Errorf("SendMessage: load session: %w", err)
+	}
+	_, ok := sess.Agents[role]
+	if !ok {
+		return fmt.Errorf("SendMessage: no agent with role %q in session %s", role, sessionID)
+	}
+	// Append to context.md so it's visible on next spawn
+	ctxPath := filepath.Join(s.root, sessionID, "context.md")
+	f, err := os.OpenFile(ctxPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return fmt.Errorf("SendMessage: open context.md: %w", err)
+	}
+	defer f.Close()
+	_, err = fmt.Fprintf(f, "\n## Operator Message to %s\n\n%s\n", role, message)
+	if err != nil {
+		return fmt.Errorf("SendMessage: write context.md: %w", err)
+	}
+	// Log to activity JSONL
+	return s.AppendActivity(sessionID, map[string]any{
+		"ts":      time.Now().UTC().Format(time.RFC3339),
+		"type":    "operator_inject",
+		"role":    role,
+		"message": message,
+	})
 }
 
 // readActivityLines reads all lines from {root}/{id}/activity.jsonl.

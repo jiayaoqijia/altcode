@@ -156,17 +156,10 @@ func runGitWorktreeAdd(
 	ctx context.Context,
 	gitRoot, wtPath, branch, baseRef string,
 ) error {
-	// git worktree add --detach <path> <baseRef>
-	if _, err := runGit(ctx, gitRoot, "worktree", "add", "--detach", wtPath, baseRef); err != nil {
-		return err
-	}
-	// Create branch inside the worktree.
-	if _, err := runGit(ctx, wtPath, "checkout", "-b", branch); err != nil {
-		// Clean up the detached worktree on branch creation failure.
-		removeWorktree(ctx, gitRoot, wtPath)
-		return err
-	}
-	return nil
+	// Single atomic command: creates worktree + branch in one step.
+	// This avoids orphan detached worktrees if branch creation fails.
+	_, err := runGit(ctx, gitRoot, "worktree", "add", "-b", branch, wtPath, baseRef)
+	return err
 }
 
 // removeWorktree removes a worktree, best-effort.

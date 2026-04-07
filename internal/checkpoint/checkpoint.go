@@ -11,10 +11,16 @@ import (
 
 // TurnCheckpoint records a single agent turn snapshot.
 type TurnCheckpoint struct {
-	Turn       int       `json:"turn"`
-	CommitHash string    `json:"commit_hash"`
-	Role       string    `json:"role"`
-	CreatedAt  time.Time `json:"created_at"`
+	Turn         int       `json:"turn"`
+	CommitHash   string    `json:"commit_hash"`
+	Role         string    `json:"role"`
+	Branch       string    `json:"branch"`
+	WorktreePath string    `json:"worktree_path"`
+	Summary      string    `json:"summary,omitempty"`
+	FilesChanged []string  `json:"files_changed,omitempty"`
+	TokensUsed   int       `json:"tokens_used,omitempty"`
+	CostUSD      float64   `json:"cost_usd,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
 }
 
 // WriteCheckpoint writes a checkpoint file to {dir}/turn-{NNN}.json.
