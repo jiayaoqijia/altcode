@@ -182,20 +182,19 @@ func installPathWrappers(workspacePath string) error {
 	return nil
 }
 
-// writeClaudeHooks writes a .claude/settings.json with a PostToolUse
-// hook that captures PR and commit metadata.
+// writeClaudeHooks MERGES a PostToolUse hook into .claude/settings.json.
+// If settings.json already exists, its existing content is preserved and
+// the altcode hook is appended to the PostToolUse array. This prevents
+// overwriting repo-specific permission restrictions or existing hooks.
 func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
 		return err
 	}
-	// Use a Go helper binary instead of inline shell to avoid injection.
-	// The hook calls altcode's own binary which is safe regardless of
-	// workspace path or role contents.
 	agentsDir := filepath.Join(sess.WorkspacePath, "agents")
 	if err := os.MkdirAll(agentsDir, 0o755); err != nil {
 		return err
 	}
-	// Write a safe shell script that uses printf with proper quoting
+	// Write a safe capture script (no shell injection possible)
 	scriptPath := filepath.Join(agentsDir, "capture-metadata.sh")
 	script := fmt.Sprintf("#!/bin/sh\nprintf '%%s\\n' \"$ALTCODE_PR_URL,$ALTCODE_COMMIT\" >> %s\n",
 		shellEscape(filepath.Join(agentsDir, sess.Role+".log")))
@@ -203,22 +202,49 @@ func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 		return err
 	}
 
-	hook := map[string]any{
-		"hooks": map[string]any{
-			"PostToolUse": []map[string]any{
-				{
-					"matcher": "Bash",
-					"hooks": []map[string]string{
-						{
-							"type":    "command",
-							"command": scriptPath,
-						},
-					},
-				},
-			},
+	// Read existing settings (if any)
+	var settings map[string]any
+	if data, err := os.ReadFile(settingsPath); err == nil {
+		json.Unmarshal(data, &settings)
+	}
+	if settings == nil {
+		settings = map[string]any{}
+	}
+
+	// Ensure hooks.PostToolUse array exists
+	hooks, _ := settings["hooks"].(map[string]any)
+	if hooks == nil {
+		hooks = map[string]any{}
+		settings["hooks"] = hooks
+	}
+	postHooks, _ := hooks["PostToolUse"].([]any)
+
+	// Append our hook (idempotent — check if already present)
+	altcodeHook := map[string]any{
+		"matcher": "Bash",
+		"hooks": []map[string]string{
+			{"type": "command", "command": scriptPath},
 		},
 	}
-	data, err := json.MarshalIndent(hook, "", "  ")
+	alreadyInstalled := false
+	for _, h := range postHooks {
+		if hm, ok := h.(map[string]any); ok {
+			if hs, _ := hm["hooks"].([]any); len(hs) > 0 {
+				if hh, ok := hs[0].(map[string]any); ok {
+					if cmd, _ := hh["command"].(string); cmd == scriptPath {
+						alreadyInstalled = true
+						break
+					}
+				}
+			}
+		}
+	}
+	if !alreadyInstalled {
+		postHooks = append(postHooks, altcodeHook)
+		hooks["PostToolUse"] = postHooks
+	}
+
+	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {
 		return err
 	}
