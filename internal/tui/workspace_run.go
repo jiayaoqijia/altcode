@@ -1,11 +1,47 @@
 package tui
 
 import (
+	"fmt"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/altcode-ai/altcode/internal/workspace/backends"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// startWorkspaceFromTUI creates a workspace session from a task prompt
+// and activates the workspace dashboard. This is the /workspace slash command handler.
+func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
+	detected, _ := backends.DetectBackends(nil)
+	if len(detected) == 0 {
+		a.appendInfo("[workspace] No CLI backends found. Install claude, codex, or opencode.")
+		return nil
+	}
+
+	// Build a lightweight session for the dashboard
+	agents := make(map[string]*workspace.AgentRecord)
+	roleNames := []string{"architect", "implementer", "reviewer"}
+	for i, d := range detected {
+		if i >= len(roleNames) {
+			break
+		}
+		agents[roleNames[i]] = &workspace.AgentRecord{
+			Role:          roleNames[i],
+			Backend:       d.Name,
+			ActivityState: workspace.ActivitySpawning,
+		}
+	}
+
+	sess := &workspace.WorkspaceSession{
+		ID:     fmt.Sprintf("tui-%d", time.Now().UnixMilli()),
+		Task:   task,
+		Status: workspace.WSSSpawning,
+		Agents: agents,
+	}
+
+	a.appendInfo(fmt.Sprintf("[workspace] Starting with %d agent(s): %s", len(detected), task))
+	return a.StartWorkspace(sess)
+}
 
 // StartWorkspace activates the workspace dashboard for the given session
 // and begins periodic polling.

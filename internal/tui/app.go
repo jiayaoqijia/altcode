@@ -290,6 +290,12 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.appendInfo("[workspace] Resumed.")
 			return a, nil, true
 		case "tab":
+			// Smart Tab: slash completion when typing /, focus cycling otherwise
+			if strings.HasPrefix(a.input.Value(), "/") {
+				if a.trySlashComplete() {
+					return a, nil, true
+				}
+			}
 			a.wsView.CycleFocus()
 			return a, nil, true
 		case "ctrl+1":
@@ -302,10 +308,11 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.wsView.FocusAgent(2)
 			return a, nil, true
 		case "ctrl+s":
-			// Send message to focused agent — prompt for input
+			// Pre-fill input with /send <focused-role> for quick message
 			focused := a.wsView.FocusedRole()
 			if focused != "" {
-				a.appendInfo(fmt.Sprintf("Use: /send %s <message>", focused))
+				a.input.SetValue(fmt.Sprintf("/send %s ", focused))
+				a.input.Focus()
 			} else {
 				a.appendInfo("No agent focused. Press Tab to cycle, then Ctrl+S.")
 			}

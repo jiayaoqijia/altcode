@@ -63,6 +63,14 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.appendInfo(a.builtinWorkflowResumeText())
 	case "/agents":
 		a.appendInfo(a.builtinAgentsText())
+	case "/workspace":
+		if len(parts) < 2 {
+			a.appendInfo("Usage: /workspace <task>\nStarts a multi-agent workspace.\nExample: /workspace add JWT authentication")
+			return true, nil
+		}
+		task := strings.Join(parts[1:], " ")
+		cmd := a.startWorkspaceFromTUI(task)
+		return true, cmd
 	case "/team":
 		if len(parts) >= 3 && parts[1] == "run" {
 			task := strings.Join(parts[2:], " ")
@@ -126,7 +134,7 @@ func (a *App) slashCommandNames() []string {
 		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
 		"/backends", "/undo", "/redo", "/search",
 		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
-		"/plan", "/rollback", "/send",
+		"/plan", "/rollback", "/send", "/workspace",
 	}
 	// Add discovered slash commands
 	for name := range a.commands {
@@ -212,32 +220,49 @@ func builtinHelpText() string {
 		{"/wf-pause", "pause workflows"},
 		{"/wf-resume", "resume workflows"},
 		{"/wf-cancel", "clear workflow state"},
+		{"/workspace", "start multi-agent workspace"},
+		{"/workflow", "run phased workflow"},
 		{"/team", "multi-AI team config"},
+		{"/backends", "detected CLI backends"},
 		{"/rollback", "rollback to turn N"},
 		{"/send", "send msg to agent"},
+		{"/context", "token breakdown"},
+		{"/plan", "show plan"},
 		{"/undo", "git-backed undo"},
 		{"/redo", "restore undo"},
 	}
 	keys := []row{
 		{"Enter", "send prompt"},
 		{"Ctrl+J", "newline"},
-		{"Tab", "complete /command"},
+		{"Tab", "complete /command (or cycle focus)"},
 		{"Ctrl+K", "command palette"},
 		{"Ctrl+A", "switch sessions"},
 		{"@file", "file completion"},
 		{"Esc", "vim mode"},
 		{"Esc Esc", "quit"},
 	}
+	wsKeys := []row{
+		{"Ctrl+Z", "pause workspace/workflow"},
+		{"Ctrl+R", "resume after pause"},
+		{"Ctrl+Q", "abort workspace/workflow"},
+		{"Ctrl+S", "send to focused agent"},
+		{"Tab", "cycle agent focus"},
+		{"Ctrl+1/2/3", "focus agent pane"},
+	}
 
 	var sb strings.Builder
-	sb.WriteString("```\n") // code block prevents Glamour word-wrapping
+	sb.WriteString("```\n")
 	sb.WriteString("Commands\n")
 	for _, r := range commands {
-		sb.WriteString(fmt.Sprintf("  %-12s %s\n", r.cmd, r.desc))
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
 	}
 	sb.WriteString("\nShortcuts\n")
 	for _, r := range keys {
-		sb.WriteString(fmt.Sprintf("  %-12s %s\n", r.cmd, r.desc))
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
+	}
+	sb.WriteString("\nWorkspace Mode\n")
+	for _, r := range wsKeys {
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
 	}
 	sb.WriteString("```")
 	return sb.String()
