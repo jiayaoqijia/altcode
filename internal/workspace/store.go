@@ -109,8 +109,8 @@ func (s *Store) AppendActivity(id string, entry any) error {
 	if err != nil {
 		return fmt.Errorf("open activity: %w", err)
 	}
-	// Defer order: unlock THEN close (LIFO — close runs first, unlock second is wrong).
-	// We use an explicit closure to ensure correct ordering.
+	// Explicit closure ensures unlock happens before close.
+	// Without this, separate defers would close first (LIFO), then unlock a closed fd.
 	defer func() {
 		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
 		f.Close()

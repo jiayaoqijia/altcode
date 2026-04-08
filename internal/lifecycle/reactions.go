@@ -59,6 +59,11 @@ func RestartAgent(
 			"agent %s: unknown backend %q", rec.Role, rec.Backend)
 	}
 	agentSess := buildAgentSession(rec, sess)
+	// Merge per-agent env vars (ALTCODE_SESSION_ID, ALTCODE_ROLE, CODEX_HOME, etc.)
+	extra, _ := agentPlugin.Environment(agentSess)
+	for k, v := range extra {
+		agentSess.Env = append(agentSess.Env, k+"="+v)
+	}
 	cmd, err := agentPlugin.RestoreCommand(agentSess)
 	if cmd == nil || err != nil {
 		cmd, err = agentPlugin.LaunchCommand(agentSess)

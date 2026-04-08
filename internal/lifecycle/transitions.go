@@ -167,6 +167,14 @@ func advanceCIFailed(
 	if err := DispatchCIFix(ctx, sess, ciLog, store); err != nil {
 		return err
 	}
+	// Set LastCheckedSHA = HeadSHA so advanceWorking's guard
+	// (HeadSHA != LastCheckedSHA) only fires on a genuinely new commit.
+	// Without this, the session re-enters ci_checking on the same SHA
+	// on the next tick, consuming the retry budget before the agent pushes.
+	primary := primaryAgent(sess)
+	if primary != nil {
+		primary.LastCheckedSHA = primary.HeadSHA
+	}
 	sess.Status = workspace.WSSWorking
 	return nil
 }
