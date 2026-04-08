@@ -12,30 +12,52 @@ import (
 	"github.com/altcode-ai/altcode/internal/workspace"
 )
 
-// GitHubSCM implements workspace.SCM using the gh CLI.
-type GitHubSCM struct {
+// GitHubCLISCM implements workspace.SCM using the gh CLI.
+type GitHubCLISCM struct {
 	owner string
 	repo  string
 }
 
-// NewGitHubSCM creates a GitHubSCM, auto-detecting owner/repo from gh.
-func NewGitHubSCM() (*GitHubSCM, error) {
+// NewGitHubSCM returns a GitHub SCM, preferring the direct API when a
+// token is available and falling back to the gh CLI.
+func NewGitHubSCM() (workspace.SCM, error) {
+	owner, repo, err := DetectOwnerRepo()
+	if err != nil {
+		// Fallback: try gh CLI detection.
+		owner, repo, err = detectRepoInfo()
+		if err != nil {
+			return nil, fmt.Errorf("github scm: %w", err)
+		}
+	}
+	token := DiscoverGitHubToken()
+	if token != "" {
+		api, aerr := NewGitHubAPISCM(owner, repo)
+		if aerr == nil {
+			return api, nil
+		}
+	}
+	return &GitHubCLISCM{owner: owner, repo: repo}, nil
+}
+
+// NewGitHubCLISCM creates a GitHubCLISCM, auto-detecting owner/repo
+// from the gh CLI. Kept as a fallback when no API token is available.
+func NewGitHubCLISCM() (*GitHubCLISCM, error) {
 	owner, repo, err := detectRepoInfo()
 	if err != nil {
-		return nil, fmt.Errorf("github scm: %w", err)
+		return nil, fmt.Errorf("github cli scm: %w", err)
 	}
-	return &GitHubSCM{owner: owner, repo: repo}, nil
+	return &GitHubCLISCM{owner: owner, repo: repo}, nil
 }
 
-// newGitHubSCMExplicit creates a GitHubSCM with explicit owner/repo.
-func newGitHubSCMExplicit(owner, repo string) *GitHubSCM {
-	return &GitHubSCM{owner: owner, repo: repo}
+// newGitHubSCMExplicit creates a GitHubCLISCM with explicit owner/repo.
+func newGitHubSCMExplicit(owner, repo string) *GitHubCLISCM {
+	return &GitHubCLISCM{owner: owner, repo: repo}
 }
 
-func (g *GitHubSCM) Name() string { return "github" }
+func (g *GitHubCLISCM) Name() string { return "github" }
 
 // CreatePR creates a pull request via gh pr create.
-func (g *GitHubSCM) CreatePR(
+func (g *GitHubCLISCM) CreatePR(
 	ctx context.Context, req workspace.CreatePRRequest,
 ) (*workspace.PR, error) {
 	args := buildCreatePRArgs(req)
@@ -64,7 +86,7 @@ func buildCreatePRArgs(req workspace.CreatePRRequest) []string {
 }
 
 // parsePRFromURL fetches PR data from a URL returned by gh pr create.
-func (g *GitHubSCM) parsePRFromURL(
+func (g *GitHubCLISCM) parsePRFromURL(
 	ctx context.Context, url string,
 ) (*workspace.PR, error) {
 	out, err := runGH(ctx, "pr", "view", url, "--json", prViewFields)
@@ -75,7 +97,7 @@ func (g *GitHubSCM) parsePRFromURL(
 }
 
 // GetPR fetches a PR by number.
-func (g *GitHubSCM) GetPR(
+func (g *GitHubCLISCM) GetPR(
 	ctx context.Context, id int,
 ) (*workspace.PR, error) {
 	out, err := runGH(ctx, "pr", "view", fmt.Sprint(id), "--json", prViewFields)
@@ -86,7 +108,7 @@ func (g *GitHubSCM) GetPR(
 }
 
 // ListPRs returns open PRs whose head branch starts with headPrefix.
-func (g *GitHubSCM) ListPRs(
+func (g *GitHubCLISCM) ListPRs(
 	ctx context.Context, headPrefix string,
 ) ([]*workspace.PR, error) {
 	out, err := runGH(ctx,
@@ -102,7 +124,7 @@ func (g *GitHubSCM) ListPRs(
 }
 
 // GetPRReviews returns reviews on a PR.
-func (g *GitHubSCM) GetPRReviews(
+func (g *GitHubCLISCM) GetPRReviews(
 	ctx context.Context, prID int,
 ) ([]*workspace.Review, error) {
 	out, err := runGH(ctx,
@@ -116,7 +138,7 @@ func (g *GitHubSCM) GetPRReviews(
 }
 
 // RequestReview requests review from the given reviewers.
-func (g *GitHubSCM) RequestReview(
+func (g *GitHubCLISCM) RequestReview(
 	ctx context.Context, prID int, reviewers []string,
 ) error {
 	if len(reviewers) == 0 {
@@ -134,7 +156,7 @@ func (g *GitHubSCM) RequestReview(
 }
 
 // MergePR merges a PR using the given method.
-func (g *GitHubSCM) MergePR(
+func (g *GitHubCLISCM) MergePR(
 	ctx context.Context, prID int, method workspace.MergeMethod,
 ) error {
 	flag := mergeMethodFlag(method)
@@ -146,7 +168,7 @@ func (g *GitHubSCM) MergePR(
 }
 
 // CIStatus returns the combined CI status for a commit SHA.
-func (g *GitHubSCM) CIStatus(
+func (g *GitHubCLISCM) CIStatus(
 	ctx context.Context, sha string,
 ) (workspace.CICheckStatus, error) {
 	endpoint := fmt.Sprintf(
@@ -161,7 +183,7 @@ func (g *GitHubSCM) CIStatus(
 }
 
 // CILogs fetches combined log output from failing checks (max 8KB).
-func (g *GitHubSCM) CILogs(
+func (g *GitHubCLISCM) CILogs(
 	ctx context.Context, sha string,
 ) (string, error) {
 	endpoint := fmt.Sprintf(
