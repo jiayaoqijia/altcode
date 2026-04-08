@@ -212,7 +212,11 @@ func (wv *WorkspaceView) Render(theme Theme) string {
 func (wv *WorkspaceView) renderHeader(theme Theme) string {
 	var parts []string
 
-	// Workspace ID and task
+	// Snapshot sess fields — caller holds wv.mu but sess itself
+	// may be written concurrently by the lifecycle goroutine.
+	// These reads are safe because Bubbletea renders on the main
+	// goroutine and sess mutations only happen via handleWorkspacePoll
+	// which also runs on the main goroutine (tea.Cmd/Msg model).
 	id := wv.sess.ID
 	if len(id) > 8 {
 		id = id[:8]
