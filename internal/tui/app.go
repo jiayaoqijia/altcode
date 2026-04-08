@@ -337,6 +337,13 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			default:
 			}
 			return a, nil, true
+		case "ctrl+r":
+			select {
+			case a.wfOverride <- orchestra.OverrideCmd{Op: orchestra.OpResume}:
+				a.appendInfo("[workflow] Resumed.")
+			default:
+			}
+			return a, nil, true
 		}
 	}
 
