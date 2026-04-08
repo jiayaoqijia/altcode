@@ -362,9 +362,57 @@ waitLoop:
 		fmt.Printf("Output: %d bytes\n", len(output))
 	}
 
+	// Run manager agent to synthesize worker outputs
+	if hasCommits && len(sess.Agents) > 1 {
+		workerOutputs := make(map[string]string)
+		for role, rec := range sess.Agents {
+			workerOutputs[role] = rt.GetOutput(
+				rec.RuntimeHandleID)
+		}
+
+		mgrBackend := "codex"
+		for _, rec := range sess.Agents {
+			if rec.Backend == "claude" {
+				mgrBackend = "claude"
+				break
+			}
+		}
+
+		fmt.Println("\n=== Manager Synthesis ===")
+		mgrResult, mgrErr := workspace.RunManager(
+			ctx, workspace.ManagerConfig{
+				Task:          task,
+				WorkerOutputs: workerOutputs,
+				GitRoot:       gitRoot,
+				WorkDir:       gitRoot,
+				Backend:       mgrBackend,
+			})
+		if mgrErr != nil {
+			fmt.Printf("Manager agent failed: %v\n", mgrErr)
+		} else {
+			fmt.Printf("Summary: %s\n", mgrResult.Summary)
+		}
+	}
+
+	// Merge agent worktree changes into a single branch
 	if hasCommits {
-		fmt.Println("\nAgents committed code. " +
-			"Check worktrees or create PR.")
+		mergeBranch, mergeErr := workspace.MergeAgentWork(
+			ctx, gitRoot, base, sess.ID[:8], sess.Agents)
+		if mergeErr != nil {
+			fmt.Printf(
+				"\nMerge failed: %v\n", mergeErr)
+			fmt.Println(
+				"Agent worktrees preserved for manual merge.")
+		} else {
+			fmt.Printf(
+				"\nMerged to branch: %s\n", mergeBranch)
+
+			if !noPR {
+				fmt.Println(
+					"Create PR with: " +
+						"gh pr create --head " + mergeBranch)
+			}
+		}
 	}
 
 	// Persist final state
