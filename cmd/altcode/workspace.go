@@ -1,21 +1,15 @@
 package main
 
 import (
-	"bufio"
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
-	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strings"
-	"sync"
-	"syscall"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/config"
@@ -242,6 +236,7 @@ func runWorkspaceStart(
 			Task:          task,
 			Role:          rec.Role,
 			Model:         rec.Model,
+			MaxTurns:      50,
 			Env:           os.Environ(),
 			AOSessionID:   id,
 		}
@@ -277,6 +272,11 @@ func runWorkspaceStart(
 
 	if err := store.SaveSession(sess); err != nil {
 		return fmt.Errorf("save session after spawn: %w", err)
+	}
+
+	// Persist PIDs for resume (Gap 1)
+	if err := savePIDs(wsDir, id, sess.Agents); err != nil {
+		slog.Warn("failed to save PIDs", "err", err)
 	}
 
 	fmt.Printf("Workspace %s started\n", id)
@@ -564,44 +564,6 @@ func listAll(
 	return nil
 }
 
-// --- altcode workspace resume [id] ---
-
-func workspaceResumeCmd() *cobra.Command {
-	return &cobra.Command{
-		Use:   "resume [id]",
-		Short: "Resume a saved workspace (most recent if no ID given)",
-		Args:  cobra.MaximumNArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			wd, _ := os.Getwd()
-			root := config.DetectProjectRoot(wd)
-			wsDir := filepath.Join(
-				root, ".altcode", "workspace")
-			st := workspace.NewStore(wsDir)
-
-			id, err := resolveWorkspaceID(st, args)
-			if err != nil {
-				return err
-			}
-			sess, err := st.LoadSession(id)
-			if err != nil {
-				return fmt.Errorf("load: %w", err)
-			}
-			if isTerminalStatus(sess.Status) {
-				return fmt.Errorf(
-					"workspace %s is %s, cannot resume",
-					sess.ID, sess.Status)
-			}
-			sess.Status = workspace.WSSWorking
-			if err := st.SaveSession(sess); err != nil {
-				return fmt.Errorf("save: %w", err)
-			}
-			fmt.Printf("Workspace %s resumed (status: %s)\n",
-				sess.ID, sess.Status)
-			return nil
-		},
-	}
-}
-
 // --- helpers ---
 
 type roleAssignment struct {
@@ -677,201 +639,6 @@ func buildPluginSet(
 		SCM:       scmPlugin,
 		Notifier:  &noopNotifier{},
 	}
-}
-
-// processRuntime is a minimal Runtime that spawns OS processes.
-// Tracks spawned processes and captures output for one-shot agents.
-type processRuntime struct {
-	mu        sync.Mutex
-	procs     map[string]*os.Process
-	outputs   map[string]*bytes.Buffer // captured stdout per agent
-	exits     map[string]int           // exit codes per agent
-	callbacks map[string]func(string)  // handle ID → line callback
-}
-
-func (p *processRuntime) Name() string { return "process" }
-
-// OnOutput registers a per-line callback for a spawned process.
-// Lines are delivered in real-time as the process writes to stdout/stderr.
-func (p *processRuntime) OnOutput(
-	handleID string, cb func(string),
-) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.callbacks == nil {
-		p.callbacks = make(map[string]func(string))
-	}
-	p.callbacks[handleID] = cb
-}
-
-func (p *processRuntime) Spawn(
-	ctx context.Context,
-	argv []string,
-	env []string,
-	workdir string,
-) (workspace.RuntimeHandle, error) {
-	if len(argv) == 0 {
-		return workspace.RuntimeHandle{},
-			fmt.Errorf("empty command")
-	}
-	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
-	cmd.Dir = workdir
-	cmd.Env = env
-
-	// Pipe-based streaming: scan lines for callbacks + capture buffer
-	var buf bytes.Buffer
-	pr, pw := io.Pipe()
-	cmd.Stdout = pw
-	cmd.Stderr = pw
-
-	if err := cmd.Start(); err != nil {
-		pw.Close()
-		pr.Close()
-		return workspace.RuntimeHandle{},
-			fmt.Errorf("start: %w", err)
-	}
-	h := workspace.RuntimeHandle{
-		ID:        fmt.Sprintf("pid:%d", cmd.Process.Pid),
-		StartedAt: time.Now(),
-	}
-	p.mu.Lock()
-	if p.procs == nil {
-		p.procs = make(map[string]*os.Process)
-	}
-	if p.outputs == nil {
-		p.outputs = make(map[string]*bytes.Buffer)
-	}
-	if p.exits == nil {
-		p.exits = make(map[string]int)
-	}
-	if p.callbacks == nil {
-		p.callbacks = make(map[string]func(string))
-	}
-	p.procs[h.ID] = cmd.Process
-	p.mu.Unlock()
-
-	// Scanner goroutine: reads lines, writes to buffer, calls callback.
-	// Signals readerDone when complete so the wait goroutine can safely
-	// access the buffer (fixes data race on buf).
-	readerDone := make(chan struct{})
-	go func() {
-		defer close(readerDone)
-		scanner := bufio.NewScanner(pr)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-		for scanner.Scan() {
-			line := scanner.Text()
-			buf.WriteString(line + "\n")
-			p.mu.Lock()
-			cb := p.callbacks[h.ID]
-			p.mu.Unlock()
-			if cb != nil {
-				cb(line)
-			}
-		}
-		pr.Close()
-	}()
-
-	// Wait goroutine: waits for process exit, closes pipe writer,
-	// then waits for reader goroutine to finish before storing buffer.
-	go func() {
-		werr := cmd.Wait()
-		pw.Close()          // signals EOF to scanner
-		<-readerDone        // wait for scanner to finish (no race on buf)
-		p.mu.Lock()
-		delete(p.procs, h.ID)
-		p.outputs[h.ID] = &buf
-		if werr != nil {
-			if exitErr, ok := werr.(*exec.ExitError); ok {
-				p.exits[h.ID] = exitErr.ExitCode()
-			} else {
-				p.exits[h.ID] = 1
-			}
-		} else {
-			p.exits[h.ID] = 0
-		}
-		p.mu.Unlock()
-	}()
-	return h, nil
-}
-
-func (p *processRuntime) Attach(
-	_ context.Context, _ workspace.RuntimeHandle,
-) (<-chan string, error) {
-	ch := make(chan string)
-	close(ch)
-	return ch, nil
-}
-
-func (p *processRuntime) Kill(
-	h workspace.RuntimeHandle,
-) error {
-	p.mu.Lock()
-	proc, ok := p.procs[h.ID]
-	p.mu.Unlock()
-	if !ok {
-		return nil // already exited
-	}
-	return proc.Kill()
-}
-
-// KillAll terminates all tracked agent processes. Called on shutdown.
-func (p *processRuntime) KillAll() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	for _, proc := range p.procs {
-		proc.Kill() //nolint:errcheck
-	}
-}
-
-func (p *processRuntime) IsRunning(
-	h workspace.RuntimeHandle,
-) (bool, error) {
-	// Parse PID from handle ID
-	var pid int
-	if _, err := fmt.Sscanf(h.ID, "pid:%d", &pid); err != nil {
-		return false, nil
-	}
-	proc, err := os.FindProcess(pid)
-	if err != nil {
-		return false, nil
-	}
-	// Signal 0 checks existence without killing.
-	err = proc.Signal(syscall.Signal(0))
-	return err == nil, nil
-}
-
-// IsStillRunning checks a handle ID directly.
-func (p *processRuntime) IsStillRunning(
-	handleID string,
-) bool {
-	alive, _ := p.IsRunning(
-		workspace.RuntimeHandle{ID: handleID})
-	return alive
-}
-
-// GetOutput returns captured stdout/stderr for a completed agent.
-func (p *processRuntime) GetOutput(
-	handleID string,
-) string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if buf, ok := p.outputs[handleID]; ok {
-		return buf.String()
-	}
-	return ""
-}
-
-// GetExitCode returns the exit code for a completed agent.
-// Returns -1 if the agent hasn't exited yet.
-func (p *processRuntime) GetExitCode(
-	handleID string,
-) int {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if code, ok := p.exits[handleID]; ok {
-		return code
-	}
-	return -1
 }
 
 func printDryRun(
