@@ -17,6 +17,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/lifecycle"
+	"github.com/altcode-ai/altcode/internal/scm"
 	"github.com/altcode-ai/altcode/internal/workspace"
 	"github.com/altcode-ai/altcode/internal/workspace/backends"
 	"github.com/altcode-ai/altcode/internal/wsctl"
@@ -205,7 +206,7 @@ func runWorkspaceStart(
 	// Spawn agents
 	rt := &processRuntime{}
 	defer rt.KillAll() // ensure cleanup on exit/Ctrl+C
-	plugins := buildPluginSet(selected, rt)
+	plugins := buildPluginSet(selected, rt, gitRoot)
 	for _, rec := range sess.Agents {
 		agent, ok := plugins.Agents[rec.Backend]
 		if !ok {
@@ -476,6 +477,7 @@ func filterBackends(
 func buildPluginSet(
 	detected []backends.DetectedBackend,
 	rt *processRuntime,
+	gitRoot string,
 ) workspace.PluginSet {
 	agents := make(map[string]workspace.Agent)
 	for _, d := range detected {
@@ -484,9 +486,20 @@ func buildPluginSet(
 			agents[d.Name] = agent
 		}
 	}
+	// SCM: try GitHub (requires gh CLI), fall back to noop
+	var scmPlugin workspace.SCM
+	ghSCM, err := scm.NewGitHubSCM()
+	if err == nil {
+		scmPlugin = ghSCM
+	} else {
+		scmPlugin = &scm.NoopSCM{}
+	}
 	return workspace.PluginSet{
-		Runtime: rt,
-		Agents:  agents,
+		Runtime:   rt,
+		Agents:    agents,
+		Workspace: workspace.NewWorktreeWorkspace(),
+		SCM:       scmPlugin,
+		Notifier:  &noopNotifier{},
 	}
 }
 
@@ -631,3 +644,11 @@ func agentSummary(sess *workspace.WorkspaceSession) string {
 	}
 	return strings.Join(parts, " ")
 }
+
+// noopNotifier satisfies workspace.Notifier with no-op methods.
+type noopNotifier struct{}
+
+func (n *noopNotifier) Notify(_ context.Context, _ workspace.NotifyEvent) error {
+	return nil
+}
+func (n *noopNotifier) Name() string { return "none" }

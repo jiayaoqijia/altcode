@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/workspace"
@@ -408,5 +409,6 @@ func buildAgentSession(
 		PriorSessionID:  rec.SessionID,
 		RuntimeHandleID: rec.RuntimeHandleID,
 		AOSessionID:     sess.ID,
+		Env:             os.Environ(), // inherit parent env (API keys, PATH)
 	}
 }
