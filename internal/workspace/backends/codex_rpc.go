@@ -14,17 +14,18 @@ import (
 // CodexRPCClient drives a multi-turn Codex session via the
 // `codex app-server --listen stdio://` JSON-RPC 2.0 protocol.
 type CodexRPCClient struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdout   io.ReadCloser
-	scanner  *bufio.Scanner
-	mu       sync.Mutex
-	nextID   int
-	pending  map[int]chan rpcResult
-	threadID string
-	turnDone chan bool
-	onEvent  func(CodexEvent)
-	output   strings.Builder
+	cmd        *exec.Cmd
+	stdin      io.WriteCloser
+	stdout     io.ReadCloser
+	scanner    *bufio.Scanner
+	mu         sync.Mutex
+	nextID     int
+	pending    map[int]chan rpcResult
+	threadID   string
+	turnDone   chan bool
+	readerDone chan struct{} // closed when readLoop exits
+	onEvent    func(CodexEvent)
+	output     strings.Builder
 }
 
 // CodexEvent is emitted during a turn for streaming to the TUI.
@@ -75,7 +76,11 @@ func NewCodexRPCClient(
 	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
 	c.scanner = scanner
 
-	go c.readLoop()
+	c.readerDone = make(chan struct{})
+	go func() {
+		defer close(c.readerDone)
+		c.readLoop()
+	}()
 
 	return c, nil
 }
@@ -83,10 +88,12 @@ func NewCodexRPCClient(
 // Start performs the JSON-RPC handshake: initialize, initialized
 // notification, and thread/start. Extracts threadID for later turns.
 func (c *CodexRPCClient) Start(ctx context.Context, workdir string) error {
+	// Match multica's exact initialize params for compatibility
 	_, err := c.request(ctx, "initialize", map[string]any{
 		"clientInfo": map[string]any{
-			"name":    "altcode",
-			"version": "0.9",
+			"name":    "altcode-agent-sdk",
+			"title":   "Altcode Agent SDK",
+			"version": "0.9.0",
 		},
 		"capabilities": map[string]any{
 			"experimentalApi": true,
@@ -98,10 +105,14 @@ func (c *CodexRPCClient) Start(ctx context.Context, workdir string) error {
 
 	c.notify("initialized")
 
+	// Match multica's thread/start params (approvalPolicy prevents
+	// interactive prompts even if codex defaults to ask mode)
 	res, err := c.request(ctx, "thread/start", map[string]any{
 		"cwd":                    workdir,
 		"sandbox":                "workspace-write",
+		"approvalPolicy":         nil,
 		"persistExtendedHistory": true,
+		"experimentalRawEvents":  false,
 	})
 	if err != nil {
 		return fmt.Errorf("thread/start: %w", err)
@@ -149,9 +160,11 @@ func (c *CodexRPCClient) Wait(ctx context.Context) (string, error) {
 	}
 }
 
-// Close shuts down the codex process by closing stdin and waiting.
+// Close shuts down the codex process by closing stdin, waiting for the
+// reader goroutine to finish, then waiting for the process to exit.
 func (c *CodexRPCClient) Close() error {
 	c.stdin.Close()
+	<-c.readerDone // wait for readLoop to finish (no use-after-close)
 	return c.cmd.Wait()
 }
 

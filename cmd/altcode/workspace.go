@@ -702,8 +702,12 @@ func (p *processRuntime) Spawn(
 	p.procs[h.ID] = cmd.Process
 	p.mu.Unlock()
 
-	// Scanner goroutine: reads lines, writes to buffer, calls callback
+	// Scanner goroutine: reads lines, writes to buffer, calls callback.
+	// Signals readerDone when complete so the wait goroutine can safely
+	// access the buffer (fixes data race on buf).
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		scanner := bufio.NewScanner(pr)
 		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 		for scanner.Scan() {
@@ -716,12 +720,15 @@ func (p *processRuntime) Spawn(
 				cb(line)
 			}
 		}
+		pr.Close()
 	}()
 
-	// Wait goroutine: waits for process exit, closes pipe writer
+	// Wait goroutine: waits for process exit, closes pipe writer,
+	// then waits for reader goroutine to finish before storing buffer.
 	go func() {
 		werr := cmd.Wait()
-		pw.Close()
+		pw.Close()          // signals EOF to scanner
+		<-readerDone        // wait for scanner to finish (no race on buf)
 		p.mu.Lock()
 		delete(p.procs, h.ID)
 		p.outputs[h.ID] = &buf
