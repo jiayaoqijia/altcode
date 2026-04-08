@@ -187,6 +187,29 @@ func (wv *WorkspaceView) renderHeader(theme Theme) string {
 		Render(string(wv.sess.Status))
 	parts = append(parts, label, task, status)
 
+	// Aggregate CI + PR info from agents
+	var prCount, ciPassCount, ciFail int
+	for _, p := range wv.panes {
+		if p.PRID > 0 {
+			prCount++
+		}
+		if p.CIStatus == workspace.CIPass {
+			ciPassCount++
+		} else if p.CIStatus == workspace.CIFail {
+			ciFail++
+		}
+	}
+	if prCount > 0 {
+		prInfo := fmt.Sprintf("pr:%d", prCount)
+		if ciFail > 0 {
+			prInfo += fmt.Sprintf(" ci:%d fail", ciFail)
+		} else if ciPassCount > 0 {
+			prInfo += " ci:pass"
+		}
+		parts = append(parts, lipgloss.NewStyle().
+			Foreground(theme.Muted).Render(prInfo))
+	}
+
 	// Phase breadcrumb
 	if len(wv.phases) > 0 {
 		var badges []string
@@ -197,7 +220,7 @@ func (wv *WorkspaceView) renderHeader(theme Theme) string {
 			badges = append(badges, b)
 		}
 		sep := lipgloss.NewStyle().Foreground(theme.Muted).
-			Render(" > ")
+			Render(" → ")
 		parts = append(parts, strings.Join(badges, sep))
 	}
 
@@ -259,15 +282,15 @@ func (wv *WorkspaceView) renderFooter(theme Theme) string {
 }
 
 // phaseIcon returns an icon and color for a phase status string.
-func phaseIcon(status string, theme Theme) (string, lipgloss.Color) {
+func phaseIcon(status string, theme Theme) (string, lipgloss.TerminalColor) {
 	switch status {
 	case "done":
-		return "ok", theme.Success
+		return "✓", theme.Success
 	case "running":
-		return "..", theme.Warning
+		return "⟳", theme.Warning
 	case "failed":
-		return "!!", theme.Error
+		return "✗", theme.Error
 	default:
-		return "--", theme.Muted
+		return "·", theme.Muted
 	}
 }

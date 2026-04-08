@@ -55,6 +55,19 @@ func (p *wsAgentPane) Render(
 	actIcon := activityIcon(p.Activity)
 	header := fmt.Sprintf("%s %s %s", badge, backend, actIcon)
 
+	// Branch line (if available)
+	branchLine := ""
+	if p.Branch != "" {
+		shortBranch := p.Branch
+		if len(shortBranch) > width-6 {
+			shortBranch = shortBranch[len(shortBranch)-(width-9):] // show tail
+			shortBranch = "..." + shortBranch
+		}
+		branchLine = lipgloss.NewStyle().
+			Foreground(theme.Secondary).
+			Render("⎇ " + shortBranch)
+	}
+
 	// Status line: PR + CI + cost
 	statusParts := []string{
 		fmt.Sprintf("turns:%d", p.Turns),
@@ -77,7 +90,11 @@ func (p *wsAgentPane) Render(
 		Render(strings.Join(statusParts, "  "))
 
 	// Body: last N visible lines
-	bodyHeight := height - 3 // header + status + border
+	overhead := 3 // header + status + border
+	if branchLine != "" {
+		overhead = 4 // + branch line
+	}
+	bodyHeight := height - overhead
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
@@ -105,8 +122,12 @@ func (p *wsAgentPane) Render(
 		body = append(body, "")
 	}
 
-	content := header + "\n" + statusLine + "\n" +
-		strings.Join(body, "\n")
+	contentParts := []string{header, statusLine}
+	if branchLine != "" {
+		contentParts = append(contentParts, branchLine)
+	}
+	contentParts = append(contentParts, strings.Join(body, "\n"))
+	content := strings.Join(contentParts, "\n")
 
 	return lipgloss.NewStyle().
 		Width(width).
