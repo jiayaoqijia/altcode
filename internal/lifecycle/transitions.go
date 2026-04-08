@@ -11,30 +11,41 @@ import (
 	"github.com/altcode-ai/altcode/internal/workspace"
 )
 
-// advanceSpawning transitions to working once all agents are alive,
-// or to failed if any agent fails to start within SpawnTimeout.
+// advanceSpawning transitions to working once all agents have been
+// observed. One-shot agents (claude --print, codex exec) exit quickly
+// with code 0 — that is success, not a spawn failure.
 func advanceSpawning(
 	ctx context.Context,
 	sess *workspace.WorkspaceSession,
 	plugins workspace.PluginSet,
 ) error {
 	for _, rec := range sess.Agents {
-		alive, err := plugins.Runtime.IsRunning(
+		alive, _ := plugins.Runtime.IsRunning(
 			workspace.RuntimeHandle{ID: rec.RuntimeHandleID},
 		)
-		if err != nil {
-			return fmt.Errorf("check alive %s: %w", rec.Role, err)
+		if alive {
+			// Still running — mark active, keep going
+			rec.ActivityState = workspace.ActivityActive
+			continue
 		}
-		if !alive && time.Since(rec.SpawnedAt) > SpawnTimeout {
-			sess.Status = workspace.WSSFailed
-			sess.Error = fmt.Sprintf(
-				"agent %s failed to start within %s", rec.Role, SpawnTimeout)
-			return nil
-		}
-		if !alive {
-			return nil // still waiting
+		// Agent is not running. For one-shot agents this is normal.
+		if rec.ActivityState == workspace.ActivitySpawning {
+			// Check if it ever got a runtime handle (was actually spawned)
+			if rec.RuntimeHandleID == "" &&
+				time.Since(rec.SpawnedAt) > SpawnTimeout {
+				sess.Status = workspace.WSSFailed
+				sess.Error = fmt.Sprintf(
+					"agent %s failed to start within %s",
+					rec.Role, SpawnTimeout)
+				return nil
+			}
+			// Exited (possibly immediately) — mark as done
+			rec.ActivityState = workspace.ActivityExited
+			now := time.Now()
+			rec.ExitedAt = &now
 		}
 	}
+	// Transition to working once we've observed all agents
 	sess.Status = workspace.WSSWorking
 	return nil
 }

@@ -225,10 +225,12 @@ func TestAdvanceSpawning_AllAlive(t *testing.T) {
 }
 
 func TestAdvanceSpawning_Timeout(t *testing.T) {
-	rt := &mockRuntime{running: map[string]bool{"pid:1": false}}
+	// Timeout only fires when the agent never got a handle ID (never started).
+	rt := &mockRuntime{running: map[string]bool{}}
 	scm := &mockSCM{prs: map[int]*workspace.PR{}}
 	mgr := testManager(t, testPlugins(rt, scm))
 	sess := testSession()
+	sess.Agents["implementer"].RuntimeHandleID = "" // never got a PID
 	sess.Agents["implementer"].SpawnedAt = time.Now().Add(-SpawnTimeout - time.Second)
 
 	if err := mgr.Advance(context.Background(), sess); err != nil {
@@ -239,6 +241,29 @@ func TestAdvanceSpawning_Timeout(t *testing.T) {
 	}
 	if sess.Error == "" {
 		t.Fatal("expected error message")
+	}
+}
+
+func TestAdvanceSpawning_OneShotExited(t *testing.T) {
+	// One-shot agents exit quickly with code 0. This is success, not failure.
+	rt := &mockRuntime{running: map[string]bool{"pid:1": false}}
+	scm := &mockSCM{prs: map[int]*workspace.PR{}}
+	mgr := testManager(t, testPlugins(rt, scm))
+	sess := testSession()
+	sess.Agents["implementer"].SpawnedAt = time.Now().Add(-SpawnTimeout - time.Second)
+
+	if err := mgr.Advance(context.Background(), sess); err != nil {
+		t.Fatal(err)
+	}
+	if sess.Status != workspace.WSSWorking {
+		t.Fatalf("expected working, got %s", sess.Status)
+	}
+	rec := sess.Agents["implementer"]
+	if rec.ActivityState != workspace.ActivityExited {
+		t.Fatalf("expected exited, got %s", rec.ActivityState)
+	}
+	if rec.ExitedAt == nil {
+		t.Fatal("expected ExitedAt to be set")
 	}
 }
 

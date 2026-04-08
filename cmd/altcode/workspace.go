@@ -1,10 +1,12 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -270,16 +272,6 @@ func runWorkspaceStart(
 		return fmt.Errorf("save session after spawn: %w", err)
 	}
 
-	// Start lifecycle manager
-	log := slog.New(slog.NewTextHandler(os.Stderr,
-		&slog.HandlerOptions{Level: slog.LevelWarn}))
-	mgr := lifecycle.NewManager(store, plugins, log)
-	go func() {
-		if rerr := mgr.Run(ctx, sess); rerr != nil {
-			log.Error("lifecycle", "err", rerr)
-		}
-	}()
-
 	fmt.Printf("Workspace %s started\n", id)
 	fmt.Printf("Task: %s\n", task)
 	fmt.Printf("Agents: %d\n", len(sess.Agents))
@@ -288,8 +280,94 @@ func runWorkspaceStart(
 			rec.Role, rec.Backend, rec.Branch)
 	}
 
-	// Block until context cancelled or lifecycle completes
-	<-ctx.Done()
+	// Wait for all agents to complete (one-shot model)
+	fmt.Println("Waiting for agents to complete...")
+	deadline := time.After(10 * time.Minute)
+	pollTick := time.NewTicker(2 * time.Second)
+	defer pollTick.Stop()
+
+waitLoop:
+	for {
+		allDone := true
+		for _, rec := range sess.Agents {
+			if rt.IsStillRunning(rec.RuntimeHandleID) {
+				allDone = false
+				break
+			}
+		}
+		if allDone {
+			break
+		}
+		select {
+		case <-pollTick.C:
+			continue
+		case <-deadline:
+			fmt.Println("Timeout waiting for agents")
+			rt.KillAll()
+			break waitLoop
+		case <-ctx.Done():
+			rt.KillAll()
+			return ctx.Err()
+		}
+	}
+
+	// Update agent records with exit info
+	for _, rec := range sess.Agents {
+		exitCode := rt.GetExitCode(rec.RuntimeHandleID)
+		if exitCode >= 0 {
+			rec.ExitCode = exitCode
+			rec.ActivityState = workspace.ActivityExited
+			now := time.Now()
+			rec.ExitedAt = &now
+		}
+	}
+	sess.Status = workspace.WSSWorking
+
+	// Run one lifecycle advance to handle the spawning→working transition
+	log := slog.New(slog.NewTextHandler(os.Stderr,
+		&slog.HandlerOptions{Level: slog.LevelWarn}))
+	mgr := lifecycle.NewManager(store, plugins, log)
+	_ = mgr.Advance(ctx, sess)
+
+	// Check what each agent produced
+	fmt.Println("\n=== Results ===")
+	hasCommits := false
+	for role, rec := range sess.Agents {
+		output := rt.GetOutput(rec.RuntimeHandleID)
+		exitCode := rt.GetExitCode(rec.RuntimeHandleID)
+
+		fmt.Printf("\n--- %s (%s) ---\n", role, rec.Backend)
+		fmt.Printf("Exit code: %d\n", exitCode)
+
+		// Check for git commits in the worktree
+		if rec.WorktreePath != "" {
+			commits, gerr := runGitInDir(
+				ctx, rec.WorktreePath,
+				"log", "--oneline", base+"..HEAD",
+			)
+			if gerr == nil && commits != "" {
+				hasCommits = true
+				fmt.Printf("Commits:\n%s\n", commits)
+			} else {
+				fmt.Println("No commits")
+			}
+		}
+		fmt.Printf("Output: %d bytes\n", len(output))
+	}
+
+	if hasCommits {
+		fmt.Println("\nAgents committed code. " +
+			"Check worktrees or create PR.")
+	}
+
+	// Persist final state
+	now := time.Now()
+	sess.CompletedAt = &now
+	sess.Status = workspace.WSSDone
+	if err := store.SaveSession(sess); err != nil {
+		return fmt.Errorf("save final: %w", err)
+	}
+
 	return nil
 }
 
@@ -547,10 +625,12 @@ func buildPluginSet(
 }
 
 // processRuntime is a minimal Runtime that spawns OS processes.
-// Tracks spawned processes for proper cleanup on shutdown.
+// Tracks spawned processes and captures output for one-shot agents.
 type processRuntime struct {
-	mu    sync.Mutex
-	procs map[string]*os.Process // handle ID → process
+	mu      sync.Mutex
+	procs   map[string]*os.Process
+	outputs map[string]*bytes.Buffer // captured stdout per agent
+	exits   map[string]int           // exit codes per agent
 }
 
 func (p *processRuntime) Name() string { return "process" }
@@ -568,8 +648,12 @@ func (p *processRuntime) Spawn(
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = workdir
 	cmd.Env = env
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
+
+	// Tee stdout/stderr to both terminal and capture buffer
+	var buf bytes.Buffer
+	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
+	cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+
 	if err := cmd.Start(); err != nil {
 		return workspace.RuntimeHandle{},
 			fmt.Errorf("start: %w", err)
@@ -582,12 +666,29 @@ func (p *processRuntime) Spawn(
 	if p.procs == nil {
 		p.procs = make(map[string]*os.Process)
 	}
+	if p.outputs == nil {
+		p.outputs = make(map[string]*bytes.Buffer)
+	}
+	if p.exits == nil {
+		p.exits = make(map[string]int)
+	}
 	p.procs[h.ID] = cmd.Process
 	p.mu.Unlock()
+
 	go func() {
-		cmd.Wait() //nolint:errcheck
+		werr := cmd.Wait()
 		p.mu.Lock()
 		delete(p.procs, h.ID)
+		p.outputs[h.ID] = &buf
+		if werr != nil {
+			if exitErr, ok := werr.(*exec.ExitError); ok {
+				p.exits[h.ID] = exitErr.ExitCode()
+			} else {
+				p.exits[h.ID] = 1
+			}
+		} else {
+			p.exits[h.ID] = 0
+		}
 		p.mu.Unlock()
 	}()
 	return h, nil
@@ -637,6 +738,40 @@ func (p *processRuntime) IsRunning(
 	// Signal 0 checks existence without killing.
 	err = proc.Signal(syscall.Signal(0))
 	return err == nil, nil
+}
+
+// IsStillRunning checks a handle ID directly.
+func (p *processRuntime) IsStillRunning(
+	handleID string,
+) bool {
+	alive, _ := p.IsRunning(
+		workspace.RuntimeHandle{ID: handleID})
+	return alive
+}
+
+// GetOutput returns captured stdout/stderr for a completed agent.
+func (p *processRuntime) GetOutput(
+	handleID string,
+) string {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if buf, ok := p.outputs[handleID]; ok {
+		return buf.String()
+	}
+	return ""
+}
+
+// GetExitCode returns the exit code for a completed agent.
+// Returns -1 if the agent hasn't exited yet.
+func (p *processRuntime) GetExitCode(
+	handleID string,
+) int {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if code, ok := p.exits[handleID]; ok {
+		return code
+	}
+	return -1
 }
 
 func printDryRun(
