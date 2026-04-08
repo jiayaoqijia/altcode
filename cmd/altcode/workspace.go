@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/rand"
@@ -266,6 +267,12 @@ func runWorkspaceStart(
 		}
 		rec.RuntimeHandleID = handle.ID
 		rec.SpawnedAt = handle.StartedAt
+
+		// Stream agent output to stdout with role prefix
+		role := rec.Role
+		rt.OnOutput(handle.ID, func(line string) {
+			fmt.Printf("[%s] %s\n", role, line)
+		})
 	}
 
 	if err := store.SaveSession(sess); err != nil {
@@ -627,13 +634,27 @@ func buildPluginSet(
 // processRuntime is a minimal Runtime that spawns OS processes.
 // Tracks spawned processes and captures output for one-shot agents.
 type processRuntime struct {
-	mu      sync.Mutex
-	procs   map[string]*os.Process
-	outputs map[string]*bytes.Buffer // captured stdout per agent
-	exits   map[string]int           // exit codes per agent
+	mu        sync.Mutex
+	procs     map[string]*os.Process
+	outputs   map[string]*bytes.Buffer // captured stdout per agent
+	exits     map[string]int           // exit codes per agent
+	callbacks map[string]func(string)  // handle ID → line callback
 }
 
 func (p *processRuntime) Name() string { return "process" }
+
+// OnOutput registers a per-line callback for a spawned process.
+// Lines are delivered in real-time as the process writes to stdout/stderr.
+func (p *processRuntime) OnOutput(
+	handleID string, cb func(string),
+) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.callbacks == nil {
+		p.callbacks = make(map[string]func(string))
+	}
+	p.callbacks[handleID] = cb
+}
 
 func (p *processRuntime) Spawn(
 	ctx context.Context,
@@ -649,12 +670,15 @@ func (p *processRuntime) Spawn(
 	cmd.Dir = workdir
 	cmd.Env = env
 
-	// Tee stdout/stderr to both terminal and capture buffer
+	// Pipe-based streaming: scan lines for callbacks + capture buffer
 	var buf bytes.Buffer
-	cmd.Stdout = io.MultiWriter(os.Stdout, &buf)
-	cmd.Stderr = io.MultiWriter(os.Stderr, &buf)
+	pr, pw := io.Pipe()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
 	if err := cmd.Start(); err != nil {
+		pw.Close()
+		pr.Close()
 		return workspace.RuntimeHandle{},
 			fmt.Errorf("start: %w", err)
 	}
@@ -672,11 +696,32 @@ func (p *processRuntime) Spawn(
 	if p.exits == nil {
 		p.exits = make(map[string]int)
 	}
+	if p.callbacks == nil {
+		p.callbacks = make(map[string]func(string))
+	}
 	p.procs[h.ID] = cmd.Process
 	p.mu.Unlock()
 
+	// Scanner goroutine: reads lines, writes to buffer, calls callback
+	go func() {
+		scanner := bufio.NewScanner(pr)
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		for scanner.Scan() {
+			line := scanner.Text()
+			buf.WriteString(line + "\n")
+			p.mu.Lock()
+			cb := p.callbacks[h.ID]
+			p.mu.Unlock()
+			if cb != nil {
+				cb(line)
+			}
+		}
+	}()
+
+	// Wait goroutine: waits for process exit, closes pipe writer
 	go func() {
 		werr := cmd.Wait()
+		pw.Close()
 		p.mu.Lock()
 		delete(p.procs, h.ID)
 		p.outputs[h.ID] = &buf
