@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -12,7 +13,7 @@ import (
 // startWorkspaceFromTUI creates a workspace session from a task prompt
 // and activates the workspace dashboard. This is the /workspace slash command handler.
 func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
-	detected, _ := backends.DetectBackends(nil)
+	detected, _ := backends.DetectBackends(context.Background())
 	if len(detected) == 0 {
 		a.appendInfo("[workspace] No CLI backends found. Install claude, codex, or opencode.")
 		return nil
