@@ -11,6 +11,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/orchestra"
+	"github.com/altcode-ai/altcode/internal/workspace"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -23,6 +24,10 @@ type eventMsg event.Event
 type streamDoneMsg struct{}
 type wfEventMsg orchestra.PhaseEvent  // workflow phase event from orchestra
 type wfDoneMsg struct{}               // workflow completed
+type workspacePollMsg struct{}        // periodic workspace poll tick
+type workspaceTransitionMsg struct {  // workspace state machine transition
+	Status workspace.WorkspaceStatus
+}
 
 // App is the top-level Bubbletea model for altcode.
 type App struct {
@@ -72,8 +77,9 @@ type App struct {
 	gitProject       string
 	gitBranch        string
 
-	teamView       *teamView       // split-pane view for team mode
-	wfHeader       *workflowHeader // phase breadcrumb for workflow mode
+	teamView       *teamView        // split-pane view for team mode
+	wsView         *WorkspaceView   // workspace mode dashboard
+	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
 	wfRunning      bool
@@ -185,6 +191,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mdRenderer = NewMarkdownRenderer(mainWidth - 4)
 		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
 		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
+		if a.wsView != nil {
+			a.wsView.SetSize(msg.Width, max(1, msg.Height-6))
+		}
 		if a.wfHeader != nil {
 			a.wfHeader.width = msg.Width
 		}
@@ -205,6 +214,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.busy = false
 		a.teamView.Stop()
 		a.appendInfo("[workflow] Complete.")
+		return a, nil
+	case workspacePollMsg:
+		return a, a.handleWorkspacePoll()
+	case workspaceTransitionMsg:
+		a.appendInfo(fmt.Sprintf("[workspace] Status → %s", msg.Status))
 		return a, nil
 	}
 
@@ -256,6 +270,46 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return a, tea.Quit, true
 		}
 		return a, nil, false
+	}
+
+	// Workspace override keys (when workspace view is active)
+	if a.wsView != nil && a.wsView.IsActive() {
+		switch msg.String() {
+		case "ctrl+z":
+			a.wsView.SetPaused(true)
+			a.appendInfo("[workspace] Paused.")
+			return a, nil, true
+		case "ctrl+q":
+			a.wsView.Stop()
+			a.busy = false
+			a.appendInfo("[workspace] Aborted.")
+			return a, nil, true
+		case "ctrl+r":
+			a.wsView.SetPaused(false)
+			a.appendInfo("[workspace] Resumed.")
+			return a, nil, true
+		case "tab":
+			a.wsView.CycleFocus()
+			return a, nil, true
+		case "ctrl+1":
+			a.wsView.FocusAgent(0)
+			return a, nil, true
+		case "ctrl+2":
+			a.wsView.FocusAgent(1)
+			return a, nil, true
+		case "ctrl+3":
+			a.wsView.FocusAgent(2)
+			return a, nil, true
+		case "ctrl+s":
+			// Send message to focused agent — prompt for input
+			focused := a.wsView.FocusedRole()
+			if focused != "" {
+				a.appendInfo(fmt.Sprintf("Use: /send %s <message>", focused))
+			} else {
+				a.appendInfo("No agent focused. Press Tab to cycle, then Ctrl+S.")
+			}
+			return a, nil, true
+		}
 	}
 
 	// Workflow override keys
@@ -666,6 +720,11 @@ func (a *App) View() string {
 		mainBody = a.palette.View()
 	} else if a.sessionSwitcher.IsVisible() {
 		mainBody = a.sessionSwitcher.View()
+	}
+
+	// Workspace view: dashboard display when workspace mode is active
+	if a.wsView != nil && a.wsView.IsActive() {
+		mainBody = a.wsView.Render(a.theme)
 	}
 
 	// Team view: split-pane display when team mode is active

@@ -91,6 +91,10 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		}
 	case "/backends":
 		a.appendInfo(a.builtinBackendsText())
+	case "/rollback":
+		a.appendInfo(a.builtinRollbackText(parts))
+	case "/send":
+		a.appendInfo(a.builtinSendText(parts))
 	case "/undo":
 		a.appendInfo(a.builtinUndoText())
 	case "/redo":
@@ -122,7 +126,7 @@ func (a *App) slashCommandNames() []string {
 		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
 		"/backends", "/undo", "/redo", "/search",
 		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
-		"/plan",
+		"/plan", "/rollback", "/send",
 	}
 	// Add discovered slash commands
 	for name := range a.commands {
@@ -209,6 +213,8 @@ func builtinHelpText() string {
 		{"/wf-resume", "resume workflows"},
 		{"/wf-cancel", "clear workflow state"},
 		{"/team", "multi-AI team config"},
+		{"/rollback", "rollback to turn N"},
+		{"/send", "send msg to agent"},
 		{"/undo", "git-backed undo"},
 		{"/redo", "restore undo"},
 	}
@@ -786,4 +792,67 @@ func (a *App) engineMemoryCount() int {
 		return 0
 	}
 	return len(memories)
+}
+
+// builtinRollbackText handles /rollback --turn N.
+func (a *App) builtinRollbackText(parts []string) string {
+	if a.engine == nil {
+		return "No engine available."
+	}
+
+	turn := -1
+	for i, p := range parts {
+		if p == "--turn" && i+1 < len(parts) {
+			n := 0
+			for _, c := range parts[i+1] {
+				if c < '0' || c > '9' {
+					return "Usage: /rollback --turn N (N must be a positive integer)"
+				}
+				n = n*10 + int(c-'0')
+			}
+			turn = n
+			break
+		}
+	}
+	if turn < 0 {
+		return "Usage: /rollback --turn N\n  Rolls back the conversation to turn N."
+	}
+
+	msgs := a.engine.Messages()
+	// Count user turns
+	turnIdx := 0
+	cutoff := len(msgs)
+	for i, m := range msgs {
+		if m.Role == "user" {
+			turnIdx++
+			if turnIdx > turn {
+				cutoff = i
+				break
+			}
+		}
+	}
+	if turn > turnIdx {
+		return fmt.Sprintf("Only %d turns exist. Cannot roll back to turn %d.", turnIdx, turn)
+	}
+
+	a.engine.TruncateMessages(cutoff)
+	kept := len(a.engine.Messages())
+	return fmt.Sprintf("Rolled back to turn %d (%d messages retained).", turn, kept)
+}
+
+// builtinSendText handles /send <role> <message>.
+func (a *App) builtinSendText(parts []string) string {
+	if len(parts) < 3 {
+		return "Usage: /send <role> <message>\n  Sends a message to the named agent."
+	}
+
+	role := parts[1]
+	message := strings.Join(parts[2:], " ")
+
+	if a.wsView == nil || !a.wsView.IsActive() {
+		return "No active workspace. /send requires a running workspace session."
+	}
+
+	a.wsView.AppendAgentOutput(role, fmt.Sprintf("[operator] %s", message))
+	return fmt.Sprintf("Sent to %s: %s", role, message)
 }

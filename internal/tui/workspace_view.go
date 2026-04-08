@@ -88,6 +88,16 @@ func (wv *WorkspaceView) FocusAgent(n int) {
 	}
 }
 
+// FocusedRole returns the role name of the currently focused agent, or "".
+func (wv *WorkspaceView) FocusedRole() string {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	if wv.focus >= 0 && wv.focus < len(wv.order) {
+		return wv.order[wv.focus]
+	}
+	return ""
+}
+
 // CycleFocus advances focus to the next pane.
 func (wv *WorkspaceView) CycleFocus() {
 	wv.mu.Lock()

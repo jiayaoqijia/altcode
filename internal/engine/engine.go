@@ -329,6 +329,16 @@ func (e *Engine) ClearMessages() {
 	e.messages = []provider.Message{}
 }
 
+// TruncateMessages keeps only the first n messages, discarding the rest.
+func (e *Engine) TruncateMessages(n int) {
+	if n < 0 {
+		n = 0
+	}
+	if n < len(e.messages) {
+		e.messages = e.messages[:n]
+	}
+}
+
 // CostTracker returns the engine's cost tracker.
 func (e *Engine) CostTracker() *cost.Tracker {
 	return e.cost
