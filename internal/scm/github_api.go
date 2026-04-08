@@ -27,13 +27,17 @@ type GitHubAPISCM struct {
 }
 
 // NewGitHubAPISCM creates a GitHubAPISCM with the given owner/repo.
-func NewGitHubAPISCM(
-	owner, repo string,
-) (*GitHubAPISCM, error) {
-	token := DiscoverGitHubToken()
+// Discovers the token automatically. Use NewGitHubAPISCMWithToken to pass one directly.
+func NewGitHubAPISCM(owner, repo string) (*GitHubAPISCM, error) {
+	return NewGitHubAPISCMWithToken(owner, repo, DiscoverGitHubToken())
+}
+
+// NewGitHubAPISCMWithToken creates a GitHubAPISCM with an explicit token.
+// Avoids double token discovery when the caller already has the token.
+func NewGitHubAPISCMWithToken(owner, repo, token string) (*GitHubAPISCM, error) {
 	if token == "" {
 		return nil, fmt.Errorf(
-			"github api: no token found; set GITHUB_TOKEN or GH_TOKEN")
+			"github api: no token provided; set GITHUB_TOKEN or GH_TOKEN")
 	}
 	base := os.Getenv("GITHUB_API_URL")
 	if base == "" {
@@ -170,13 +174,17 @@ func (g *GitHubAPISCM) doRequest(
 		return nil, err
 	}
 
-	// Rate-limit awareness: sleep briefly when running low.
-	// Rate limit awareness: only trust the header for known GitHub hosts.
-	// Cap sleep at 2s to prevent server-controlled DoS.
-	if strings.Contains(g.baseURL, "github.com") || strings.Contains(g.baseURL, "github") {
+	// Rate-limit awareness: context-aware sleep when running low.
+	// Only trust the header for known GitHub hosts (prevents DoS via fake header).
+	if strings.Contains(g.baseURL, "github.com") {
 		if remaining := resp.Header.Get("X-RateLimit-Remaining"); remaining != "" {
 			if n, perr := strconv.Atoi(remaining); perr == nil && n < 10 {
-				time.Sleep(2 * time.Second)
+				select {
+				case <-time.After(2 * time.Second):
+				case <-ctx.Done():
+					resp.Body.Close()
+					return nil, ctx.Err()
+				}
 			}
 		}
 	}
@@ -242,12 +250,15 @@ func (g *GitHubAPISCM) CreatePR(
 	}
 	pr := raw.toWorkspacePR()
 
-	// Apply labels if requested (separate endpoint).
+	// Apply labels if requested (separate endpoint, non-fatal on failure).
 	if len(req.Labels) > 0 {
 		labelsBody := map[string][]string{"labels": req.Labels}
-		_ = g.doJSON(ctx, http.MethodPost,
+		if lerr := g.doJSON(ctx, http.MethodPost,
 			g.repoPath("issues/%d/labels", raw.Number),
-			labelsBody, nil)
+			labelsBody, nil); lerr != nil {
+			// Non-fatal: PR was created, labels failed. Wrap as warning.
+			return pr, fmt.Errorf("PR #%d created but labels failed: %w", raw.Number, lerr)
+		}
 	}
 
 	return pr, nil

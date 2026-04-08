@@ -31,7 +31,7 @@ func NewGitHubSCM() (workspace.SCM, error) {
 	}
 	token := DiscoverGitHubToken()
 	if token != "" {
-		api, aerr := NewGitHubAPISCM(owner, repo)
+		api, aerr := NewGitHubAPISCMWithToken(owner, repo, token)
 		if aerr == nil {
 			return api, nil
 		}
