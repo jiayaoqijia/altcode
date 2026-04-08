@@ -150,6 +150,32 @@ func (wv *WorkspaceView) UpdateAgent(rec *workspace.AgentRecord) {
 	p.Turns = rec.TurnCount
 }
 
+// updatePhases rebuilds the phase breadcrumb from current agent states.
+func (wv *WorkspaceView) updatePhases() {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	phases := make([]wsPhase, 0, len(wv.order))
+	for _, role := range wv.order {
+		p := wv.panes[role]
+		status := "pending"
+		switch p.Activity {
+		case workspace.ActivityActive:
+			status = "running"
+		case workspace.ActivityExited:
+			status = "done"
+		case workspace.ActivityBlocked:
+			status = "failed"
+		case workspace.ActivityReady, workspace.ActivityIdle:
+			status = "done"
+		}
+		phases = append(phases, wsPhase{
+			Name:   role,
+			Status: status,
+		})
+	}
+	wv.phases = phases
+}
+
 // Render returns the full workspace dashboard view.
 func (wv *WorkspaceView) Render(theme Theme) string {
 	wv.mu.Lock()

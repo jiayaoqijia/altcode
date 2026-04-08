@@ -85,6 +85,9 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 		}
 	}
 
+	// Populate phase breadcrumb from agent states (spec gap 3)
+	a.wsView.updatePhases()
+
 	// Ring bell at most once per cooldown period
 	if bellNeeded && time.Since(a.lastBell) > bellCooldown {
 		a.lastBell = time.Now()

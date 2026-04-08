@@ -26,11 +26,14 @@ const (
 
 // ExternalAgentConfig configures an external CLI agent.
 type ExternalAgentConfig struct {
-	Backend  CLIBackend
-	Role     string        // human-readable role name (e.g. "architect", "reviewer")
-	Model    string        // model override (e.g. "o3", "claude-sonnet-4-20250514")
-	Timeout  time.Duration // 0 = no timeout
-	WorkDir  string        // working directory for the CLI
+	Backend            CLIBackend
+	Role               string        // human-readable role name (e.g. "architect", "reviewer")
+	Model              string        // model override (e.g. "o3", "claude-sonnet-4-20250514")
+	Timeout            time.Duration // 0 = no timeout
+	WorkDir            string        // working directory for the CLI
+	MaxTurns           int           // max agentic turns (0 = unlimited)
+	AppendSystemPrompt string        // appended to the agent's system prompt
+	ResumeSessionID    string        // resume a prior session by ID
 }
 
 // AgentEventType identifies a typed streaming event.
@@ -278,6 +281,17 @@ func buildCLICommand(ctx context.Context, cfg ExternalAgentConfig, task string) 
 		}
 		if cfg.Model != "" {
 			args = append(args, "--model", cfg.Model)
+		}
+		if cfg.MaxTurns > 0 {
+			args = append(args, "--max-turns",
+				fmt.Sprintf("%d", cfg.MaxTurns))
+		}
+		if cfg.AppendSystemPrompt != "" {
+			args = append(args,
+				"--append-system-prompt", cfg.AppendSystemPrompt)
+		}
+		if cfg.ResumeSessionID != "" {
+			args = append(args, "--resume", cfg.ResumeSessionID)
 		}
 		args = append(args, "--print", task)
 		return exec.CommandContext(ctx, "claude", args...)

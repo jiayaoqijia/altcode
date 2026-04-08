@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"time"
 
+	"github.com/altcode-ai/altcode/internal/checkpoint"
 	"github.com/altcode-ai/altcode/internal/workspace"
 )
 
@@ -219,6 +221,17 @@ func advanceChangesRequested(
 		return err
 	}
 	sess.Status = workspace.WSSWorking
+
+	// Re-request review after the agent addresses feedback (spec gap 2)
+	if len(sess.Reviewers) > 0 {
+		for _, rec := range sess.Agents {
+			if rec.PRID > 0 {
+				_ = plugins.SCM.RequestReview(
+					ctx, rec.PRID, sess.Reviewers,
+				)
+			}
+		}
+	}
 	return nil
 }
 
@@ -400,6 +413,20 @@ func checkpointOnTurnEnd(
 		return err
 	}
 	rec.HeadSHA = hash
+
+	// Write checkpoint JSON metadata (spec gap 1: was never persisted)
+	cpDir := filepath.Join(
+		sess.GitRoot, ".altcode", "workspace",
+		sess.ID, "checkpoints",
+	)
+	_ = checkpoint.WriteCheckpoint(cpDir, checkpoint.TurnCheckpoint{
+		Turn:         rec.TurnCount,
+		CommitHash:   hash,
+		Role:         rec.Role,
+		Branch:       rec.Branch,
+		WorktreePath: rec.WorktreePath,
+		CreatedAt:    time.Now(),
+	})
 	return nil
 }
 
