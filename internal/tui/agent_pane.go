@@ -86,10 +86,18 @@ func (p *wsAgentPane) Render(
 		visible = visible[len(visible)-bodyHeight:]
 	}
 	var body []string
+	maxLineWidth := width - 4
+	if maxLineWidth < 3 {
+		maxLineWidth = 3
+	}
 	for _, l := range visible {
 		runes := []rune(l)
-		if len(runes) > width-4 {
-			l = string(runes[:width-7]) + "..."
+		if len(runes) > maxLineWidth {
+			cut := maxLineWidth - 3
+			if cut < 0 {
+				cut = 0
+			}
+			l = string(runes[:cut]) + "..."
 		}
 		body = append(body, l)
 	}

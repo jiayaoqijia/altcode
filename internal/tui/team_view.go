@@ -223,11 +223,20 @@ func (tv *teamView) renderPane(p *agentPane, w, h int, theme Theme) string {
 		lines = lines[len(lines)-visibleLines:]
 	}
 
-	// Truncate long lines
+	// Truncate long lines (rune-safe for UTF-8)
 	var body []string
+	maxW := w - 2
+	if maxW < 3 {
+		maxW = 3
+	}
 	for _, l := range lines {
-		if len(l) > w-2 {
-			l = l[:w-5] + "..."
+		runes := []rune(l)
+		if len(runes) > maxW {
+			cut := maxW - 3
+			if cut < 0 {
+				cut = 0
+			}
+			l = string(runes[:cut]) + "..."
 		}
 		body = append(body, l)
 	}

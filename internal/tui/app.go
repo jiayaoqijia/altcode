@@ -184,6 +184,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
 		a.mdRenderer = NewMarkdownRenderer(mainWidth - 4)
 		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
+		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
+		if a.wfHeader != nil {
+			a.wfHeader.width = msg.Width
+		}
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
 		a.palette.SetWidth(msg.Width)
@@ -665,15 +669,11 @@ func (a *App) View() string {
 	}
 
 	// Team view: split-pane display when team mode is active
+	// NOTE: SetSize is called in Update's WindowSizeMsg handler, not here.
+	// View() must be a pure render function (no state mutation).
 	if a.teamView.IsActive() || a.wfRunning {
-		wfHeaderHeight := 0
-		if a.wfRunning && len(a.wfHeader.phases) > 0 {
-			wfHeaderHeight = 1
-		}
-		a.teamView.SetSize(a.width, a.height-6-wfHeaderHeight)
 		panes := a.teamView.Render(a.theme)
-		if wfHeaderHeight > 0 {
-			a.wfHeader.width = a.width
+		if a.wfRunning && len(a.wfHeader.phases) > 0 {
 			mainBody = a.wfHeader.Render(a.theme) + "\n" + panes
 		} else {
 			mainBody = panes
