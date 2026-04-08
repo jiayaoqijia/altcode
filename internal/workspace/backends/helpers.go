@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -159,14 +158,12 @@ func installPathWrappers(workspacePath string) error {
 		return err
 	}
 	for _, tool := range []string{"git", "gh"} {
-		// Resolve the REAL binary path at install time to avoid self-loop.
-		// The wrapper must NOT re-resolve via PATH (which includes ~/.altcode/bin/).
-		realBin, err := exec.LookPath(tool)
+		// Resolve the REAL binary, filtering out ~/.altcode/bin/ from PATH
+		// to prevent self-loop on reinstall (security audit finding).
+		realBin, err := lookPathExcluding(tool, binDir)
 		if err != nil {
 			continue // tool not installed, skip wrapper
 		}
-		// Ensure we have an absolute path
-		realBin, _ = filepath.Abs(realBin)
 
 		wrapper := filepath.Join(binDir, tool)
 		content := fmt.Sprintf(
@@ -249,6 +246,24 @@ func writeClaudeHooks(settingsPath string, sess *workspace.AgentSession) error {
 		return err
 	}
 	return os.WriteFile(settingsPath, data, 0o644)
+}
+
+// lookPathExcluding finds a binary on PATH, skipping the given directory.
+// Prevents self-loop when ~/.altcode/bin/ is already on PATH from a prior install.
+func lookPathExcluding(name, excludeDir string) (string, error) {
+	excludeClean := filepath.Clean(excludeDir)
+	pathEnv := os.Getenv("PATH")
+	for _, dir := range filepath.SplitList(pathEnv) {
+		if filepath.Clean(dir) == excludeClean {
+			continue
+		}
+		candidate := filepath.Join(dir, name)
+		if info, err := os.Stat(candidate); err == nil && !info.IsDir() {
+			abs, _ := filepath.Abs(candidate)
+			return abs, nil
+		}
+	}
+	return "", fmt.Errorf("%s not found in PATH (excluding %s)", name, excludeDir)
 }
 
 // shellEscape wraps a string in single quotes for safe shell use.
