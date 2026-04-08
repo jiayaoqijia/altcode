@@ -138,7 +138,8 @@ func (wv *WorkspaceView) Render(theme Theme) string {
 	defer wv.mu.Unlock()
 
 	if len(wv.order) == 0 {
-		return ""
+		return lipgloss.NewStyle().Foreground(theme.Muted).
+			Render("  No agents spawned yet.")
 	}
 
 	headerLine := wv.renderHeader(theme)
