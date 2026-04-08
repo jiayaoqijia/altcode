@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -38,8 +39,26 @@ func NewGitHubAPISCM(
 	if base == "" {
 		base = "https://api.github.com"
 	}
+	// Security: reject non-HTTPS base URLs (token would be sent in cleartext)
+	if !strings.HasPrefix(base, "https://") {
+		return nil, fmt.Errorf("github api: GITHUB_API_URL must use HTTPS, got %q", base)
+	}
+	baseHost := extractHost(base)
 	return &GitHubAPISCM{
-		client:  &http.Client{Timeout: 30 * time.Second},
+		client: &http.Client{
+			Timeout: 30 * time.Second,
+			// Security: strip Authorization header on cross-domain redirects
+			// to prevent token exfiltration via 301/302 to attacker-controlled hosts
+			CheckRedirect: func(req *http.Request, via []*http.Request) error {
+				if len(via) >= 10 {
+					return fmt.Errorf("too many redirects")
+				}
+				if req.URL.Host != baseHost {
+					req.Header.Del("Authorization")
+				}
+				return nil
+			},
+		},
 		token:   token,
 		owner:   owner,
 		repo:    repo,
@@ -48,6 +67,15 @@ func NewGitHubAPISCM(
 }
 
 func (g *GitHubAPISCM) Name() string { return "github-api" }
+
+// extractHost returns the host portion of a URL.
+func extractHost(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	return u.Host
+}
 
 // DiscoverGitHubToken returns a token using priority:
 // 1. GITHUB_TOKEN  2. GH_TOKEN  3. `gh auth token` output
@@ -143,9 +171,13 @@ func (g *GitHubAPISCM) doRequest(
 	}
 
 	// Rate-limit awareness: sleep briefly when running low.
-	if remaining := resp.Header.Get("X-RateLimit-Remaining"); remaining != "" {
-		if n, perr := strconv.Atoi(remaining); perr == nil && n < 10 {
-			time.Sleep(2 * time.Second)
+	// Rate limit awareness: only trust the header for known GitHub hosts.
+	// Cap sleep at 2s to prevent server-controlled DoS.
+	if strings.Contains(g.baseURL, "github.com") || strings.Contains(g.baseURL, "github") {
+		if remaining := resp.Header.Get("X-RateLimit-Remaining"); remaining != "" {
+			if n, perr := strconv.Atoi(remaining); perr == nil && n < 10 {
+				time.Sleep(2 * time.Second)
+			}
 		}
 	}
 
