@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -38,7 +39,14 @@ func NewWorkspaceView(sess *workspace.WorkspaceSession) *WorkspaceView {
 		panes: make(map[string]*wsAgentPane),
 		focus: -1,
 	}
-	for _, rec := range sess.Agents {
+	// Build stable role order (sorted) to avoid non-deterministic map iteration
+	roles := make([]string, 0, len(sess.Agents))
+	for role := range sess.Agents {
+		roles = append(roles, role)
+	}
+	sort.Strings(roles)
+	for _, role := range roles {
+		rec := sess.Agents[role]
 		pane := &wsAgentPane{
 			Role:     rec.Role,
 			Backend:  rec.Backend,
@@ -50,8 +58,8 @@ func NewWorkspaceView(sess *workspace.WorkspaceSession) *WorkspaceView {
 			CostUSD:  rec.CostUSD,
 			Turns:    rec.TurnCount,
 		}
-		wv.panes[rec.Role] = pane
-		wv.order = append(wv.order, rec.Role)
+		wv.panes[role] = pane
+		wv.order = append(wv.order, role)
 	}
 	wv.active = true
 	return wv
@@ -86,6 +94,13 @@ func (wv *WorkspaceView) FocusAgent(n int) {
 	if n >= 0 && n < len(wv.order) {
 		wv.focus = n
 	}
+}
+
+// Session returns the underlying workspace session (mutex-protected).
+func (wv *WorkspaceView) Session() *workspace.WorkspaceSession {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	return wv.sess
 }
 
 // HasRole checks if a role exists in this workspace view.

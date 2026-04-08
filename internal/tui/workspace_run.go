@@ -72,7 +72,7 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 		return nil
 	}
 
-	sess := a.wsView.sess
+	sess := a.wsView.Session()
 	if sess == nil {
 		return nil
 	}
