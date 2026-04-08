@@ -33,12 +33,13 @@ func init() {
 // into the given root cobra command.
 func addWorkspaceCmd(root *cobra.Command) {
 	var (
-		wsBase    string
-		wsAgents  string
-		wsModel   string
-		wsDryRun  bool
-		wsNoPR    bool
-		wsCfgPath string
+		wsBase     string
+		wsAgents   string
+		wsModel    string
+		wsDryRun   bool
+		wsNoPR     bool
+		wsCfgPath  string
+		wsWorkflow string
 	)
 
 	wsCmd := &cobra.Command{
@@ -60,7 +61,7 @@ func addWorkspaceCmd(root *cobra.Command) {
 			task := strings.Join(args, " ")
 			return runWorkspaceStart(
 				task, wsBase, wsAgents, wsModel,
-				wsDryRun, wsNoPR, wsCfgPath,
+				wsDryRun, wsNoPR, wsCfgPath, wsWorkflow,
 			)
 		},
 	}
@@ -77,11 +78,18 @@ func addWorkspaceCmd(root *cobra.Command) {
 		"Skip PR creation")
 	wsCmd.Flags().StringVar(&wsCfgPath, "config", "",
 		"Config path override")
+	wsCmd.Flags().StringVar(&wsWorkflow, "workflow", "",
+		"Run a named workflow definition (e.g. ship-feature)")
 
 	// Subcommands
 	wsCmd.AddCommand(workspaceStatusCmd())
 	wsCmd.AddCommand(workspaceListCmd())
 	wsCmd.AddCommand(workspaceResumeCmd())
+	wsCmd.AddCommand(workspaceSpawnCmd())
+	wsCmd.AddCommand(workspaceSendCmd())
+	wsCmd.AddCommand(workspaceReviewCheckCmd())
+	wsCmd.AddCommand(workspaceRollbackCmd())
+	wsCmd.AddCommand(workspaceInitCmd())
 
 	root.AddCommand(wsCmd)
 }
@@ -91,7 +99,7 @@ func addWorkspaceCmd(root *cobra.Command) {
 func runWorkspaceStart(
 	task, base, agentsFlag, model string,
 	dryRun, noPR bool,
-	cfgPath string,
+	cfgPath, workflowName string,
 ) error {
 	ctx, stop := signal.NotifyContext(
 		context.Background(), os.Interrupt)
@@ -122,6 +130,16 @@ func runWorkspaceStart(
 	).String()
 	shortID := id[:8]
 
+	// Load workflow definition if specified
+	if workflowName != "" {
+		wfPath := filepath.Join(
+			gitRoot, ".altcode", "workflows", workflowName+".yaml")
+		if _, serr := os.Stat(wfPath); os.IsNotExist(serr) {
+			return fmt.Errorf(
+				"workflow %q not found at %s", workflowName, wfPath)
+		}
+	}
+
 	// Build session
 	sess := &workspace.WorkspaceSession{
 		ID:           id,
@@ -129,6 +147,7 @@ func runWorkspaceStart(
 		Status:       workspace.WSSSpawning,
 		GitRoot:      gitRoot,
 		BaseBranch:   base,
+		WorkflowName: workflowName,
 		Agents:       make(map[string]*workspace.AgentRecord),
 		MaxCIRetries: 3,
 		CreatedAt:    time.Now(),
@@ -372,10 +391,15 @@ func listAll(
 		return err
 	}
 	if len(ids) == 0 {
-		fmt.Println("No workspaces found.")
+		if jsonOut {
+			fmt.Println("[]")
+		} else {
+			fmt.Println("No workspaces found.")
+		}
 		return nil
 	}
 
+	var sessions []*workspace.WorkspaceSession
 	for _, id := range ids {
 		sess, lerr := store.LoadSession(id)
 		if lerr != nil {
@@ -384,11 +408,20 @@ func listAll(
 		if !showAll && isTerminalStatus(sess.Status) {
 			continue
 		}
-		if jsonOut {
-			data, _ := json.Marshal(sess)
-			fmt.Println(string(data))
-			continue
+		sessions = append(sessions, sess)
+	}
+
+	if jsonOut {
+		if len(sessions) == 0 {
+			fmt.Println("[]")
+			return nil
 		}
+		data, _ := json.Marshal(sessions)
+		fmt.Println(string(data))
+		return nil
+	}
+
+	for _, sess := range sessions {
 		ago := time.Since(sess.CreatedAt).Truncate(time.Second)
 		agents := agentSummary(sess)
 		fmt.Printf("%-12s %-15s %-30s %8s  %s\n",
@@ -403,16 +436,20 @@ func listAll(
 func workspaceResumeCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "resume [id]",
-		Short: "Resume a saved workspace",
-		Args:  cobra.ExactArgs(1),
+		Short: "Resume a saved workspace (most recent if no ID given)",
+		Args:  cobra.MaximumNArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			wd, _ := os.Getwd()
 			root := config.DetectProjectRoot(wd)
 			wsDir := filepath.Join(
 				root, ".altcode", "workspace")
-			store := workspace.NewStore(wsDir)
+			st := workspace.NewStore(wsDir)
 
-			sess, err := store.LoadSession(args[0])
+			id, err := resolveWorkspaceID(st, args)
+			if err != nil {
+				return err
+			}
+			sess, err := st.LoadSession(id)
 			if err != nil {
 				return fmt.Errorf("load: %w", err)
 			}
@@ -422,7 +459,7 @@ func workspaceResumeCmd() *cobra.Command {
 					sess.ID, sess.Status)
 			}
 			sess.Status = workspace.WSSWorking
-			if err := store.SaveSession(sess); err != nil {
+			if err := st.SaveSession(sess); err != nil {
 				return fmt.Errorf("save: %w", err)
 			}
 			fmt.Printf("Workspace %s resumed (status: %s)\n",
