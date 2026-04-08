@@ -227,6 +227,12 @@ func runWorkspaceStart(
 		// Setup hooks for metadata capture
 		_ = agent.SetupWorkspaceHooks(as)
 
+		// Merge agent-specific env vars (ALTCODE_SESSION_ID, ALTCODE_ROLE, etc.)
+		extra, _ := agent.Environment(as)
+		for k, v := range extra {
+			as.Env = append(as.Env, k+"="+v)
+		}
+
 		argv, cerr := agent.LaunchCommand(as)
 		if cerr != nil {
 			return fmt.Errorf("launch cmd %s: %w", rec.Role, cerr)
