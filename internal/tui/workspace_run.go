@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"fmt"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/workspace"
@@ -25,9 +24,12 @@ func (a *App) workspacePollTick() tea.Cmd {
 	})
 }
 
+// bellCooldown prevents the terminal bell from ringing every poll tick.
+const bellCooldown = 30 * time.Second
+
 // handleWorkspacePoll refreshes agent panes from the session and checks
-// for attention-red conditions (terminal bell). Returns a cmd to
-// continue polling if the workspace is still active.
+// for attention-red conditions (terminal bell with cooldown).
+// Returns a cmd to continue polling if the workspace is still active.
 func (a *App) handleWorkspacePoll() tea.Cmd {
 	if a.wsView == nil || !a.wsView.IsActive() {
 		return nil
@@ -46,8 +48,14 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 		}
 	}
 
-	if bellNeeded {
-		fmt.Print("\a") // terminal bell for urgent attention
+	// Ring bell at most once per cooldown period
+	if bellNeeded && time.Since(a.lastBell) > bellCooldown {
+		a.lastBell = time.Now()
+		// Use tea.Printf to safely write through Bubbletea's renderer
+		return tea.Batch(
+			tea.Printf("\a"),
+			a.workspacePollTick(),
+		)
 	}
 
 	return a.workspacePollTick()

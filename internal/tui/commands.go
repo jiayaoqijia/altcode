@@ -853,6 +853,9 @@ func (a *App) builtinSendText(parts []string) string {
 		return "No active workspace. /send requires a running workspace session."
 	}
 
+	if a.wsView.FocusedRole() == "" && !a.wsView.HasRole(role) {
+		return fmt.Sprintf("Unknown agent role %q. Check /agents for available roles.", role)
+	}
 	a.wsView.AppendAgentOutput(role, fmt.Sprintf("[operator] %s", message))
 	return fmt.Sprintf("Sent to %s: %s", role, message)
 }

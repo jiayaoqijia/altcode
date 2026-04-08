@@ -88,6 +88,14 @@ func (wv *WorkspaceView) FocusAgent(n int) {
 	}
 }
 
+// HasRole checks if a role exists in this workspace view.
+func (wv *WorkspaceView) HasRole(role string) bool {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	_, ok := wv.panes[role]
+	return ok
+}
+
 // FocusedRole returns the role name of the currently focused agent, or "".
 func (wv *WorkspaceView) FocusedRole() string {
 	wv.mu.Lock()
@@ -232,7 +240,7 @@ func (wv *WorkspaceView) renderFooter(theme Theme) string {
 	key := lipgloss.NewStyle().Foreground(theme.Warning).Bold(true)
 
 	parts := []string{
-		key.Render("Ctrl+P") + hint.Render(" pause"),
+		key.Render("Ctrl+Z") + hint.Render(" pause"),
 		key.Render("Ctrl+Q") + hint.Render(" abort"),
 		key.Render("Ctrl+S") + hint.Render(" send"),
 		key.Render("Tab") + hint.Render(" cycle"),

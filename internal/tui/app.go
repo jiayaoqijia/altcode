@@ -79,6 +79,7 @@ type App struct {
 
 	teamView       *teamView        // split-pane view for team mode
 	wsView         *WorkspaceView   // workspace mode dashboard
+	lastBell       time.Time        // bell cooldown (30s between rings)
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
