@@ -116,17 +116,18 @@ func (p *wsAgentPane) Render(
 		Render(content)
 }
 
-// attentionColor maps priority to a lipgloss color.
-func attentionColor(p workspace.AttentionPriority) lipgloss.Color {
+// attentionColor maps priority to a theme-aware lipgloss color.
+// Uses AdaptiveColor for graceful degradation on 16-color terminals.
+func attentionColor(p workspace.AttentionPriority) lipgloss.TerminalColor {
 	switch p {
 	case workspace.AttentionYellow:
-		return lipgloss.Color("#FFFF00")
+		return lipgloss.AdaptiveColor{Light: "#B8860B", Dark: "#FFD700"}
 	case workspace.AttentionOrange:
-		return lipgloss.Color("#FF8800")
+		return lipgloss.AdaptiveColor{Light: "#CC5500", Dark: "#FF8C00"}
 	case workspace.AttentionRed:
-		return lipgloss.Color("#FF0000")
+		return lipgloss.AdaptiveColor{Light: "#CC0000", Dark: "#FF4444"}
 	default:
-		return lipgloss.Color("#00FF00")
+		return lipgloss.AdaptiveColor{Light: "#228B22", Dark: "#00CC00"}
 	}
 }
 

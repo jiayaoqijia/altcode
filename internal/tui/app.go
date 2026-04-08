@@ -261,7 +261,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	// Workflow override keys
 	if a.wfRunning {
 		switch msg.String() {
-		case "ctrl+p":
+		case "ctrl+z":
 			select {
 			case a.wfOverride <- orchestra.OverrideCmd{Op: orchestra.OpPause}:
 				a.appendInfo("[workflow] Paused.")

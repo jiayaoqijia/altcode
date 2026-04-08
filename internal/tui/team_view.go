@@ -149,10 +149,17 @@ func (tv *teamView) Render(theme Theme) string {
 		totalWidth = 40
 	}
 
-	// Calculate pane dimensions
-	paneWidth := (totalWidth - (n - 1)) / n // -1 per separator
+	// Calculate pane dimensions, ensuring total doesn't exceed terminal width
+	separators := n - 1
+	paneWidth := (totalWidth - separators) / n
 	if paneWidth < 20 {
 		paneWidth = 20
+	}
+	// Clamp: if panes + separators exceed terminal, reduce pane count
+	for n > 1 && (paneWidth*n+separators) > totalWidth {
+		n--
+		separators = n - 1
+		paneWidth = (totalWidth - separators) / n
 	}
 	paneHeight := tv.height - 2 // header + footer
 	if paneHeight < 5 {
@@ -167,7 +174,7 @@ func (tv *teamView) Render(theme Theme) string {
 	// Join panes horizontally
 	sep := lipgloss.NewStyle().
 		Foreground(theme.Border).
-		Render(strings.Repeat("│\n", paneHeight+1))
+		Render(strings.Repeat("│\n", paneHeight))
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, interleave(rendered, sep)...)
 }
