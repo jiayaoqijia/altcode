@@ -1,6 +1,7 @@
 package tui
 
 import (
+	crand "crypto/rand"
 	"fmt"
 	"os"
 	"os/exec"
@@ -346,11 +347,20 @@ func generateSessionSlug() string {
 		"lark", "maple", "oak", "pearl", "pine",
 		"reed", "sage", "tulip", "vine", "wren",
 	}
-	now := time.Now().UnixNano()
-	a := adjectives[int(now/7)%len(adjectives)]
-	v := verbs[int(now/13)%len(verbs)]
-	n := nouns[int(now/17)%len(nouns)]
+	// Use crypto/rand for proper randomness (time-based was biased)
+	a := adjectives[cryptoRandInt(len(adjectives))]
+	v := verbs[cryptoRandInt(len(verbs))]
+	n := nouns[cryptoRandInt(len(nouns))]
 	return a + "-" + v + "-" + n
+}
+
+func cryptoRandInt(max int) int {
+	if max <= 0 {
+		return 0
+	}
+	b := make([]byte, 1)
+	crand.Read(b)
+	return int(b[0]) % max
 }
 
 func formatDuration(d time.Duration) string {

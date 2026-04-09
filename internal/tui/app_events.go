@@ -115,7 +115,7 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		a.activeToolName = ""
 		a.activeToolDetail = ""
 		// Track file changes for sidebar
-		if ev.ToolCall != nil && (ev.ToolCall.Name == "edit" || ev.ToolCall.Name == "write") {
+		if ev.ToolCall != nil && (ev.ToolCall.Name == "Edit" || ev.ToolCall.Name == "Write") {
 			path := title
 			if path != "" {
 				a.sidebar.AddFile(path, 1, 0)

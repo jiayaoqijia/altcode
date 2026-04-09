@@ -133,14 +133,18 @@ func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
 
 // DoneWithErrorOutput marks as failed and stores the error message for display.
 func (t *toolTree) DoneWithErrorOutput(title string, elapsed time.Duration, errMsg string) {
-	t.DoneWithError(title, elapsed)
-	// Find the entry we just marked as error and add the error output
-	for i := len(t.entries) - 1; i >= 0; i-- {
-		if t.entries[i].status == "error" {
-			t.entries[i].output = errMsg
-			break
+	// Find the running entry FIRST, then mark it — avoids index aliasing
+	// when multiple error entries exist from prior tool calls.
+	idx := t.findRunning()
+	if idx >= 0 {
+		t.entries[idx].status = "error"
+		t.entries[idx].elapsed = elapsed
+		if title != "" {
+			t.entries[idx].detail = title
 		}
+		t.entries[idx].output = errMsg
 	}
+	t.active = -1
 }
 
 // Clear resets the tree for the next turn.
