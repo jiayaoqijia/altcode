@@ -1,0 +1,7 @@
+name: codex-tui
+binary: codex
+args: []
+task_flag: ""
+tui: true
+worktree: true
+detect: "codex --version"

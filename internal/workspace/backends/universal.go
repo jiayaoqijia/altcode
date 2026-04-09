@@ -19,6 +19,7 @@ type AgentDef struct {
 	TaskFlag   string   `yaml:"task_flag"`
 	Mode       string   `yaml:"mode"`
 	Worktree   bool     `yaml:"worktree"`
+	TUI        bool     `yaml:"tui"` // launch in tmux pane with real PTY
 	ResumeFlag string   `yaml:"resume_flag"`
 	DetectCmd  string   `yaml:"detect"`
 }

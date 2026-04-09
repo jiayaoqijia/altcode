@@ -37,6 +37,7 @@ func addWorkspaceCmd(root *cobra.Command) {
 		wsNoPR     bool
 		wsCfgPath  string
 		wsWorkflow string
+		wsTmux     bool
 	)
 
 	wsCmd := &cobra.Command{
@@ -59,6 +60,7 @@ func addWorkspaceCmd(root *cobra.Command) {
 			return runWorkspaceStart(
 				task, wsBase, wsAgents, wsModel,
 				wsDryRun, wsNoPR, wsCfgPath, wsWorkflow,
+				wsTmux,
 			)
 		},
 	}
@@ -77,6 +79,8 @@ func addWorkspaceCmd(root *cobra.Command) {
 		"Config path override")
 	wsCmd.Flags().StringVar(&wsWorkflow, "workflow", "",
 		"Run a named workflow definition (e.g. ship-feature)")
+	wsCmd.Flags().BoolVar(&wsTmux, "tmux", false,
+		"Launch agents in tmux panes with real PTYs")
 
 	// Subcommands
 	wsCmd.AddCommand(workspaceStatusCmd())
@@ -97,6 +101,7 @@ func runWorkspaceStart(
 	task, base, agentsFlag, model string,
 	dryRun, noPR bool,
 	cfgPath, workflowName string,
+	useTmux bool,
 ) error {
 	ctx, stop := signal.NotifyContext(
 		context.Background(), os.Interrupt)
@@ -223,10 +228,18 @@ func runWorkspaceStart(
 		return setupErr
 	}
 
-	// Spawn agents
-	rt := &processRuntime{}
+	// Spawn agents — choose runtime based on --tmux flag.
+	var rt interface {
+		workspace.Runtime
+		KillAll()
+	}
+	if useTmux {
+		rt = backends.NewTmuxRuntime("altcode-" + shortID)
+	} else {
+		rt = &processRuntime{}
+	}
 	defer rt.KillAll() // ensure cleanup on exit/Ctrl+C
-	plugins := buildPluginSet(selected, rt, gitRoot)
+	plugins := buildPluginSetFromRuntime(selected, rt, gitRoot)
 	for _, rec := range sess.Agents {
 		agent, ok := plugins.Agents[rec.Backend]
 		if !ok {
@@ -274,17 +287,35 @@ func runWorkspaceStart(
 			Content: rec.Backend + " " + handle.ID,
 		})
 
-		// Stream agent output to stdout with role prefix
+		// Stream agent output to stdout with role prefix.
+		// processRuntime has OnOutput; tmux uses Attach.
 		role := rec.Role
 		el := evLog
-		rt.OnOutput(handle.ID, func(line string) {
-			fmt.Printf("[%s] %s\n", role, line)
-			el.Emit(workspace.Event{ //nolint:errcheck
-				Type:    workspace.EventAgentOutput,
-				Role:    role,
-				Content: line,
+		if prt, ok := rt.(*processRuntime); ok {
+			prt.OnOutput(handle.ID, func(line string) {
+				fmt.Printf("[%s] %s\n", role, line)
+				el.Emit(workspace.Event{ //nolint:errcheck
+					Type:    workspace.EventAgentOutput,
+					Role:    role,
+					Content: line,
+				})
 			})
-		})
+		} else {
+			go func(h workspace.RuntimeHandle, r string) {
+				ch, aerr := rt.Attach(ctx, h)
+				if aerr != nil {
+					return
+				}
+				for line := range ch {
+					fmt.Printf("[%s] %s\n", r, line)
+					el.Emit(workspace.Event{ //nolint:errcheck
+						Type:    workspace.EventAgentOutput,
+						Role:    r,
+						Content: line,
+					})
+				}
+			}(handle, role)
+		}
 	}
 
 	if err := store.SaveSession(sess); err != nil {
@@ -314,7 +345,11 @@ waitLoop:
 	for {
 		allDone := true
 		for _, rec := range sess.Agents {
-			if rt.IsStillRunning(rec.RuntimeHandleID) {
+			h := workspace.RuntimeHandle{
+				ID: rec.RuntimeHandleID,
+			}
+			alive, _ := rt.IsRunning(h)
+			if alive {
 				allDone = false
 				break
 			}
@@ -335,9 +370,21 @@ waitLoop:
 		}
 	}
 
-	// Update agent records with exit info
+	// Update agent records with exit info.
 	for _, rec := range sess.Agents {
-		exitCode := rt.GetExitCode(rec.RuntimeHandleID)
+		exitCode := -1
+		if prt, ok := rt.(*processRuntime); ok {
+			exitCode = prt.GetExitCode(rec.RuntimeHandleID)
+		} else {
+			// tmux mode: pane gone means exited (code unknown).
+			h := workspace.RuntimeHandle{
+				ID: rec.RuntimeHandleID,
+			}
+			alive, _ := rt.IsRunning(h)
+			if !alive {
+				exitCode = 0
+			}
+		}
 		if exitCode >= 0 {
 			rec.ExitCode = exitCode
 			rec.ActivityState = workspace.ActivityExited
@@ -359,12 +406,16 @@ waitLoop:
 	mgr := lifecycle.NewManager(store, plugins, log)
 	_ = mgr.Advance(ctx, sess)
 
-	// Check what each agent produced
+	// Check what each agent produced.
 	fmt.Println("\n=== Results ===")
 	hasCommits := false
 	for role, rec := range sess.Agents {
-		output := rt.GetOutput(rec.RuntimeHandleID)
-		exitCode := rt.GetExitCode(rec.RuntimeHandleID)
+		var output string
+		exitCode := rec.ExitCode
+		if prt, ok := rt.(*processRuntime); ok {
+			output = prt.GetOutput(rec.RuntimeHandleID)
+			exitCode = prt.GetExitCode(rec.RuntimeHandleID)
+		}
 
 		fmt.Printf("\n--- %s (%s) ---\n", role, rec.Backend)
 		fmt.Printf("Exit code: %d\n", exitCode)
@@ -389,8 +440,12 @@ waitLoop:
 	if hasCommits && len(sess.Agents) > 1 {
 		workers := make(map[string]workspace.WorkerInfo)
 		for role, rec := range sess.Agents {
+			var workerOutput string
+			if prt, ok := rt.(*processRuntime); ok {
+				workerOutput = prt.GetOutput(rec.RuntimeHandleID)
+			}
 			workers[role] = workspace.WorkerInfo{
-				Output:       rt.GetOutput(rec.RuntimeHandleID),
+				Output:       workerOutput,
 				WorktreePath: rec.WorktreePath,
 				BaseBranch:   base,
 			}
@@ -651,6 +706,36 @@ func buildPluginSet(
 		}
 	}
 	// SCM: try GitHub (requires gh CLI), fall back to noop
+	var scmPlugin workspace.SCM
+	ghSCM, err := scm.NewGitHubSCM()
+	if err == nil {
+		scmPlugin = ghSCM
+	} else {
+		scmPlugin = &scm.NoopSCM{}
+	}
+	return workspace.PluginSet{
+		Runtime:   rt,
+		Agents:    agents,
+		Workspace: workspace.NewWorktreeWorkspace(),
+		SCM:       scmPlugin,
+		Notifier:  &noopNotifier{},
+	}
+}
+
+// buildPluginSetFromRuntime is like buildPluginSet but accepts
+// any workspace.Runtime (processRuntime or TmuxRuntime).
+func buildPluginSetFromRuntime(
+	detected []backends.DetectedBackend,
+	rt workspace.Runtime,
+	gitRoot string,
+) workspace.PluginSet {
+	agents := make(map[string]workspace.Agent)
+	for _, d := range detected {
+		agent, err := backends.NewBackend(d.Name)
+		if err == nil {
+			agents[d.Name] = agent
+		}
+	}
 	var scmPlugin workspace.SCM
 	ghSCM, err := scm.NewGitHubSCM()
 	if err == nil {

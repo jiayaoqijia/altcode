@@ -1,0 +1,7 @@
+name: claude-code-tui
+binary: claude
+args: []
+task_flag: ""
+tui: true
+worktree: true
+detect: "claude --version"
