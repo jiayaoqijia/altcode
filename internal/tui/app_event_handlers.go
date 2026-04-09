@@ -1,0 +1,212 @@
+package tui
+
+import (
+	"fmt"
+	"strings"
+	"time"
+
+	"github.com/altcode-ai/altcode/internal/event"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// handleEvent routes a streaming event to the appropriate handler.
+func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
+	switch ev.Type {
+	case event.TextDelta:
+		return a.onTextDelta(ev)
+	case event.TextDone:
+		a.thinking = false
+		return a, a.waitForEvent()
+	case event.ThinkingDelta:
+		return a.onThinkingDelta(ev)
+	case event.ToolStart:
+		return a.onToolStart(ev)
+	case event.ToolResultEvent:
+		return a.onToolResult(ev)
+	case event.UsageEvent:
+		return a.onUsage(ev)
+	case event.InfoEvent:
+		return a.onInfo(ev)
+	case event.ErrorEvent:
+		return a.onError(ev)
+	case event.Done:
+		return a.onDone()
+	}
+	return a, a.waitForEvent()
+}
+
+func (a *App) onTextDelta(ev event.Event) (tea.Model, tea.Cmd) {
+	if a.thinking && a.thinkingText != "" {
+		a.messages = append(a.messages, chatMessage{
+			role: roleThinking, content: a.thinkingText,
+		})
+		a.thinkingText = ""
+	}
+	a.thinking = false
+	a.streaming += ev.Text
+	a.updateViewport()
+	return a, a.waitForEvent()
+}
+
+func (a *App) onThinkingDelta(ev event.Event) (tea.Model, tea.Cmd) {
+	a.thinking = true
+	a.thinkingText = ev.Thinking
+	a.updateViewport()
+	return a, a.waitForEvent()
+}
+
+func (a *App) onToolStart(ev event.Event) (tea.Model, tea.Cmd) {
+	if a.streaming != "" {
+		a.messages = append(a.messages, chatMessage{
+			role: roleAssistant, content: a.streaming,
+		})
+		a.streaming = ""
+	}
+	a.thinking = true
+	a.activeToolName = ""
+	a.activeToolDetail = ""
+	if ev.ToolCall != nil {
+		a.activeToolName = ev.ToolCall.Name
+		target := extractToolTarget(ev.ToolCall)
+		a.activeToolDetail = target
+		a.tools.Start(ev.ToolCall.Name, target)
+		a.toolStart = time.Now()
+	}
+	a.updateViewport()
+	stuckName := a.activeToolName
+	stuckStart := a.toolStart
+	stuckCmd := tea.Tick(30*time.Second, func(_ time.Time) tea.Msg {
+		return stuckToolMsg{name: stuckName, startedAt: stuckStart}
+	})
+	return a, tea.Batch(a.waitForEvent(), stuckCmd)
+}
+
+func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
+	a.thinking = false
+	title, output := extractToolOutput(ev)
+	hasError := ev.ToolResult != nil && ev.ToolResult.Error != ""
+	elapsed := time.Since(a.toolStart)
+
+	if hasError {
+		a.tools.DoneWithErrorOutput(title, elapsed, output)
+	} else {
+		a.recordToolSuccess(ev, title, elapsed, output)
+	}
+	a.recordToolMeta(ev, title)
+	a.activeToolName = ""
+	a.activeToolDetail = ""
+	a.updateViewport()
+	return a, a.waitForEvent()
+}
+
+func (a *App) onUsage(ev event.Event) (tea.Model, tea.Cmd) {
+	if ev.Usage != nil {
+		a.tokensIn += ev.Usage.InputTokens
+		a.tokensOut += ev.Usage.OutputTokens
+		a.tokenInfo = fmt.Sprintf("tokens: %d in / %d out",
+			a.tokensIn, a.tokensOut)
+	}
+	if a.engine != nil {
+		a.costUSD = a.engine.CostTracker().TotalCost()
+	}
+	return a, a.waitForEvent()
+}
+
+func (a *App) onInfo(ev event.Event) (tea.Model, tea.Cmd) {
+	if ev.Info != "" {
+		a.messages = append(a.messages,
+			chatMessage{role: roleInfo, content: ev.Info})
+		a.updateViewport()
+	}
+	return a, a.waitForEvent()
+}
+
+func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
+	if provider := a.authErrorProvider(ev.Error); provider != "" {
+		a.busy = false
+		a.streaming = ""
+		a.repromptForAPIKey(provider)
+		return a, nil
+	}
+	a.messages = append(a.messages,
+		chatMessage{role: roleInfo, content: ev.Error, meta: "error"})
+	a.streaming = ""
+	a.busy = false
+	a.updateViewport()
+	return a, nil
+}
+
+func (a *App) onDone() (tea.Model, tea.Cmd) {
+	if len(a.tools.entries) > 0 {
+		tree := a.tools.Render(a.theme, a.width-6)
+		a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
+		a.tools.Clear()
+	}
+	if a.streaming != "" {
+		meta := a.buildTurnMeta()
+		a.messages = append(a.messages, chatMessage{
+			role: roleAssistant, content: a.streaming, meta: meta,
+		})
+		a.streaming = ""
+	}
+	a.busy = false
+	a.updateViewport()
+	return a, nil
+}
+
+// buildTurnMeta returns "model (duration)" for the response attribution line.
+func (a *App) buildTurnMeta() string {
+	if a.engine == nil || a.turnStart.IsZero() {
+		return ""
+	}
+	elapsed := time.Since(a.turnStart)
+	model := a.engine.Config().Model
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	return fmt.Sprintf("%s (%s)", model, formatDuration(elapsed))
+}
+
+// extractToolOutput pulls title and output from a tool result event.
+func extractToolOutput(ev event.Event) (string, string) {
+	title, output := "", ""
+	if ev.ToolResult != nil {
+		title = ev.ToolResult.Title
+		output = ev.ToolResult.Output
+		if ev.ToolResult.Error != "" {
+			output = ev.ToolResult.Error
+		}
+	}
+	return title, output
+}
+
+// recordToolSuccess dispatches the tool result to the tree with output.
+func (a *App) recordToolSuccess(ev event.Event, title string, elapsed time.Duration, output string) {
+	toolName := ""
+	if ev.ToolCall != nil {
+		toolName = ev.ToolCall.Name
+	}
+	switch toolName {
+	case "Edit", "Bash", "Write":
+		a.tools.DoneWithOutput(title, elapsed, output)
+	case "Read":
+		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 3))
+	case "Grep":
+		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 4))
+	default:
+		a.tools.Done(title, elapsed)
+	}
+}
+
+// recordToolMeta updates tool counts, task tracking, and sidebar.
+func (a *App) recordToolMeta(ev event.Event, title string) {
+	if ev.ToolCall != nil && ev.ToolCall.Name != "" {
+		a.toolCounts[ev.ToolCall.Name]++
+		a.trackTaskFromTool(ev.ToolCall)
+	}
+	if ev.ToolCall != nil && (ev.ToolCall.Name == "Edit" || ev.ToolCall.Name == "Write") {
+		if title != "" {
+			a.sidebar.AddFile(title, 1, 0)
+		}
+	}
+}
