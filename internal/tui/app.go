@@ -434,14 +434,21 @@ func (a *App) updateViewport() {
 	if len(a.tools.entries) > 0 {
 		sb.WriteString(a.tools.Render(a.theme, a.width-6))
 	}
-	// CC-style thinking indicator: ✶ Contemplating… (1m 5s · ↑ 1.2k tokens)
+	// CC-style thinking indicator
 	if a.thinking && a.streaming == "" {
 		sb.WriteString(a.renderThinkingIndicator())
 	}
 	if a.streaming != "" {
 		sb.WriteString(a.renderMessage(chatMessage{role: roleAssistant, content: a.streaming}))
 	}
-	a.viewport.SetContent(sb.String())
-	a.viewport.GotoBottom()
+
+	newContent := sb.String()
+	oldLen := len(a.viewport.View())
+	a.viewport.SetContent(newContent)
+	// Only auto-scroll to bottom when content grows (new text/tools added).
+	// Prevents jumping when tool tree appears/disappears at same height.
+	if len(newContent) > oldLen {
+		a.viewport.GotoBottom()
+	}
 }
 
