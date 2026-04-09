@@ -93,10 +93,12 @@ func (a *App) spawnWorkspaceAgents(
 					fmt.Sprintf("[exited: code %d]", result.ExitCode))
 			}
 			if rec != nil {
+				sess.Lock()
 				rec.ActivityState = workspace.ActivityExited
 				rec.ExitCode = result.ExitCode
 				now := time.Now()
 				rec.ExitedAt = &now
+				sess.Unlock()
 			}
 		}(role, stream)
 	}

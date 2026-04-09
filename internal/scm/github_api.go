@@ -504,14 +504,22 @@ func aggregateReviewStatus(
 	if len(reviews) == 0 {
 		return workspace.ReviewNone
 	}
-	// Last decisive review wins.
-	for i := len(reviews) - 1; i >= 0; i-- {
-		switch strings.ToUpper(reviews[i].State) {
-		case "APPROVED":
-			return workspace.ReviewApproved
-		case "CHANGES_REQUESTED":
+	// Per-reviewer latest state, then aggregate (matches GitHub's model).
+	// Any CHANGES_REQUESTED from any reviewer blocks, even if another approved.
+	latest := map[string]string{} // author → latest state
+	for _, r := range reviews {
+		state := strings.ToUpper(r.State)
+		if state == "APPROVED" || state == "CHANGES_REQUESTED" {
+			latest[r.Author] = state
+		}
+	}
+	if len(latest) == 0 {
+		return workspace.ReviewNone
+	}
+	for _, state := range latest {
+		if state == "CHANGES_REQUESTED" {
 			return workspace.ReviewChangesRequested
 		}
 	}
-	return workspace.ReviewNone
+	return workspace.ReviewApproved
 }

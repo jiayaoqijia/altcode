@@ -104,6 +104,9 @@ func cherryPickAgents(
 					"skipping\n", role)
 			runGit(ctx, gitRoot, //nolint:errcheck
 				"cherry-pick", "--abort")
+			// Surface conflict on the agent record for TUI visibility
+			// ActivityBlocked triggers AttentionRed in the TUI pane
+			rec.ActivityState = ActivityBlocked
 			continue
 		}
 		merged++

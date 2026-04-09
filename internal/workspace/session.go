@@ -69,6 +69,11 @@ type WorkspaceSession struct {
 	mu sync.Mutex `json:"-"` //nolint:unused // guards in-memory mutations
 }
 
+// Lock acquires the session mutex for cross-goroutine field mutations.
+func (s *WorkspaceSession) Lock()   { s.mu.Lock() }
+// Unlock releases the session mutex.
+func (s *WorkspaceSession) Unlock() { s.mu.Unlock() }
+
 // AgentRecord tracks one agent within a workspace.
 // R3-2: canonical definition including RestartCount and LastCheckedSHA from errata.
 type AgentRecord struct {
