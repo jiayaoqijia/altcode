@@ -94,6 +94,7 @@ type App struct {
 	turnBashes     int              // commands run this turn
 	turnCostStart  float64          // cost at turn start (for delta)
 	turnTokenStart int              // tokens at turn start (for delta)
+	prevContentLen int              // viewport content length for scroll stability
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
@@ -443,12 +444,13 @@ func (a *App) updateViewport() {
 	}
 
 	newContent := sb.String()
-	oldLen := len(a.viewport.View())
 	a.viewport.SetContent(newContent)
-	// Only auto-scroll to bottom when content grows (new text/tools added).
-	// Prevents jumping when tool tree appears/disappears at same height.
-	if len(newContent) > oldLen {
+	// Only auto-scroll when content actually grew — prevents visual jumping
+	// when tool tree toggles on/off at similar height. Uses raw content
+	// length (not viewport.View() which is clamped to viewport height).
+	if len(newContent) > a.prevContentLen {
 		a.viewport.GotoBottom()
 	}
+	a.prevContentLen = len(newContent)
 }
 
