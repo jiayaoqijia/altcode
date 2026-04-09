@@ -12,8 +12,12 @@ import (
 )
 
 // NewBackend returns the Agent implementation for the given backend name.
-// Supported: "claude", "codex", "opencode", "aider".
+// It first checks YAML-defined agents from agentDefs, then falls back
+// to hardcoded backends: "claude", "codex", "opencode", "aider".
 func NewBackend(name string) (workspace.Agent, error) {
+	if def, ok := agentDefs[name]; ok {
+		return NewUniversalBackend(def), nil
+	}
 	switch name {
 	case "claude":
 		return &ClaudeBackend{}, nil
@@ -27,6 +31,9 @@ func NewBackend(name string) (workspace.Agent, error) {
 		return nil, fmt.Errorf("unknown backend: %q", name)
 	}
 }
+
+// agentDefs holds discovered YAML agent definitions, keyed by name.
+var agentDefs = map[string]*AgentDef{}
 
 // DetectedBackend describes a coding-agent binary found on PATH.
 type DetectedBackend struct {
@@ -49,11 +56,41 @@ var probeOrder = []probeSpec{
 	{"aider", "aider"},
 }
 
+// LoadAgentDefsIntoRegistry discovers YAML agent definitions from the
+// given directories and registers them so NewBackend can find them.
+// Hardcoded backends always take precedence over YAML definitions
+// with the same name.
+func LoadAgentDefsIntoRegistry(dirs ...string) error {
+	defs, err := DiscoverAgentDefs(dirs...)
+	if err != nil {
+		return err
+	}
+	for _, def := range defs {
+		if isHardcodedBackend(def.Name) {
+			continue
+		}
+		agentDefs[def.Name] = def
+	}
+	return nil
+}
+
+// isHardcodedBackend returns true if a name is served by a native backend.
+func isHardcodedBackend(name string) bool {
+	switch name {
+	case "claude", "codex", "opencode", "aider":
+		return true
+	}
+	return false
+}
+
 // DetectBackends probes PATH for known coding-agent binaries and returns
 // those found, in preference order (claude > codex > opencode > aider).
+// It also includes YAML-defined agents whose detect command succeeds.
 // Each binary is queried with --version using a 3-second timeout.
 func DetectBackends(ctx context.Context) ([]DetectedBackend, error) {
 	var found []DetectedBackend
+
+	// 1. Hardcoded backends in preference order.
 	for _, spec := range probeOrder {
 		bin, err := exec.LookPath(spec.binary)
 		if err != nil {
@@ -66,6 +103,28 @@ func DetectBackends(ctx context.Context) ([]DetectedBackend, error) {
 			Version: ver,
 		})
 	}
+
+	// 2. YAML-defined agents (skip names already found above).
+	seen := make(map[string]bool, len(found))
+	for _, b := range found {
+		seen[b.Name] = true
+	}
+	for _, def := range agentDefs {
+		if seen[def.Name] {
+			continue
+		}
+		bin, err := exec.LookPath(def.Binary)
+		if err != nil {
+			continue
+		}
+		ver := probeVersion(ctx, bin)
+		found = append(found, DetectedBackend{
+			Name:    def.Name,
+			Binary:  bin,
+			Version: ver,
+		})
+	}
+
 	return found, nil
 }
 

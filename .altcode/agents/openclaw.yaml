@@ -1,0 +1,6 @@
+name: openclaw
+binary: openclaw
+args: ["agent", "--output-format", "stream-json", "--yes"]
+task_flag: "-p"
+worktree: true
+detect: "openclaw --version"

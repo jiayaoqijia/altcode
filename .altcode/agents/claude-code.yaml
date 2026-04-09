@@ -1,0 +1,7 @@
+name: claude-code
+binary: claude
+args: ["--permission-mode", "bypassPermissions", "--max-turns", "50"]
+task_flag: "-p"
+worktree: true
+resume_flag: "--resume"
+detect: "claude --version"

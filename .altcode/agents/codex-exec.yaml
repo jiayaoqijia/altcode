@@ -1,0 +1,6 @@
+name: codex-exec
+binary: codex
+args: ["exec", "--dangerously-bypass-approvals-and-sandbox"]
+task_flag: ""
+worktree: true
+detect: "codex --version"

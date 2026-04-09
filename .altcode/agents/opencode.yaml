@@ -1,0 +1,6 @@
+name: opencode
+binary: opencode
+args: ["exec"]
+task_flag: ""
+worktree: true
+detect: "opencode --version"

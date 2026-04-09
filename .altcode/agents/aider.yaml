@@ -1,0 +1,6 @@
+name: aider
+binary: aider
+args: ["--no-auto-commits"]
+task_flag: ""
+worktree: true
+detect: "aider --version"

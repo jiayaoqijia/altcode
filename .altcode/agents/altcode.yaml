@@ -1,0 +1,6 @@
+name: altcode
+binary: altcode
+args: ["--json"]
+task_flag: ""
+worktree: true
+detect: "altcode --help"
