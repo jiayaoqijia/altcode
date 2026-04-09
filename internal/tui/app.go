@@ -92,6 +92,8 @@ type App struct {
 	turnWrites     int              // files written this turn
 	turnReads      int              // files read this turn
 	turnBashes     int              // commands run this turn
+	turnCostStart  float64          // cost at turn start (for delta)
+	turnTokenStart int              // tokens at turn start (for delta)
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
@@ -354,6 +356,8 @@ func (a *App) submit() tea.Cmd {
 	a.turnWrites = 0
 	a.turnReads = 0
 	a.turnBashes = 0
+	a.turnCostStart = a.costUSD
+	a.turnTokenStart = a.tokensIn + a.tokensOut
 
 	if handled, cmd := a.handleBuiltinCommand(text); handled {
 		if cmd == nil {

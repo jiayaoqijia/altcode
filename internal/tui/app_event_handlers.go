@@ -179,8 +179,15 @@ func (a *App) buildTurnSummary() string {
 	if bashes > 0 {
 		parts = append(parts, fmt.Sprintf("%d command%s", bashes, plural(bashes)))
 	}
-	if a.costUSD > 0 {
-		parts = append(parts, fmt.Sprintf("$%.2f", a.costUSD))
+	// Per-turn cost delta (not cumulative session cost)
+	turnCost := a.costUSD - a.turnCostStart
+	if turnCost > 0.001 {
+		parts = append(parts, fmt.Sprintf("$%.2f", turnCost))
+	}
+	// Per-turn token delta
+	turnTokens := (a.tokensIn + a.tokensOut) - a.turnTokenStart
+	if turnTokens > 0 {
+		parts = append(parts, formatTokens(turnTokens)+" tokens")
 	}
 	if !a.turnStart.IsZero() {
 		parts = append(parts, formatDuration(time.Since(a.turnStart)))
