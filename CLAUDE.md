@@ -62,13 +62,54 @@ and hope CI catches it — CI runs on 3 platforms and failures block everyone.
 
 ### TUI Testing Rule (HARD RULE)
 
-**Every TUI change must be tested visually, not just with unit tests.**
-Unit tests only verify data flow. They miss rendering bugs (word wrap, overflow,
-alignment, color, viewport scrolling) that only appear in a real terminal.
+**Every TUI change must be tested at THREE levels: view tests, tmux E2E, and headless CLI.**
+Unit tests only verify data flow. View tests catch rendering bugs. tmux E2E catches
+real terminal interactions. All three are required for workspace/agent TUI changes.
 
-How to test TUI changes:
+#### Level 1: View Tests with `teatest` (REQUIRED for all TUI changes)
 
-**Method 1: tmux E2E testing (PREFERRED — proven to work)**
+Use `charmbracelet/x/exp/teatest` for Bubbletea integration tests and direct
+render testing. These run in CI with `-race` and catch layout, content, and
+concurrency bugs.
+
+```go
+// teatest integration — tests the full Bubbletea app lifecycle
+func TestTUIView_StartupRender(t *testing.T) {
+    m := testApp()
+    tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 30))
+    time.Sleep(500 * time.Millisecond)
+    tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+    out := readOutput(t, tm)
+    // Assert rendered terminal output contains expected elements
+}
+
+// Direct render testing — tests individual components
+func TestTUIView_WorkspaceViewRender(t *testing.T) {
+    wv := NewWorkspaceView(sess)
+    wv.SetSize(120, 25)
+    wv.AppendAgentOutput("architect", "Reading codebase...")
+    output := wv.Render(DefaultTheme)
+    plain := stripANSI(output)
+    // Assert: roles, agent output, branch, CI, PR, footer keys
+}
+```
+
+**Required view test coverage for workspace changes:**
+- Workspace pane render: roles, output lines, branch name, CI status, PR number
+- Phase breadcrumb: ✓ done, ⟳ running, · pending icons
+- Attention colors: green/yellow/orange/red produce different ANSI output
+- Narrow terminal: no overflow at 60 cols
+- Empty state: "No agents" fallback message
+- Concurrent access: 200 writes + 200 renders under `-race`
+- Help text: all slash commands + workspace mode keys present
+
+See `internal/tui/tui_view_test.go` for the reference test suite (8 tests).
+
+#### Level 2: tmux E2E Testing (REQUIRED for agent/workspace changes)
+
+tmux creates a real PTY so Bubbletea renders properly. This catches issues that
+view tests miss: actual agent spawning, output streaming, key binding conflicts.
+
 ```bash
 # Build the binary
 GOFLAGS=-mod=mod go build -o /tmp/altcode-test ./cmd/altcode/
@@ -77,12 +118,10 @@ GOFLAGS=-mod=mod go build -o /tmp/altcode-test ./cmd/altcode/
 tmux new-session -d -s altcode-tui -x 120 -y 30 "/tmp/altcode-test"
 sleep 3
 
-# Send commands
+# Send commands and capture output
 tmux send-keys -t altcode-tui "/help" Enter
 sleep 2
-
-# Capture and verify the rendered output
-tmux capture-pane -t altcode-tui -p
+tmux capture-pane -t altcode-tui -p  # verify help renders
 
 # Test workspace with real agents
 tmux send-keys -t altcode-tui "/workspace create a hello function" Enter
@@ -93,32 +132,49 @@ tmux capture-pane -t altcode-tui -p  # verify agent panes + streaming
 tmux kill-session -t altcode-tui
 ```
 
-**Method 2: Headless CLI testing (for non-interactive features)**
-```bash
-# Test workspace commands
-timeout 5 /tmp/altcode-test workspace "test" --dry-run
-timeout 3 /tmp/altcode-test workspace list --json
-timeout 3 /tmp/altcode-test workspace status
-```
-
-**Method 3: Unit tests for render functions**
-```go
-// Test WorkspaceView rendering
-wv := NewWorkspaceView(sess)
-wv.SetSize(120, 30)
-output := wv.Render(DefaultTheme)
-// Check output contains expected elements
-```
-
 **What to verify in tmux captures:**
-- Header renders: `[workspace:ID] task status`
-- Agent panes: bordered boxes with role, backend, activity state
-- Phase breadcrumb: `[architect ✓] → [implementer ⟳]`
-- Footer key hints: `Ctrl+Z pause Ctrl+Q abort Ctrl+S send`
+- Header: `[workspace:ID] task status [phase ✓] → [phase ⟳]`
+- Agent panes: bordered boxes with ROLE, backend, activity, branch
+- Agent output: scrolling text from codex/claude in panes
+- Footer: `Ctrl+Z pause Ctrl+Q abort Ctrl+S send Tab cycle`
 - HUD: model, git branch, timer, context bar
-- Agent output scrolls in panes (codex output visible)
 - No line overflow beyond terminal width
-- Colors render (attention priority: green/yellow/orange/red)
+- Attention colors visible (green borders for working agents)
+
+#### Level 3: Headless CLI Testing (REQUIRED for workspace commands)
+
+Tests all workspace subcommands without a terminal:
+
+```bash
+timeout 5 /tmp/altcode-test workspace "test" --dry-run    # shows plan
+timeout 3 /tmp/altcode-test workspace list --json          # valid JSON []
+timeout 3 /tmp/altcode-test workspace status               # no crash
+timeout 3 /tmp/altcode-test workspace resume               # helpful error
+timeout 3 /tmp/altcode-test workspace spawn --help         # shows usage
+timeout 3 /tmp/altcode-test workspace send --help          # shows usage
+timeout 3 /tmp/altcode-test workspace rollback --help      # shows usage
+timeout 3 /tmp/altcode-test workspace init --help          # shows usage
+```
+
+#### Pre-Push Checklist for TUI Changes
+
+```bash
+# 1. View tests pass
+GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1 -run TestTUIView -v
+
+# 2. Full TUI test suite passes
+GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1
+
+# 3. tmux E2E (manual — run before every PR)
+tmux new-session -d -s test -x 120 -y 30 "/tmp/altcode-test"
+tmux send-keys -t test "/workspace test task" Enter
+sleep 10
+tmux capture-pane -t test -p  # inspect output
+tmux kill-session -t test
+
+# 4. Headless CLI commands all work
+timeout 5 /tmp/altcode-test workspace "test" --dry-run
+```
 
 **Workspace E2E test checklist (run before every workspace PR):**
 1. `altcode workspace "task" --dry-run` — shows plan

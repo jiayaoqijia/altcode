@@ -225,6 +225,61 @@ place. Prefer removing over adding. Count concepts, not pixels.
 Apply in sequence: Socratic (surface assumptions) → First Principles (decompose to
 truths) → Occam's Razor (choose simplest valid solution).
 
+## TUI View Testing Rule (HARD RULE)
+
+**Every TUI/workspace change must be tested at three levels.**
+
+### Level 1: View Tests with `teatest` (CI-enforced)
+
+Uses `charmbracelet/x/exp/teatest` for Bubbletea integration + direct render testing.
+
+```go
+// teatest — full app lifecycle
+tm := teatest.NewTestModel(t, m, teatest.WithInitialTermSize(120, 30))
+tm.Send(tea.KeyMsg{Type: tea.KeyCtrlC})
+out := readOutput(t, tm)
+
+// Direct render — individual components
+wv := NewWorkspaceView(sess)
+output := wv.Render(DefaultTheme)
+plain := stripANSI(output)
+// Assert: roles, output, branch, CI, PR, footer keys, colors
+```
+
+Required coverage: pane render, phase breadcrumb, attention colors, narrow terminal,
+empty state, concurrent access, help text. See `internal/tui/tui_view_test.go`.
+
+### Level 2: tmux E2E (manual, before every workspace PR)
+
+```bash
+tmux new-session -d -s test -x 120 -y 30 "/tmp/altcode-test"
+tmux send-keys -t test "/workspace create hello" Enter
+sleep 15
+tmux capture-pane -t test -p  # verify agent panes + live streaming
+tmux kill-session -t test
+```
+
+Verify: header, agent panes, phase breadcrumb, footer hints, HUD, streaming output,
+no overflow, attention colors.
+
+### Level 3: Headless CLI (CI-enforced)
+
+```bash
+timeout 5 /tmp/altcode-test workspace "test" --dry-run
+timeout 3 /tmp/altcode-test workspace list --json   # must output []
+timeout 3 /tmp/altcode-test workspace status
+timeout 3 /tmp/altcode-test workspace spawn --help
+```
+
+### Pre-Push Checklist
+
+```bash
+GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1 -run TestTUIView -v
+GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1
+# tmux E2E for workspace changes
+# Headless CLI for command changes
+```
+
 ## Adding new agents
 
 Place agent skills in `.agents/skills/<name>/SKILL.md`. The SKILL.md follows the
