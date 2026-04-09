@@ -1,6 +1,6 @@
 name: aider
 binary: aider
-args: ["--no-auto-commits"]
-task_flag: ""
+args: ["--no-auto-commits", "--yes"]
+task_flag: "--message"
 worktree: true
 detect: "aider --version"

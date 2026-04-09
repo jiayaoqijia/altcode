@@ -62,10 +62,15 @@ func (t *TmuxRuntime) Spawn(
 	}
 	paneID := strings.TrimSpace(out)
 
-	// Inject environment variables.
+	// Inject environment variables. Only escape the value side,
+	// not the KEY=VALUE pair (export 'KEY=VALUE' is invalid POSIX).
 	for _, kv := range env {
+		eq := strings.IndexByte(kv, '=')
+		if eq < 0 {
+			continue
+		}
 		t.sendKeys(paneID,
-			fmt.Sprintf("export %s", shellEscape(kv)))
+			"export "+kv[:eq]+"="+shellEscape(kv[eq+1:]))
 	}
 
 	// Launch the command. Each arg is shell-escaped to prevent
@@ -114,12 +119,16 @@ func (t *TmuxRuntime) Attach(
 				return
 			case <-ticker.C:
 				out, err := t.run(
-					"capture-pane", "-t", paneID, "-p",
+					"capture-pane", "-t", paneID,
+					"-p", "-S", "-",
 				)
 				if err != nil {
 					return
 				}
 				lines := strings.Split(out, "\n")
+				if len(lines) < lastLen {
+					lastLen = 0 // scrollback reset
+				}
 				if len(lines) > lastLen {
 					for _, line := range lines[lastLen:] {
 						select {
