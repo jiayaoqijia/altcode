@@ -40,12 +40,12 @@ func TestBuildCLICommand_Claude(t *testing.T) {
 	}, "review this code")
 
 	args := cmd.Args
-	if len(args) < 5 {
-		t.Fatalf("expected at least 5 args, got %v", args)
+	if len(args) < 3 {
+		t.Fatalf("expected at least 3 args, got %v", args)
 	}
-	// Should use stream-json format like multica
-	if args[1] != "--output-format" || args[2] != "stream-json" {
-		t.Errorf("expected '--output-format stream-json', got %q %q", args[1], args[2])
+	// Should use --permission-mode bypassPermissions (not --output-format which conflicts with -p)
+	if args[1] != "--permission-mode" || args[2] != "bypassPermissions" {
+		t.Errorf("expected '--permission-mode bypassPermissions', got %q %q", args[1], args[2])
 	}
 }
 
