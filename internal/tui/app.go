@@ -352,6 +352,8 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
+	// Clear previous turn's tool tree (deferred from onDone to avoid shrink flicker)
+	a.tools.Clear()
 	// Reset per-turn counters for the new turn's summary
 	a.turnToolCount = 0
 	a.turnWrites = 0
@@ -431,9 +433,9 @@ func (a *App) updateViewport() {
 		sb.WriteString(a.renderMessage(m))
 		sb.WriteString("\n")
 	}
-	// Show live tool tree during tool execution
+	// Show live tool tree during tool execution — NO collapsing to prevent height jumps
 	if len(a.tools.entries) > 0 {
-		sb.WriteString(a.tools.Render(a.theme, a.width-6))
+		sb.WriteString(a.tools.RenderLive(a.theme, a.width-6))
 	}
 	// CC-style thinking indicator
 	if a.thinking && a.streaming == "" {

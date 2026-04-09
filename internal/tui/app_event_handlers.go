@@ -148,7 +148,8 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 	if len(a.tools.entries) > 0 {
 		tree := a.tools.Render(a.theme, a.width-6)
 		a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
-		a.tools.Clear()
+		// Don't clear live tree here — let updateViewport show the final state
+		// for one more frame. Clear happens on next submit() to avoid shrink flicker.
 	}
 	if a.streaming != "" {
 		meta := a.buildTurnMeta()

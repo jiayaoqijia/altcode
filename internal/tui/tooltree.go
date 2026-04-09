@@ -219,13 +219,30 @@ func toolSummaryNoun(name string, count int) string {
 	}
 }
 
-// Render returns the tool tree as styled text with collapsed groups.
+// RenderLive returns the tree during active execution — NO collapsing.
+// This prevents visual height jumping when consecutive tools complete.
+func (t *toolTree) RenderLive(theme Theme, width int) string {
+	if len(t.entries) == 0 {
+		return ""
+	}
+	// Convert entries to []any without collapsing
+	items := make([]any, len(t.entries))
+	for i, e := range t.entries {
+		items[i] = e
+	}
+	return t.renderItems(items, theme, width)
+}
+
+// Render returns the tool tree with collapsed groups (for final display).
 func (t *toolTree) Render(theme Theme, width int) string {
 	if len(t.entries) == 0 {
 		return ""
 	}
-
 	items := collapseEntries(t.entries)
+	return t.renderItems(items, theme, width)
+}
+
+func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 	var sb strings.Builder
 	for i, item := range items {
 		prefix := "├─"
