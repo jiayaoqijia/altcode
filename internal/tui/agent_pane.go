@@ -8,7 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 )
 
-const agentPaneOutputLines = 50
+const agentPaneOutputLines = 200
 
 // wsAgentPane renders a single agent within the workspace view.
 type wsAgentPane struct {
@@ -22,6 +22,7 @@ type wsAgentPane struct {
 	CostUSD  float64
 	Turns    int
 	Lines    []string // rolling output buffer
+	Focused  bool     // true when this pane has keyboard focus
 }
 
 // AppendOutput adds a line to the pane's rolling buffer.
@@ -39,14 +40,22 @@ func (p *wsAgentPane) Render(
 	height int,
 ) string {
 	borderColor := attentionColor(p.Priority)
+	if p.Focused {
+		// Focused pane gets a bright white border for clear visual distinction
+		borderColor = lipgloss.AdaptiveColor{Light: "#000000", Dark: "#FFFFFF"}
+	}
 
-	// Header: role badge + backend + activity
+	// Header: focus indicator + role badge + backend + activity
+	focusMarker := ""
+	if p.Focused {
+		focusMarker = "▸ "
+	}
 	badge := lipgloss.NewStyle().
 		Background(borderColor).
 		Foreground(lipgloss.Color("#000000")).
 		Bold(true).
 		Padding(0, 1).
-		Render(strings.ToUpper(p.Role))
+		Render(focusMarker + strings.ToUpper(p.Role))
 
 	backend := lipgloss.NewStyle().
 		Foreground(theme.Muted).
@@ -152,24 +161,25 @@ func attentionColor(p workspace.AttentionPriority) lipgloss.TerminalColor {
 	}
 }
 
-// activityIcon returns a compact icon for the agent's activity state.
+// activityIcon returns a user-friendly label for the agent's state.
+// Avoids implementation jargon — uses verbs users understand.
 func activityIcon(s workspace.ActivityState) string {
 	switch s {
 	case workspace.ActivityActive:
-		return "[active]"
+		return "working"
 	case workspace.ActivityReady:
-		return "[ready]"
+		return "ready"
 	case workspace.ActivityIdle:
-		return "[idle]"
+		return "idle"
 	case workspace.ActivitySpawning:
-		return "[spawning]"
+		return "starting…"
 	case workspace.ActivityWaitInput:
-		return "[waiting]"
+		return "needs input"
 	case workspace.ActivityBlocked:
-		return "[BLOCKED]"
+		return "STUCK"
 	case workspace.ActivityExited:
-		return "[exited]"
+		return "done"
 	default:
-		return "[--]"
+		return "—"
 	}
 }

@@ -356,34 +356,55 @@ func (wv *WorkspaceView) renderPanes(theme Theme) string {
 		paneH = 6
 	}
 
+	// Set focus state on panes
+	for i, role := range wv.order {
+		wv.panes[role].Focused = (i == wv.focus)
+	}
+
 	var rendered []string
 	for _, role := range wv.order {
 		p := wv.panes[role]
 		rendered = append(rendered, p.Render(theme, paneW, paneH))
 	}
 
+	// Stack vertically when too many agents for horizontal layout
+	if n > 3 && totalW < 120 {
+		return lipgloss.JoinVertical(lipgloss.Left, rendered...)
+	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, rendered...)
 }
 
-// renderFooter shows key hints and overall status.
+// renderFooter shows contextual key hints based on current state.
 func (wv *WorkspaceView) renderFooter(theme Theme) string {
 	hint := lipgloss.NewStyle().Foreground(theme.Muted)
 	key := lipgloss.NewStyle().Foreground(theme.Warning).Bold(true)
 
-	parts := []string{
-		key.Render("Ctrl+Z") + hint.Render(" pause"),
-		key.Render("Ctrl+Q") + hint.Render(" abort"),
-		key.Render("Ctrl+S") + hint.Render(" send"),
-		key.Render("Tab") + hint.Render(" cycle"),
+	// Context-sensitive hints — show what's relevant NOW
+	var parts []string
+	if wv.paused {
+		parts = append(parts, key.Render("Ctrl+R")+" "+hint.Render("resume"))
+		parts = append(parts, key.Render("Ctrl+Q")+" "+hint.Render("abort"))
+	} else {
+		parts = append(parts, key.Render("Tab")+" "+hint.Render("focus"))
+		if wv.focus >= 0 {
+			parts = append(parts, key.Render("Ctrl+S")+" "+hint.Render("send"))
+		}
+		parts = append(parts, key.Render("Ctrl+Z")+" "+hint.Render("pause"))
+		parts = append(parts, key.Render("Ctrl+Q")+" "+hint.Render("abort"))
 	}
 
+	// Status with focused agent name
 	status := "working"
 	if wv.paused {
 		status = "PAUSED"
 	}
+	focusInfo := ""
+	if wv.focus >= 0 && wv.focus < len(wv.order) {
+		focusInfo = " → " + wv.order[wv.focus]
+	}
 	statusStyle := lipgloss.NewStyle().
 		Foreground(theme.Warning).Bold(true).
-		Render(fmt.Sprintf("[%s]", status))
+		Render(fmt.Sprintf("[%s%s]", status, focusInfo))
 
 	return lipgloss.NewStyle().Width(wv.width).Render(
 		statusStyle + "  " + strings.Join(parts, "  "))

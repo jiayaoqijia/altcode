@@ -568,13 +568,13 @@ func TestTUIView_UpdateAgent_DynamicStateChange(t *testing.T) {
 	wv := NewWorkspaceView(sess)
 	wv.SetSize(80, 20)
 
-	// Initially spawning
+	// Initially spawning → "starting…"
 	out1 := stripANSI(wv.Render(DefaultTheme))
-	if !strings.Contains(out1, "spawning") {
-		t.Error("should show spawning state initially")
+	if !strings.Contains(out1, "starting") {
+		t.Errorf("should show starting state initially, got:\n%s", out1)
 	}
 
-	// Transition to active
+	// Transition to active → "working"
 	rec := sess.Agents["worker"]
 	rec.ActivityState = workspace.ActivityActive
 	rec.TurnCount = 5
@@ -582,8 +582,8 @@ func TestTUIView_UpdateAgent_DynamicStateChange(t *testing.T) {
 	wv.UpdateAgent(rec)
 
 	out2 := stripANSI(wv.Render(DefaultTheme))
-	if !strings.Contains(out2, "active") {
-		t.Error("should show active state after update")
+	if !strings.Contains(out2, "working") {
+		t.Errorf("should show working state after update, got:\n%s", out2)
 	}
 	if !strings.Contains(out2, "turns:5") {
 		t.Error("should show updated turn count")
@@ -599,8 +599,8 @@ func TestTUIView_UpdateAgent_DynamicStateChange(t *testing.T) {
 	wv.UpdateAgent(rec)
 
 	out3 := stripANSI(wv.Render(DefaultTheme))
-	if !strings.Contains(out3, "exited") {
-		t.Error("should show exited state after update")
+	if !strings.Contains(out3, "done") {
+		t.Errorf("should show done state after update, got:\n%s", out3)
 	}
 	if !strings.Contains(out3, "PR#99") {
 		t.Error("should show PR number after update")
@@ -680,20 +680,20 @@ func TestTUIView_OutputScrollback(t *testing.T) {
 	wv := NewWorkspaceView(sess)
 	wv.SetSize(80, 20)
 
-	// Push more lines than the rolling buffer (50)
-	for i := 0; i < 100; i++ {
+	// Push more lines than the rolling buffer (200)
+	for i := 0; i < 300; i++ {
 		wv.AppendAgentOutput("streamer", fmt.Sprintf("line-%03d", i))
 	}
 
-	// The pane should keep only the last 50 lines
+	// The pane should keep only the last 200 lines
 	pane := wv.panes["streamer"]
 	if len(pane.Lines) != agentPaneOutputLines {
 		t.Errorf("expected %d lines in buffer, got %d", agentPaneOutputLines, len(pane.Lines))
 	}
 
-	// Earliest line should be line-050 (after discarding 0-49)
-	if pane.Lines[0] != "line-050" {
-		t.Errorf("expected first buffered line 'line-050', got %q", pane.Lines[0])
+	// Earliest line should be line-100 (after discarding 0-99)
+	if pane.Lines[0] != "line-100" {
+		t.Errorf("expected first buffered line 'line-100', got %q", pane.Lines[0])
 	}
 }
 
