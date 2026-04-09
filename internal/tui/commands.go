@@ -67,11 +67,17 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.appendInfo(a.builtinAgentsText())
 	case "/workspace":
 		if len(parts) < 2 {
-			a.appendInfo("Usage: /workspace <task>\nStarts a multi-agent workspace.\nExample: /workspace add JWT authentication")
+			a.appendInfo("Usage: /workspace <task> [backend:role ...]\n" +
+				"Starts a multi-agent workspace.\n" +
+				"Examples:\n" +
+				"  /workspace add JWT auth                    (auto-detect agents)\n" +
+				"  /workspace add auth claude:architect codex:coder   (pick agents)\n" +
+				"  /workspace add auth codex:all              (single agent)")
 			return true, nil
 		}
-		task := strings.Join(parts[1:], " ")
-		cmd := a.startWorkspaceFromTUI(task)
+		// Parse backend:role pairs from the end of the command
+		task, agentSpecs := parseWorkspaceArgs(parts[1:])
+		cmd := a.startWorkspaceFromTUIWithAgents(task, agentSpecs)
 		return true, cmd
 	case "/team":
 		if len(parts) >= 3 && parts[1] == "run" {
@@ -105,6 +111,18 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.appendInfo(a.builtinRollbackText(parts))
 	case "/send":
 		a.appendInfo(a.builtinSendText(parts))
+	case "/spawn":
+		if a.wsView == nil || !a.wsView.IsActive() {
+			a.appendInfo("[spawn] No active workspace. Start one with /workspace first.")
+			return true, nil
+		}
+		if len(parts) < 3 {
+			a.appendInfo("Usage: /spawn <role> <backend>\nExample: /spawn reviewer claude\n         /spawn security codex")
+			return true, nil
+		}
+		role, backend := parts[1], parts[2]
+		cmd := a.spawnAdditionalAgent(role, backend)
+		return true, cmd
 	case "/undo":
 		a.appendInfo(a.builtinUndoText())
 	case "/redo":
@@ -222,7 +240,8 @@ func builtinHelpText() string {
 		{"/wf-pause", "pause workflows"},
 		{"/wf-resume", "resume workflows"},
 		{"/wf-cancel", "clear workflow state"},
-		{"/workspace", "start multi-agent workspace"},
+		{"/workspace", "start workspace [backend:role ...]"},
+		{"/spawn", "add agent mid-run: /spawn role backend"},
 		{"/workflow", "run phased workflow"},
 		{"/team", "multi-AI team config"},
 		{"/backends", "detected CLI backends"},

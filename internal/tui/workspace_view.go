@@ -65,6 +65,24 @@ func NewWorkspaceView(sess *workspace.WorkspaceSession) *WorkspaceView {
 	return wv
 }
 
+// AddAgent adds a new agent pane to the workspace view (for /spawn mid-run).
+func (wv *WorkspaceView) AddAgent(rec *workspace.AgentRecord) {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	if _, exists := wv.panes[rec.Role]; exists {
+		return
+	}
+	pane := &wsAgentPane{
+		Role:     rec.Role,
+		Backend:  rec.Backend,
+		Activity: rec.ActivityState,
+		Priority: rec.Priority(),
+	}
+	wv.panes[rec.Role] = pane
+	wv.order = append(wv.order, rec.Role)
+	sort.Strings(wv.order)
+}
+
 // IsActive reports whether the workspace view should be displayed.
 func (wv *WorkspaceView) IsActive() bool {
 	wv.mu.Lock()
@@ -119,6 +137,51 @@ func (wv *WorkspaceView) FocusedRole() string {
 		return wv.order[wv.focus]
 	}
 	return ""
+}
+
+// FocusByClick determines which pane was clicked based on X coordinate
+// and focuses it. Returns true if a pane was focused.
+func (wv *WorkspaceView) FocusByClick(x int) bool {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	n := len(wv.order)
+	if n == 0 || wv.width == 0 {
+		return false
+	}
+	totalW := wv.width
+	if totalW < 40 {
+		totalW = 40
+	}
+	paneW := (totalW - (n - 1)) / n
+	if paneW < 20 {
+		paneW = 20
+	}
+	idx := x / paneW
+	if idx >= n {
+		idx = n - 1
+	}
+	if idx < 0 {
+		idx = 0
+	}
+	wv.focus = idx
+	return true
+}
+
+// ScrollPane scrolls the focused pane's output buffer by delta lines.
+func (wv *WorkspaceView) ScrollPane(delta int) {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	if wv.focus < 0 || wv.focus >= len(wv.order) {
+		return
+	}
+	p := wv.panes[wv.order[wv.focus]]
+	if p == nil {
+		return
+	}
+	// Adjust visible window by trimming lines (scroll up = show older lines)
+	// For now, scrolling is handled by the rolling buffer — mouse scroll
+	// doesn't add new content, but future: offset into Lines buffer.
+	_ = delta
 }
 
 // CycleFocus advances focus to the next pane.

@@ -155,6 +155,13 @@ func (a *App) Init() tea.Cmd {
 func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
+		// Route mouse to workspace panes when active
+		if a.wsView != nil && a.wsView.IsActive() {
+			if msg.Action == tea.MouseActionPress {
+				a.wsView.FocusByClick(msg.X)
+			}
+			return a, nil
+		}
 		var cmd tea.Cmd
 		a.viewport, cmd = a.viewport.Update(msg)
 		return a, cmd

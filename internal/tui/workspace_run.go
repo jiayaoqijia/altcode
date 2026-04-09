@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/agent"
@@ -10,6 +11,64 @@ import (
 	"github.com/altcode-ai/altcode/internal/workspace/backends"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// agentSpec is a user-specified backend:role pair for workspace agent selection.
+type agentSpec struct {
+	backend string
+	role    string
+}
+
+// parseWorkspaceArgs splits the workspace command into task + agent specs.
+// "add auth claude:architect codex:coder" → task="add auth", specs=[{claude,architect},{codex,coder}]
+// "add auth" → task="add auth", specs=nil (auto-detect)
+func parseWorkspaceArgs(parts []string) (string, []agentSpec) {
+	var taskParts []string
+	var specs []agentSpec
+	for _, p := range parts {
+		if strings.Contains(p, ":") {
+			kv := strings.SplitN(p, ":", 2)
+			if len(kv) == 2 && kv[0] != "" && kv[1] != "" {
+				specs = append(specs, agentSpec{backend: kv[0], role: kv[1]})
+				continue
+			}
+		}
+		taskParts = append(taskParts, p)
+	}
+	return strings.Join(taskParts, " "), specs
+}
+
+// startWorkspaceFromTUIWithAgents starts workspace with optional agent selection.
+func (a *App) startWorkspaceFromTUIWithAgents(task string, specs []agentSpec) tea.Cmd {
+	if len(specs) == 0 {
+		// No specs → auto-detect (original behavior)
+		return a.startWorkspaceFromTUI(task)
+	}
+	// User specified agents — skip detection, build directly
+	a.appendInfo(fmt.Sprintf("[workspace] Starting with %d specified agent(s): %s", len(specs), task))
+
+	agents := make(map[string]*workspace.AgentRecord)
+	var detected []backends.DetectedBackend
+	for _, s := range specs {
+		agents[s.role] = &workspace.AgentRecord{
+			Role:          s.role,
+			Backend:       s.backend,
+			ActivityState: workspace.ActivitySpawning,
+		}
+		detected = append(detected, backends.DetectedBackend{
+			Name: s.backend,
+		})
+	}
+
+	sess := &workspace.WorkspaceSession{
+		ID:     fmt.Sprintf("tui-%d", time.Now().UnixMilli()),
+		Task:   task,
+		Status: workspace.WSSSpawning,
+		Agents: agents,
+	}
+
+	go a.spawnWorkspaceAgents(sess, detected, task)
+	return a.StartWorkspace(sess)
+}
 
 // workspaceDetectedMsg carries detected backends from the background probe.
 type workspaceDetectedMsg struct {
@@ -123,6 +182,75 @@ func (a *App) spawnWorkspaceAgents(
 			}
 		}(role, stream)
 	}
+}
+
+// spawnAdditionalAgent adds a new agent to an active workspace mid-run.
+func (a *App) spawnAdditionalAgent(role, backendName string) tea.Cmd {
+	sess := a.wsView.Session()
+	if sess == nil {
+		a.appendInfo("[spawn] No active session.")
+		return nil
+	}
+
+	// Check if role already exists
+	if a.wsView.HasRole(role) {
+		a.appendInfo(fmt.Sprintf("[spawn] Role '%s' already exists. Pick a different name.", role))
+		return nil
+	}
+
+	// Add agent record to session
+	rec := &workspace.AgentRecord{
+		Role:          role,
+		Backend:       backendName,
+		ActivityState: workspace.ActivitySpawning,
+	}
+	sess.Lock()
+	sess.Agents[role] = rec
+	sess.Unlock()
+
+	// Add pane to workspace view
+	a.wsView.AddAgent(rec)
+
+	a.appendInfo(fmt.Sprintf("[spawn] Spawning %s (%s)...", role, backendName))
+
+	// Spawn the agent in background
+	go func() {
+		cfg := agent.ExternalAgentConfig{
+			Backend: agent.CLIBackend(backendName),
+			Role:    role,
+			WorkDir: a.projectRoot,
+			Timeout: 10 * time.Minute,
+		}
+		stream := agent.SpawnExternal(context.Background(), cfg, sess.Task)
+		go func() {
+			for ev := range stream.Events {
+				if a.wsView != nil && ev.Content != "" {
+					a.wsView.AppendAgentOutput(role, ev.Content)
+				}
+			}
+			var result agent.ExternalAgentResult
+			select {
+			case r, ok := <-stream.Result:
+				if ok {
+					result = r
+				}
+			case <-time.After(5 * time.Second):
+				result = agent.ExternalAgentResult{ExitCode: -1}
+			}
+			if a.wsView != nil {
+				a.wsView.AppendAgentOutput(role,
+					fmt.Sprintf("[exited: code %d]", result.ExitCode))
+			}
+			sess.Lock()
+			rec.ActivityState = workspace.ActivityExited
+			rec.ExitCode = result.ExitCode
+			now := time.Now()
+			rec.ExitedAt = &now
+			sess.Unlock()
+		}()
+	}()
+
+	return nil
 }
 
 // StartWorkspace activates the workspace dashboard for the given session
