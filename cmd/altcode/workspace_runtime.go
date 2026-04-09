@@ -17,12 +17,14 @@ import (
 
 // processRuntime is a minimal Runtime that spawns OS processes.
 // Tracks spawned processes and captures output for one-shot agents.
+// Supports fan-out streaming via subscribers for Attach().
 type processRuntime struct {
-	mu        sync.Mutex
-	procs     map[string]*os.Process
-	outputs   map[string]*bytes.Buffer
-	exits     map[string]int
-	callbacks map[string]func(string)
+	mu          sync.Mutex
+	procs       map[string]*os.Process
+	outputs     map[string]*bytes.Buffer
+	exits       map[string]int
+	callbacks   map[string]func(string)
+	subscribers map[string][]chan string
 }
 
 func (p *processRuntime) Name() string { return "process" }
@@ -85,7 +87,8 @@ func (p *processRuntime) Spawn(
 	p.procs[h.ID] = cmd.Process
 	p.mu.Unlock()
 
-	// Scanner goroutine: reads lines, calls callback, fills buffer.
+	// Scanner goroutine: reads lines, calls callback,
+	// fans out to subscribers, fills buffer.
 	readerDone := make(chan struct{})
 	go func() {
 		defer close(readerDone)
@@ -97,9 +100,18 @@ func (p *processRuntime) Spawn(
 			buf.WriteString(line + "\n")
 			p.mu.Lock()
 			cb := p.callbacks[h.ID]
+			subs := append(
+				[]chan string(nil),
+				p.subscribers[h.ID]...)
 			p.mu.Unlock()
 			if cb != nil {
 				cb(line)
+			}
+			for _, sub := range subs {
+				select {
+				case sub <- line:
+				default: // drop if subscriber is slow
+				}
 			}
 		}
 		pr.Close()
@@ -127,12 +139,45 @@ func (p *processRuntime) Spawn(
 	return h, nil
 }
 
+// Attach returns a channel that receives all future output
+// lines from the given handle. Multiple callers can attach
+// concurrently; each gets its own channel (fan-out). The
+// channel is closed when the context is cancelled.
 func (p *processRuntime) Attach(
-	_ context.Context, _ workspace.RuntimeHandle,
+	ctx context.Context, h workspace.RuntimeHandle,
 ) (<-chan string, error) {
-	ch := make(chan string)
-	close(ch)
+	ch := make(chan string, 100)
+	p.mu.Lock()
+	if p.subscribers == nil {
+		p.subscribers = make(map[string][]chan string)
+	}
+	p.subscribers[h.ID] = append(
+		p.subscribers[h.ID], ch)
+	p.mu.Unlock()
+
+	go func() {
+		<-ctx.Done()
+		p.mu.Lock()
+		p.removeSubscriber(h.ID, ch)
+		p.mu.Unlock()
+		close(ch)
+	}()
 	return ch, nil
+}
+
+// removeSubscriber removes ch from the subscriber list.
+// Caller must hold p.mu.
+func (p *processRuntime) removeSubscriber(
+	id string, ch chan string,
+) {
+	subs := p.subscribers[id]
+	for i, s := range subs {
+		if s == ch {
+			p.subscribers[id] = append(
+				subs[:i], subs[i+1:]...)
+			return
+		}
+	}
 }
 
 func (p *processRuntime) Kill(

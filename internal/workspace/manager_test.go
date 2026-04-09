@@ -1,6 +1,7 @@
 package workspace
 
 import (
+	"context"
 	"strings"
 	"testing"
 )
@@ -10,7 +11,9 @@ func TestBuildManagerPrompt(t *testing.T) {
 		"architect":   "designed auth module",
 		"implementer": "wrote auth.go with JWT",
 	}
-	prompt := BuildManagerPrompt("add JWT auth", outputs)
+	ctx := context.Background()
+	prompt := BuildManagerPrompt(
+		ctx, "add JWT auth", outputs, nil)
 
 	if !strings.Contains(prompt, "add JWT auth") {
 		t.Error("prompt missing original task")

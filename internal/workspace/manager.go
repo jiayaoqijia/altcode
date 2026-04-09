@@ -11,10 +11,22 @@ import (
 // maxWorkerOutputBytes caps each worker's output in the manager prompt.
 const maxWorkerOutputBytes = 8 * 1024
 
+// maxDiffBytes caps each worker's full diff in the manager prompt.
+const maxDiffBytes = 4 * 1024
+
+// WorkerInfo carries a worker's output plus worktree metadata
+// so the manager prompt can include actual git diffs.
+type WorkerInfo struct {
+	Output       string // stdout/stderr text
+	WorktreePath string // git worktree root (empty = no diff)
+	BaseBranch   string // e.g. "main"
+}
+
 // ManagerConfig configures the manager agent synthesis step.
 type ManagerConfig struct {
 	Task          string
-	WorkerOutputs map[string]string // role -> output text
+	WorkerOutputs map[string]string // role -> output text (legacy)
+	Workers       map[string]WorkerInfo
 	GitRoot       string
 	WorkDir       string // manager's working directory
 	Backend       string // "codex" or "claude"
@@ -31,7 +43,8 @@ type ManagerResult struct {
 func RunManager(
 	ctx context.Context, cfg ManagerConfig,
 ) (*ManagerResult, error) {
-	prompt := BuildManagerPrompt(cfg.Task, cfg.WorkerOutputs)
+	prompt := BuildManagerPrompt(
+		ctx, cfg.Task, cfg.WorkerOutputs, cfg.Workers)
 
 	backend := agent.BackendCodex
 	if cfg.Backend == "claude" {
@@ -59,9 +72,15 @@ func RunManager(
 	}, nil
 }
 
-// BuildManagerPrompt constructs the prompt sent to the manager agent.
+// BuildManagerPrompt constructs the prompt sent to the manager
+// agent. When Workers is populated, it includes git diff stat and
+// full diff (capped at maxDiffBytes) so the manager has factual
+// grounding about what each worker actually changed.
 func BuildManagerPrompt(
-	task string, workerOutputs map[string]string,
+	ctx context.Context,
+	task string,
+	workerOutputs map[string]string,
+	workers map[string]WorkerInfo,
 ) string {
 	var b strings.Builder
 	b.WriteString(
@@ -69,10 +88,18 @@ func BuildManagerPrompt(
 			"Your workers completed these tasks:\n\n")
 	b.WriteString("Original task: " + task + "\n\n")
 
-	for role, output := range workerOutputs {
-		b.WriteString("=== " + role + " ===\n")
-		b.WriteString(TruncateWorkerOutput(output))
-		b.WriteString("\n\n")
+	// Prefer Workers (has diffs), fall back to legacy map.
+	if len(workers) > 0 {
+		for role, w := range workers {
+			writeWorkerSection(
+				ctx, &b, role, w)
+		}
+	} else {
+		for role, output := range workerOutputs {
+			b.WriteString("=== " + role + " ===\n")
+			b.WriteString(TruncateWorkerOutput(output))
+			b.WriteString("\n\n")
+		}
 	}
 
 	b.WriteString(
@@ -80,6 +107,51 @@ func BuildManagerPrompt(
 			"Resolve any conflicts between workers. " +
 			"List the final files changed.")
 	return b.String()
+}
+
+// writeWorkerSection writes one worker's output + git diffs.
+func writeWorkerSection(
+	ctx context.Context,
+	b *strings.Builder,
+	role string,
+	w WorkerInfo,
+) {
+	b.WriteString("=== " + role + " ===\n")
+	b.WriteString(TruncateWorkerOutput(w.Output))
+	b.WriteString("\n")
+
+	if w.WorktreePath == "" || w.BaseBranch == "" {
+		b.WriteString("\n")
+		return
+	}
+
+	base := w.BaseBranch
+	stat, err := runGit(
+		ctx, w.WorktreePath,
+		"diff", base+"..HEAD", "--stat")
+	if err == nil && strings.TrimSpace(stat) != "" {
+		b.WriteString("\nDiff stat:\n")
+		b.WriteString(strings.TrimSpace(stat))
+		b.WriteString("\n")
+	}
+
+	full, err := runGit(
+		ctx, w.WorktreePath,
+		"diff", base+"..HEAD")
+	if err == nil && strings.TrimSpace(full) != "" {
+		b.WriteString("\nDiff:\n")
+		b.WriteString(truncateDiff(full))
+		b.WriteString("\n")
+	}
+	b.WriteString("\n")
+}
+
+// truncateDiff caps a diff string at maxDiffBytes.
+func truncateDiff(s string) string {
+	if len(s) <= maxDiffBytes {
+		return s
+	}
+	return s[:maxDiffBytes] + "\n[...diff truncated]"
 }
 
 // TruncateWorkerOutput caps output at maxWorkerOutputBytes.

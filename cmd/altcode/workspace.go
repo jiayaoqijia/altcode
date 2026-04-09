@@ -179,6 +179,10 @@ func runWorkspaceStart(
 		return fmt.Errorf("save session: %w", err)
 	}
 
+	// Initialize durable event log
+	evLogPath := filepath.Join(wsDir, id, "events.jsonl")
+	evLog := workspace.NewEventLog(evLogPath)
+
 	// Create worktrees and inject context.
 	// Track created worktrees for cleanup on partial failure.
 	wksp := workspace.NewWorktreeWorkspace()
@@ -263,10 +267,23 @@ func runWorkspaceStart(
 		rec.RuntimeHandleID = handle.ID
 		rec.SpawnedAt = handle.StartedAt
 
+		// Emit spawn event
+		evLog.Emit(workspace.Event{ //nolint:errcheck
+			Type:    workspace.EventAgentSpawned,
+			Role:    rec.Role,
+			Content: rec.Backend + " " + handle.ID,
+		})
+
 		// Stream agent output to stdout with role prefix
 		role := rec.Role
+		el := evLog
 		rt.OnOutput(handle.ID, func(line string) {
 			fmt.Printf("[%s] %s\n", role, line)
+			el.Emit(workspace.Event{ //nolint:errcheck
+				Type:    workspace.EventAgentOutput,
+				Role:    role,
+				Content: line,
+			})
 		})
 	}
 
@@ -326,6 +343,12 @@ waitLoop:
 			rec.ActivityState = workspace.ActivityExited
 			now := time.Now()
 			rec.ExitedAt = &now
+			evLog.Emit(workspace.Event{ //nolint:errcheck
+				Type: workspace.EventAgentExited,
+				Role: rec.Role,
+				Content: fmt.Sprintf(
+					"exit %d", exitCode),
+			})
 		}
 	}
 	sess.Status = workspace.WSSWorking
@@ -364,10 +387,13 @@ waitLoop:
 
 	// Run manager agent to synthesize worker outputs
 	if hasCommits && len(sess.Agents) > 1 {
-		workerOutputs := make(map[string]string)
+		workers := make(map[string]workspace.WorkerInfo)
 		for role, rec := range sess.Agents {
-			workerOutputs[role] = rt.GetOutput(
-				rec.RuntimeHandleID)
+			workers[role] = workspace.WorkerInfo{
+				Output:       rt.GetOutput(rec.RuntimeHandleID),
+				WorktreePath: rec.WorktreePath,
+				BaseBranch:   base,
+			}
 		}
 
 		mgrBackend := "codex"
@@ -381,11 +407,11 @@ waitLoop:
 		fmt.Println("\n=== Manager Synthesis ===")
 		mgrResult, mgrErr := workspace.RunManager(
 			ctx, workspace.ManagerConfig{
-				Task:          task,
-				WorkerOutputs: workerOutputs,
-				GitRoot:       gitRoot,
-				WorkDir:       gitRoot,
-				Backend:       mgrBackend,
+				Task:    task,
+				Workers: workers,
+				GitRoot: gitRoot,
+				WorkDir: gitRoot,
+				Backend: mgrBackend,
 			})
 		if mgrErr != nil {
 			fmt.Printf("Manager agent failed: %v\n", mgrErr)
