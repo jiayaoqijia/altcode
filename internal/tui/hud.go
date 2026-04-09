@@ -130,7 +130,7 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 	// Session duration with emoji — CC style: ⏱️ 2m33s
 	if !h.SessionStart.IsZero() && width >= 50 {
 		dur := time.Since(h.SessionStart).Truncate(time.Second)
-		parts1 = append(parts1, dim.Render("⏱️  "+formatDuration(dur)))
+		parts1 = append(parts1, dim.Render(formatDuration(dur)))
 	}
 
 	line1 := strings.Join(parts1, sep)
