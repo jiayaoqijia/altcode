@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -10,6 +11,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/orchestrator"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/workflow"
+	"github.com/altcode-ai/altcode/internal/workspace"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -553,6 +555,11 @@ func (a *App) builtinVersionText() string {
 }
 
 func (a *App) builtinTasksText() string {
+	// When a workspace is active, show its shared task list.
+	if a.wsView != nil && a.wsView.IsActive() {
+		return a.workspaceTasksText()
+	}
+
 	if a.engine == nil || a.engine.TaskQueue() == nil {
 		return "No task queue available."
 	}
@@ -570,6 +577,39 @@ func (a *App) builtinTasksText() string {
 		))
 	}
 	sb.WriteString("\n" + a.engine.TaskQueue().Summary())
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func (a *App) workspaceTasksText() string {
+	sess := a.wsView.Session()
+	if sess == nil {
+		return "Workspace session unavailable."
+	}
+	wsDir := filepath.Join(".altcode", "workspace", sess.ID)
+	tl := workspace.NewTaskList(filepath.Join(wsDir, "tasks.json"))
+	if err := tl.Load(); err != nil {
+		return fmt.Sprintf("No workspace tasks (load: %v).", err)
+	}
+	tasks := tl.List()
+	if len(tasks) == 0 {
+		return "Workspace task list is empty."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Workspace Tasks (%d):\n", len(tasks)))
+	for _, t := range tasks {
+		assignee := t.Assignee
+		if assignee == "" {
+			assignee = "-"
+		}
+		blocked := ""
+		if tl.IsBlocked(t.ID) {
+			blocked = " [blocked]"
+		}
+		sb.WriteString(fmt.Sprintf(
+			"  %-10s %-12s %-10s %s%s\n",
+			t.ID, t.Status, assignee, t.Title, blocked,
+		))
+	}
 	return strings.TrimRight(sb.String(), "\n")
 }
 
