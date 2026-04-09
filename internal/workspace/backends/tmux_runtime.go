@@ -68,8 +68,13 @@ func (t *TmuxRuntime) Spawn(
 			fmt.Sprintf("export %s", shellEscape(kv)))
 	}
 
-	// Launch the command.
-	t.sendKeys(paneID, strings.Join(argv, " "))
+	// Launch the command. Each arg is shell-escaped to prevent
+	// interpretation of special chars (parentheses, quotes, etc.)
+	var quoted []string
+	for _, a := range argv {
+		quoted = append(quoted, shellEscape(a))
+	}
+	t.sendKeys(paneID, strings.Join(quoted, " "))
 
 	// Auto-layout so panes tile evenly.
 	_, _ = t.run("select-layout", "-t", t.session, "tiled")
