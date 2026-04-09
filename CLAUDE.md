@@ -38,6 +38,26 @@ make lint           # Run go vet
 
 Note: Makefile sets `GOFLAGS=-mod=mod` automatically because vendor/ contains git submodules (codex, claude-code), not Go dependencies.
 
+### Benchmark & Testing Rule (HARD RULE)
+
+**ALL benchmarks and feature tests MUST run through the TUI, not headless commands.**
+
+- Launch altcode TUI in tmux, send prompts via `tmux send-keys`, capture via `tmux capture-pane`
+- This tests the REAL user experience: thinking indicator, tool tree, HUD, streaming, sidebar
+- Headless mode (`altcode "prompt"`) skips TUI rendering and misses rendering bugs
+- For CC comparison: capture CC's HUD via `claude-hud` plugin + Playwright browser capture
+
+```bash
+# Correct: TUI benchmark via tmux
+tmux new-session -d -s bench -x 160 -y 45 "/tmp/altcode --config config.json"
+tmux send-keys -t bench "Write a Fibonacci function in Go" Enter
+sleep 20
+tmux capture-pane -t bench -p  # capture rendered TUI output
+
+# Wrong: headless benchmark (misses TUI bugs)
+altcode "Write a Fibonacci function in Go"  # skips TUI entirely
+```
+
 ### Pre-Push Gate (HARD RULE)
 
 **NEVER push without passing these locally first:**
