@@ -20,10 +20,11 @@ type WorkspaceView struct {
 	order  []string                // role display order
 	phases []wsPhase               // phase breadcrumb
 	focus  int                     // focused pane index (-1 = none)
-	active bool
-	width  int
-	height int
-	paused bool
+	active    bool
+	width     int
+	height    int
+	paused    bool
+	inputHas  string // current input prefix (for Tab hint accuracy)
 }
 
 // wsPhase tracks one phase in the breadcrumb bar.
@@ -413,7 +414,12 @@ func (wv *WorkspaceView) renderFooter(theme Theme) string {
 		parts = append(parts, key.Render("Ctrl+R")+" "+hint.Render("resume"))
 		parts = append(parts, key.Render("Ctrl+Q")+" "+hint.Render("abort"))
 	} else {
-		parts = append(parts, key.Render("Tab")+" "+hint.Render("focus"))
+		// Tab hint changes based on input: slash-complete vs focus cycling
+		if strings.HasPrefix(wv.inputHas, "/") {
+			parts = append(parts, key.Render("Tab")+" "+hint.Render("complete"))
+		} else {
+			parts = append(parts, key.Render("Tab")+" "+hint.Render("focus"))
+		}
 		if wv.focus >= 0 {
 			parts = append(parts, key.Render("Ctrl+S")+" "+hint.Render("send"))
 		}

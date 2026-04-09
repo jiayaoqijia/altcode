@@ -93,6 +93,14 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 		a.recordToolSuccess(ev, title, elapsed, output)
 	}
 	a.recordToolMeta(ev, title)
+	// Lightweight git dirty refresh after file-changing tools
+	tn := a.activeToolName
+	if ev.ToolCall != nil && ev.ToolCall.Name != "" {
+		tn = ev.ToolCall.Name
+	}
+	if tn == "Write" || tn == "Edit" || tn == "Bash" {
+		a.gitDirty = detectGitDirty()
+	}
 	a.activeToolName = ""
 	a.activeToolDetail = ""
 	a.updateViewport()

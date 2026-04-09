@@ -30,6 +30,8 @@ func NewMarkdownRenderer(width int) *MarkdownRenderer {
 	}
 }
 
+const maxCacheEntries = 100 // bound cache to prevent memory leak in long sessions
+
 // Render converts markdown text to styled terminal output.
 func (r *MarkdownRenderer) Render(input string) string {
 	if cached, ok := r.cache[input]; ok {
@@ -44,6 +46,10 @@ func (r *MarkdownRenderer) Render(input string) string {
 	}
 
 	result := r.renderWithGlamour(input)
+	// Evict oldest entries if cache exceeds bound
+	if len(r.cache) >= maxCacheEntries {
+		r.cache = make(map[string]string)
+	}
 	r.cache[input] = result
 	return result
 }

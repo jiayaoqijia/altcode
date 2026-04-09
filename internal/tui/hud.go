@@ -392,6 +392,15 @@ func detectGitInfo() (project, branch string, dirty bool) {
 	return
 }
 
+// detectGitDirty is a lightweight check — only runs git status (1 process,
+// not 3 like detectGitInfo). Called after file-changing tool results.
+func detectGitDirty() bool {
+	if out, err := exec.Command("git", "status", "--porcelain").Output(); err == nil {
+		return strings.TrimSpace(string(out)) != ""
+	}
+	return false
+}
+
 // detectTerminal returns info about the terminal environment.
 func detectTerminal() string {
 	if os.Getenv("TMUX") != "" {

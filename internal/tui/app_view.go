@@ -64,6 +64,7 @@ func (a *App) renderMainBody() string {
 		mainBody = a.sessionSwitcher.View()
 	}
 	if a.wsView != nil && a.wsView.IsActive() {
+		a.wsView.inputHas = a.input.Value() // sync input for Tab hint
 		mainBody = a.wsView.Render(a.theme)
 	}
 	if a.teamView.IsActive() || a.wfRunning {
