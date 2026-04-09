@@ -432,10 +432,12 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 	e.persistMessage("user", userMsg)
 
 	defer func() {
-		// Emit final summary with intent + verification info
-		summary := e.buildTurnSummary(intent)
-		if summary != "" {
-			out <- event.Event{Type: event.InfoEvent, Info: summary}
+		// Emit final summary only in debug mode (noisy for regular users)
+		if os.Getenv("ALTCODE_DEBUG") != "" {
+			summary := e.buildTurnSummary(intent)
+			if summary != "" {
+				out <- event.Event{Type: event.InfoEvent, Info: summary}
+			}
 		}
 		out <- event.Event{Type: event.Done}
 	}()
