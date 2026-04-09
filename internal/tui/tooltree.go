@@ -286,12 +286,18 @@ func (t *toolTree) Render(theme Theme, width int) string {
 				timing = lipgloss.NewStyle().Foreground(theme.Muted).
 					Render(" " + formatToolDuration(e.elapsed))
 			}
-			// CC-style: show elapsed time for running tools
+			// CC-style running tool: elapsed + timeout + background hint
+			var runHint string
 			if e.status == "running" && !e.startedAt.IsZero() {
 				runElapsed := time.Since(e.startedAt)
 				if runElapsed >= time.Second {
-					timing = lipgloss.NewStyle().Foreground(theme.Muted).
-						Render(" " + formatToolDuration(runElapsed))
+					// Show: Running… (22s · timeout 2m)
+					timing = lipgloss.NewStyle().Foreground(theme.Warning).
+						Render(" Running… (" + formatToolDuration(runElapsed) + " · timeout 2m)")
+				}
+				if runElapsed >= 10*time.Second {
+					runHint = lipgloss.NewStyle().Foreground(theme.Muted).Italic(true).
+						Render("   (ctrl+b to run in background)")
 				}
 			}
 
@@ -299,6 +305,9 @@ func (t *toolTree) Render(theme Theme, width int) string {
 				Render(prefix+" ") + iconRendered + " " + nameRendered + detailRendered + timing
 			sb.WriteString(line)
 			sb.WriteByte('\n')
+			if runHint != "" {
+				sb.WriteString(runHint + "\n")
+			}
 
 			// Render output below the tool entry (CC style: ⎿ output lines)
 			if e.output != "" && e.status != "running" {
@@ -348,7 +357,7 @@ func formatDiffOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 		if len(result) >= maxLines {
 			// CC-style collapsed output hint
 			result = append(result,
-				ctxStyle.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
+				ctxStyle.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
 			break
 		}
 		display := truncateStr(line, maxWidth)
@@ -371,7 +380,7 @@ func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
 			break
 		}
 		if strings.TrimSpace(line) == "" {
@@ -390,7 +399,7 @@ func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int) []
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
 			break
 		}
 		trimmed := strings.TrimSpace(line)
