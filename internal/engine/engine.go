@@ -143,6 +143,10 @@ func New(params EngineParams) (*Engine, error) {
 	if tq == nil {
 		tq = task.NewQueue()
 	}
+	registry.Register(tool.NewTaskCreateTool(tq))
+	registry.Register(tool.NewTaskUpdateTool(tq))
+	registry.Register(tool.NewTaskListTool(tq))
+	registry.Register(tool.NewTaskGetTool(tq))
 
 	perm := params.Perm
 	if perm == nil {
