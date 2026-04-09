@@ -135,30 +135,34 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 
 	line1 := strings.Join(parts1, sep)
 
-	// ── LINE 2 ──
-	parts2 := []string{}
+	// ── LINE 2: left=progress, right=resources ──
+	// Left side: task progress
+	var leftParts []string
 
-	// Context bar — adaptive width
+	// Right side: context + config + cost (resource meters)
+	var rightParts []string
+
+	// Context bar (right)
 	if h.ContextLimit > 0 {
-		barWidth := 20
-		if width < 60 {
-			barWidth = 10 // shorter bar on narrow terminals
+		barWidth := 12
+		if width >= 80 {
+			barWidth = 16
 		}
 		bar := renderContextBar(h.contextPercent(), theme, barWidth)
 		pct := fmt.Sprintf("%d%%", h.contextPercent())
-		if width >= 80 {
+		if width >= 100 {
 			tokens := fmt.Sprintf("%s/%s",
 				formatTokens(h.ContextTokens), formatTokens(h.ContextLimit))
-			parts2 = append(parts2, bar+" "+dim.Render(pct)+" "+dim.Render(tokens))
+			rightParts = append(rightParts, bar+" "+dim.Render(pct)+" "+dim.Render(tokens))
 		} else {
-			parts2 = append(parts2, bar+" "+dim.Render(pct))
+			rightParts = append(rightParts, bar+" "+dim.Render(pct))
 		}
 	} else if info.TokensIn+info.TokensOut > 0 {
-		parts2 = append(parts2, dim.Render(fmt.Sprintf("%s in / %s out",
+		rightParts = append(rightParts, dim.Render(fmt.Sprintf("%s in / %s out",
 			formatTokens(info.TokensIn), formatTokens(info.TokensOut))))
 	}
 
-	// Config counts (Claude Code parity: "2 CLAUDE.md | 4 MCPs | 3 hooks")
+	// Config counts (right)
 	if h.ClaudeMDCount > 0 || h.MCPCount > 0 || h.HooksCount > 0 {
 		var cfgParts []string
 		if h.ClaudeMDCount > 0 {
@@ -170,34 +174,37 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		if h.HooksCount > 0 {
 			cfgParts = append(cfgParts, fmt.Sprintf("%d hooks", h.HooksCount))
 		}
-		parts2 = append(parts2, dim.Render(strings.Join(cfgParts, " | ")))
+		rightParts = append(rightParts, dim.Render(strings.Join(cfgParts, " | ")))
 	}
 
-	// Cost
+	// Cost (right)
 	if info.CostUSD > 0 {
-		parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Success).Render(
+		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(theme.Success).Render(
 			fmt.Sprintf("$%.4f", info.CostUSD)))
 	}
 
-	// Tasks (Claude Code style: ▸ active task (completed/total))
+	// Merge into parts2 — left progress first, then right resources
+	// Tasks go on left side (progress)
 	if h.TasksTotal > 0 {
 		if h.TasksDone == h.TasksTotal {
-			parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Success).Render(
-				fmt.Sprintf("✓ All tasks complete (%d/%d)", h.TasksDone, h.TasksTotal)))
+			leftParts = append(leftParts, lipgloss.NewStyle().Foreground(theme.Success).Render(
+				fmt.Sprintf("✓ All tasks (%d/%d)", h.TasksDone, h.TasksTotal)))
 		} else if h.ActiveTaskName != "" {
 			taskName := h.ActiveTaskName
-			if len(taskName) > 50 {
-				taskName = taskName[:47] + "..."
+			if len(taskName) > 40 {
+				taskName = taskName[:37] + "..."
 			}
-			parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Warning).Render("▸ ")+
+			leftParts = append(leftParts, lipgloss.NewStyle().Foreground(theme.Warning).Render("▸ ")+
 				dim.Render(taskName)+" "+
 				dim.Render(fmt.Sprintf("(%d/%d)", h.TasksDone, h.TasksTotal)))
 		} else {
-			parts2 = append(parts2, dim.Render(
+			leftParts = append(leftParts, dim.Render(
 				fmt.Sprintf("tasks %d/%d", h.TasksDone, h.TasksTotal)))
 		}
 	}
 
+	// Build line 2: left progress │ right resources
+	parts2 := append(leftParts, rightParts...)
 	line2 := ""
 	if len(parts2) > 0 {
 		line2 = "  " + strings.Join(parts2, sep)

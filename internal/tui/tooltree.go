@@ -57,25 +57,43 @@ func (t *toolTree) Start(name, detail string) {
 	t.active = len(t.entries) - 1
 }
 
-// Done marks the current tool as complete with optional output.
+// Done marks the OLDEST running tool as complete. When tools run
+// concurrently or complete out of order, this finds the right entry
+// instead of blindly using t.active (which caused the ⟳ 37s stale bug).
 func (t *toolTree) Done(title string, elapsed time.Duration) {
-	if t.active >= 0 && t.active < len(t.entries) {
-		t.entries[t.active].status = "done"
-		t.entries[t.active].elapsed = elapsed
+	idx := t.findRunning()
+	if idx >= 0 {
+		t.entries[idx].status = "done"
+		t.entries[idx].elapsed = elapsed
 		if title != "" {
-			t.entries[t.active].detail = title
+			t.entries[idx].detail = title
 		}
 	}
 	t.active = -1
 }
 
-// DoneWithOutput marks the tool as complete and stores truncated output.
+// DoneWithOutput marks the oldest running tool as complete with output.
 func (t *toolTree) DoneWithOutput(title string, elapsed time.Duration, output string) {
-	t.Done(title, elapsed)
-	idx := len(t.entries) - 1
+	idx := t.findRunning()
 	if idx >= 0 {
+		t.entries[idx].status = "done"
+		t.entries[idx].elapsed = elapsed
+		if title != "" {
+			t.entries[idx].detail = title
+		}
 		t.entries[idx].output = output
 	}
+	t.active = -1
+}
+
+// findRunning returns the index of the oldest running entry, or -1.
+func (t *toolTree) findRunning() int {
+	for i, e := range t.entries {
+		if e.status == "running" {
+			return i
+		}
+	}
+	return -1
 }
 
 // DoneWithError marks the active tool as failed.

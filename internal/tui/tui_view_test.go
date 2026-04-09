@@ -930,7 +930,7 @@ func TestCCParity_HUD_AllTasksComplete(t *testing.T) {
 	output := renderHUD(hs, info, DefaultTheme, 120, false, "")
 	plain := stripANSI(output)
 
-	if !strings.Contains(plain, "All tasks complete") {
+	if !strings.Contains(plain, "All tasks") {
 		t.Errorf("missing 'All tasks complete' when all done:\n%s", plain)
 	}
 	if !strings.Contains(plain, "5/5") {
