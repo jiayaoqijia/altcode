@@ -139,15 +139,34 @@ func (wv *WorkspaceView) FocusedRole() string {
 	return ""
 }
 
-// FocusByClick determines which pane was clicked based on X coordinate
-// and focuses it. Returns true if a pane was focused.
-func (wv *WorkspaceView) FocusByClick(x int) bool {
+// FocusByClick determines which pane was clicked based on coordinates.
+// Handles both horizontal layout (X-based) and vertical layout (Y-based).
+func (wv *WorkspaceView) FocusByClick(x, y int) bool {
 	wv.mu.Lock()
 	defer wv.mu.Unlock()
 	n := len(wv.order)
-	if n == 0 || wv.width == 0 {
+	if n == 0 {
 		return false
 	}
+
+	// Vertical stack mode: 4+ agents on narrow terminal
+	if n > 3 && wv.width < 120 {
+		paneH := (wv.height - 4) / n
+		if paneH < 3 {
+			paneH = 3
+		}
+		idx := (y - 1) / paneH // -1 for header
+		if idx >= n {
+			idx = n - 1
+		}
+		if idx < 0 {
+			idx = 0
+		}
+		wv.focus = idx
+		return true
+	}
+
+	// Horizontal layout: divide by pane width
 	totalW := wv.width
 	if totalW < 40 {
 		totalW = 40
@@ -167,7 +186,8 @@ func (wv *WorkspaceView) FocusByClick(x int) bool {
 	return true
 }
 
-// ScrollPane scrolls the focused pane's output buffer by delta lines.
+// ScrollPane scrolls the focused pane's output by delta lines.
+// Positive delta = scroll down (newer), negative = scroll up (older).
 func (wv *WorkspaceView) ScrollPane(delta int) {
 	wv.mu.Lock()
 	defer wv.mu.Unlock()
@@ -178,10 +198,17 @@ func (wv *WorkspaceView) ScrollPane(delta int) {
 	if p == nil {
 		return
 	}
-	// Adjust visible window by trimming lines (scroll up = show older lines)
-	// For now, scrolling is handled by the rolling buffer — mouse scroll
-	// doesn't add new content, but future: offset into Lines buffer.
-	_ = delta
+	p.scrollOffset += delta
+	if p.scrollOffset < 0 {
+		p.scrollOffset = 0
+	}
+	maxScroll := len(p.Lines) - 10
+	if maxScroll < 0 {
+		maxScroll = 0
+	}
+	if p.scrollOffset > maxScroll {
+		p.scrollOffset = maxScroll
+	}
 }
 
 // CycleFocus advances focus to the next pane.

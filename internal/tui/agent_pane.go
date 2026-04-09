@@ -21,8 +21,9 @@ type wsAgentPane struct {
 	Priority workspace.AttentionPriority
 	CostUSD  float64
 	Turns    int
-	Lines    []string // rolling output buffer
-	Focused  bool     // true when this pane has keyboard focus
+	Lines        []string // rolling output buffer
+	Focused      bool     // true when this pane has keyboard focus
+	scrollOffset int      // 0 = bottom (latest), >0 = scrolled up
 }
 
 // AppendOutput adds a line to the pane's rolling buffer.
@@ -107,8 +108,19 @@ func (p *wsAgentPane) Render(
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
+	// Apply scroll offset: 0 = show latest lines, >0 = scrolled up
 	visible := p.Lines
-	if len(visible) > bodyHeight {
+	if p.scrollOffset > 0 && len(visible) > bodyHeight {
+		end := len(visible) - p.scrollOffset
+		if end < bodyHeight {
+			end = bodyHeight
+		}
+		start := end - bodyHeight
+		if start < 0 {
+			start = 0
+		}
+		visible = visible[start:end]
+	} else if len(visible) > bodyHeight {
 		visible = visible[len(visible)-bodyHeight:]
 	}
 	var body []string

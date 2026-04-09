@@ -157,8 +157,16 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.MouseMsg:
 		// Route mouse to workspace panes when active
 		if a.wsView != nil && a.wsView.IsActive() {
-			if msg.Action == tea.MouseActionPress {
-				a.wsView.FocusByClick(msg.X)
+			switch msg.Action {
+			case tea.MouseActionPress:
+				a.wsView.FocusByClick(msg.X, msg.Y)
+			case tea.MouseActionMotion:
+				// Scroll wheel: Button 4=up, 5=down in some terminals
+				if msg.Button == tea.MouseButtonWheelUp {
+					a.wsView.ScrollPane(-3)
+				} else if msg.Button == tea.MouseButtonWheelDown {
+					a.wsView.ScrollPane(3)
+				}
 			}
 			return a, nil
 		}
