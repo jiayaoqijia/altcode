@@ -1,0 +1,45 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+┃ ▶                                                                                                                               │ Files
+┃   Write IsPrime(n int) bool in prime.go. Write table-driven tests in prime_test.go. Run go test -v.                             │ ────────────────────────────
+┃ ℹ                                                                                                                               │ …ibench/prime.go +1
+┃   [38;2;62;68;81m├─ [0m[38;2;152;195;121m✓[0m [1;38;2;224;163;88mwrite(write /tmp/tuibench/prime.go)[0m[38;2;92;99;112m         │ …h/prime_test.go +1
+┃   2s[0m [38;2;62;68;81m├─ [0m[38;2;152;195;121m✓[0m [1;38;2;224;163;88mwrite(write                                              │
+┃   /tmp/tuibench/prime_test.go)[0m[38;2;92;99;112m 6s[0m [38;2;62;68;81m└─ [0m[38;2;152;195;121m✓[0m                             │
+┃   [1;38;2;224;163;88mbash(cd /tmp/tuibench && go test -v)[0m[38;2;92;99;112m <1s[0m                                             │
+┃ ◆                                                                                                                               │
+┃   Done.                                                                                                                         │
+┃                                                                                                                                 │
+┃   • Added  IsPrime(n int) bool  in  prime.go                                                                                    │
+┃   • Added table-driven tests in  prime_test.go                                                                                  │
+┃   • Ran  go test -v  successfully                                                                                               │
+┃                                                                                                                                 │
+┃   Result:                                                                                                                       │
+┃                                                                                                                                 │
+┃   •  PASS                                                                                                                       │
+┃   •  ok   tuibench  0.003s                                                                                                      │
+┃                                                                                                                                 │
+┃   Note: the automatic build check complained about missing  main()  because this is  package main , but  go test -v  passed     │
+┃   as requested.                                                                                                                 │
+┃ ╰ gpt-5.4 (16s)                                                                                                                 │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+[gpt-5.4] │ tuibench git:(master*) │ eager-solving-flame │ ✓ Write ×2 ✓ Bash ×1 │ 47s
+  [░░░░░░░░░░░░░░░░] 0% 0/1.0M
+┃ Ask anything... (Enter to submit, Ctrl+J newline, Esc to quit)
+┃
+┃

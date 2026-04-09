@@ -1,0 +1,45 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+┃ ▶                                                                                                                               │ Files
+┃   Explain what a Go select statement does in 3 sentences.                                                                       │ ────────────────────────────
+┃ ◆                                                                                                                               │ no changes yet
+┃   A  select  statement in Go waits on multiple channel operations and runs the case for whichever send or receive is ready      │
+┃   first. If more than one case is ready, Go picks one pseudo-randomly; if none are ready,  default  runs immediately if         │
+┃   present, otherwise  select  blocks. It’s commonly used for timeouts, cancellation, and coordinating concurrent goroutines.    │
+┃ ╰ gpt-5.4 (2s)                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+[gpt-5.4] │ tuibench git:(master*) │ daring-singing-reed │ 6s
+  [░░░░░░░░░░░░░░░░] 0% 0/1.0M
+┃ Ask anything... (Enter to submit, Ctrl+J newline, Esc to quit)
+┃
+┃

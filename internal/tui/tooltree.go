@@ -25,6 +25,28 @@ func formatToolDuration(d time.Duration) string {
 	return fmt.Sprintf("%dm", m)
 }
 
+// smartTruncate preserves the basename (last path component) and truncates
+// the prefix with "…/" if the string is too long for the available width.
+// For non-path strings (commands), truncates from the right.
+func smartTruncate(s string, maxLen int) string {
+	if maxLen < 5 {
+		maxLen = 5
+	}
+	if len(s) <= maxLen {
+		return s
+	}
+	// If it looks like a path, keep the basename
+	if i := strings.LastIndex(s, "/"); i >= 0 {
+		base := s[i+1:]
+		if len(base) < maxLen-2 {
+			return "…/" + base
+		}
+		return base[:maxLen-3] + "..."
+	}
+	// Non-path: truncate from right
+	return s[:maxLen-3] + "..."
+}
+
 // toolEntry records a single tool call for the tool tree display.
 type toolEntry struct {
 	name      string
@@ -228,16 +250,10 @@ func (t *toolTree) Render(theme Theme, width int) string {
 			iconRendered := lipgloss.NewStyle().Foreground(iconColor).Render(icon)
 
 			// CC style: "Edit(app.go)" / "Bash(go test ./...)" not "Edit app.go"
+			// Basename-first truncation: show filename, trim path prefix
 			nameText := e.name
 			if e.detail != "" {
-				det := e.detail
-				maxDet := width - len(prefix) - len(e.name) - 14
-				if maxDet < 10 {
-					maxDet = 10
-				}
-				if len(det) > maxDet {
-					det = det[:maxDet-3] + "..."
-				}
+				det := smartTruncate(e.detail, width-len(prefix)-len(e.name)-14)
 				nameText = e.name + "(" + det + ")"
 			}
 			nameRendered := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(nameText)

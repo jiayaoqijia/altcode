@@ -1,0 +1,45 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+┃ ▶                                                                                                                               │ Files
+┃   Read fib.go and buggy.go. Which one has better error handling? Answer in 2 sentences.                                         │ ────────────────────────────
+┃ ℹ                                                                                                                               │ no changes yet
+┃   [38;2;62;68;81m├─ [0m[38;2;152;195;121m✓[0m [1;38;2;224;163;88mRead 3 files[0m[38;2;92;99;112m <1s[0m [38;2;62;68;81m├─       │
+┃   [0m[38;2;209;154;102m⟳[0m [1;38;2;224;163;88mgrep[0m[38;2;92;99;112m 4s[0m [38;2;62;68;81m└─ [0m[38;2;209;154;102m⟳[0m        │
+┃   [1;38;2;224;163;88mread[0m[38;2;92;99;112m 2s[0m                                                                              │
+┃ ◆                                                                                                                               │
+┃   Neither has real error handling; both just return a value and never validate inputs or return errors. If I had to choose,     │
+┃   fib.go  is slightly better because it at least handles small inputs explicitly with  if n <= 1 , while  buggy.go  does no     │
+┃   checks at all.                                                                                                                │
+┃ ╰ gpt-5.4 (9s)                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+[gpt-5.4] │ tuibench git:(master*) │ keen-writing-brook │ ✓ Read ×2 ✓ Grep ×1 │ 14s
+  [░░░░░░░░░░░░░░░░] 0% 0/1.0M
+┃ Ask anything... (Enter to submit, Ctrl+J newline, Esc to quit)
+┃
+┃
