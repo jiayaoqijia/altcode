@@ -41,7 +41,8 @@ func TestAppCtrlJInsertsNewline(t *testing.T) {
 	}
 }
 
-func TestAppIgnoresTypingWhileBusy(t *testing.T) {
+func TestAppAllowsTypingWhileBusy(t *testing.T) {
+	// Users need to type /spawn, /send, /quit during workspace mode
 	app := New(nil, DefaultTheme, "test", "")
 	app.busy = true
 
@@ -51,8 +52,8 @@ func TestAppIgnoresTypingWhileBusy(t *testing.T) {
 	})
 	app = model.(*App)
 
-	if got := app.input.Value(); got != "" {
-		t.Fatalf("expected busy app to ignore typing, got %q", got)
+	if got := app.input.Value(); got != "x" {
+		t.Fatalf("expected typing to work while busy, got %q", got)
 	}
 }
 

@@ -271,12 +271,15 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
+	// Always allow textarea input — user needs to type /spawn, /send, /quit
+	// even during workspace mode (a.busy=true). Only the engine-submit is
+	// blocked by busy, not the typing itself.
+	var cmd tea.Cmd
+	a.input, cmd = a.input.Update(msg)
 	if !a.busy {
-		var cmd tea.Cmd
-		a.input, cmd = a.input.Update(msg)
 		a.updateFilePopup()
-		return a, cmd
 	}
+	return a, cmd
 	return a, nil
 }
 

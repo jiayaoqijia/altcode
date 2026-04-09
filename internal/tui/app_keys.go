@@ -95,6 +95,16 @@ func (a *App) handleWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.appendInfo("No agent focused. Press Tab to cycle, then Ctrl+S.")
 		}
 		return a, nil, true
+	case "enter":
+		// Handle ALL slash commands directly in workspace mode
+		text := strings.TrimSpace(a.input.Value())
+		if strings.HasPrefix(text, "/") {
+			a.input.Reset()
+			handled, cmd := a.handleBuiltinCommand(text)
+			if handled {
+				return a, cmd, true
+			}
+		}
 	}
 	return a, nil, false
 }
@@ -231,8 +241,13 @@ func (a *App) handleEscKey() (tea.Model, tea.Cmd, bool) {
 
 // handleEnterKey submits the prompt or starts setup.
 func (a *App) handleEnterKey() (tea.Model, tea.Cmd, bool) {
-	// If user typed text, always submit it — don't redirect to setup
-	if !a.busy && strings.TrimSpace(a.input.Value()) != "" {
+	text := strings.TrimSpace(a.input.Value())
+	// Allow slash commands even when busy (control commands like /spawn, /quit)
+	if text != "" && strings.HasPrefix(text, "/") {
+		return a, a.submit(), true
+	}
+	// Normal prompts only when not busy
+	if !a.busy && text != "" {
 		return a, a.submit(), true
 	}
 	// Empty input + startup prompt → start setup
