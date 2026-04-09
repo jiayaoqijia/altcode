@@ -274,9 +274,9 @@ func buildCLICommand(ctx context.Context, cfg ExternalAgentConfig, task string) 
 		return exec.CommandContext(ctx, "codex", args...)
 
 	case BackendClaude:
-		// Use stream-json for structured output (like multica), fallback to --print
+		// claude --print is incompatible with --output-format=stream-json.
+		// Use -p (print mode) without stream-json for one-shot tasks.
 		args := []string{
-			"--output-format", "stream-json",
 			"--permission-mode", "bypassPermissions",
 		}
 		if cfg.Model != "" {
@@ -293,7 +293,7 @@ func buildCLICommand(ctx context.Context, cfg ExternalAgentConfig, task string) 
 		if cfg.ResumeSessionID != "" {
 			args = append(args, "--resume", cfg.ResumeSessionID)
 		}
-		args = append(args, "--print", task)
+		args = append(args, "-p", task)
 		return exec.CommandContext(ctx, "claude", args...)
 
 	case BackendOpenCode:
