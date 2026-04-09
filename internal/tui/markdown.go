@@ -49,16 +49,38 @@ func (r *MarkdownRenderer) Render(input string) string {
 }
 
 // renderWithGlamour delegates to the glamour renderer with
-// a raw-text fallback on error.
+// a raw-text fallback on error. Preprocesses to strip heading markers
+// since glamour renders them literally (unlike CC which hides them).
 func (r *MarkdownRenderer) renderWithGlamour(input string) string {
 	if r.renderer == nil {
 		return input
 	}
-	out, err := r.renderer.Render(input)
+	// Strip markdown heading markers — CC shows bold colored text, not ### Header
+	processed := stripHeadingMarkers(input)
+	out, err := r.renderer.Render(processed)
 	if err != nil {
 		return input
 	}
 	return out
+}
+
+// stripHeadingMarkers converts "### Header" to "**Header**" so glamour
+// renders them as bold text instead of showing the # markers literally.
+func stripHeadingMarkers(input string) string {
+	lines := strings.Split(input, "\n")
+	for i, line := range lines {
+		trimmed := strings.TrimLeft(line, " ")
+		if strings.HasPrefix(trimmed, "# ") {
+			lines[i] = "**" + strings.TrimPrefix(trimmed, "# ") + "**"
+		} else if strings.HasPrefix(trimmed, "## ") {
+			lines[i] = "**" + strings.TrimPrefix(trimmed, "## ") + "**"
+		} else if strings.HasPrefix(trimmed, "### ") {
+			lines[i] = "**" + strings.TrimPrefix(trimmed, "### ") + "**"
+		} else if strings.HasPrefix(trimmed, "#### ") {
+			lines[i] = "**" + strings.TrimPrefix(trimmed, "#### ") + "**"
+		}
+	}
+	return strings.Join(lines, "\n")
 }
 
 // isStreaming returns true when the input contains an unclosed
