@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -68,17 +69,21 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 
 	sep := lipgloss.NewStyle().Foreground(theme.Border).Render(" │ ")
 	dim := lipgloss.NewStyle().Foreground(theme.Muted)
-	bright := lipgloss.NewStyle().Foreground(theme.Foreground)
 
-	parts1 := []string{mode}
+	parts1 := []string{}
 
-	// Model
+	// Model in [brackets] — CC style: [Opus 4.6]
 	if info.Model != "" {
 		short := info.Model
 		if i := strings.LastIndex(short, "/"); i >= 0 {
 			short = short[i+1:]
 		}
-		parts1 = append(parts1, bright.Bold(true).Render(short))
+		modelBadge := lipgloss.NewStyle().
+			Foreground(theme.Secondary).Bold(true).
+			Render("[" + short + "]")
+		parts1 = append(parts1, modelBadge)
+	} else {
+		parts1 = append(parts1, mode)
 	}
 
 	// Git context (Claude Code style: project git:(branch*))
@@ -122,10 +127,10 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		}
 	}
 
-	// Session duration (drop on narrow terminals)
+	// Session duration with emoji — CC style: ⏱️ 2m33s
 	if !h.SessionStart.IsZero() && width >= 50 {
 		dur := time.Since(h.SessionStart).Truncate(time.Second)
-		parts1 = append(parts1, dim.Render(formatDuration(dur)))
+		parts1 = append(parts1, dim.Render("⏱️  "+formatDuration(dur)))
 	}
 
 	line1 := strings.Join(parts1, sep)
@@ -234,20 +239,77 @@ func renderContextBar(pct int, theme Theme, barWidth int) string {
 		lipgloss.NewStyle().Foreground(theme.Muted).Render("]")
 }
 
-// renderToolCounts formats tool usage as "✓ read ×3 ✓ edit ×1"
+// renderToolCounts formats tool usage as "✓ Bash ×3 ✓ Edit ×1" (CC style, capitalized).
 func renderToolCounts(counts map[string]int, theme Theme) string {
 	if len(counts) == 0 {
 		return ""
 	}
 	check := lipgloss.NewStyle().Foreground(theme.Success).Render("✓")
-	name := lipgloss.NewStyle().Foreground(theme.Muted)
+	nameStyle := lipgloss.NewStyle().Foreground(theme.Muted)
 	cnt := lipgloss.NewStyle().Foreground(theme.Foreground)
 
-	var parts []string
+	// Sort by count descending, show top 4 like CC
+	type toolCount struct {
+		name  string
+		count int
+	}
+	var sorted []toolCount
 	for tool, n := range counts {
-		parts = append(parts, fmt.Sprintf("%s %s %s", check, name.Render(tool), cnt.Render(fmt.Sprintf("×%d", n))))
+		sorted = append(sorted, toolCount{tool, n})
+	}
+	sort.Slice(sorted, func(i, j int) bool {
+		return sorted[i].count > sorted[j].count
+	})
+	if len(sorted) > 4 {
+		sorted = sorted[:4]
+	}
+
+	var parts []string
+	for _, tc := range sorted {
+		// Capitalize first letter to match CC style
+		displayName := capitalizeFirst(tc.name)
+		parts = append(parts, fmt.Sprintf("%s %s %s",
+			check, nameStyle.Render(displayName), cnt.Render(fmt.Sprintf("×%d", tc.count))))
 	}
 	return strings.Join(parts, " ")
+}
+
+func capitalizeFirst(s string) string {
+	if s == "" {
+		return s
+	}
+	r := []rune(s)
+	if r[0] >= 'a' && r[0] <= 'z' {
+		r[0] -= 32
+	}
+	return string(r)
+}
+
+// generateSessionSlug creates a CC-style session name: adjective-verb-noun.
+func generateSessionSlug() string {
+	adjectives := []string{
+		"bright", "calm", "daring", "eager", "fair",
+		"gentle", "happy", "keen", "lively", "merry",
+		"nimble", "plain", "quick", "sharp", "swift",
+		"warm", "witty", "bold", "crisp", "fresh",
+	}
+	verbs := []string{
+		"dancing", "flying", "gliding", "jumping", "racing",
+		"running", "sailing", "singing", "soaring", "wading",
+		"walking", "waving", "coding", "building", "crafting",
+		"forging", "making", "solving", "testing", "writing",
+	}
+	nouns := []string{
+		"brook", "cloud", "crane", "dawn", "eagle",
+		"flame", "grove", "hawk", "iris", "jade",
+		"lark", "maple", "oak", "pearl", "pine",
+		"reed", "sage", "tulip", "vine", "wren",
+	}
+	now := time.Now().UnixNano()
+	a := adjectives[int(now/7)%len(adjectives)]
+	v := verbs[int(now/13)%len(verbs)]
+	n := nouns[int(now/17)%len(nouns)]
+	return a + "-" + v + "-" + n
 }
 
 func formatDuration(d time.Duration) string {

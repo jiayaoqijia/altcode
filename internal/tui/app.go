@@ -76,6 +76,7 @@ type App struct {
 	tokensOut        int
 	costUSD          float64
 	sessionStart     time.Time
+	sessionSlug      string
 	toolCounts       map[string]int
 	gitProject       string
 	gitBranch        string
@@ -130,6 +131,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		tools:           newToolTree(),
 		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
+		sessionSlug:     generateSessionSlug(),
 		toolCounts:      make(map[string]int),
 		spinner:         newSpinner(theme),
 		teamView:        newTeamView(),
@@ -627,6 +629,7 @@ func (a *App) View() string {
 		ContextTokens: a.tokensIn + a.tokensOut,
 		ContextLimit:  ctxLimit,
 		SessionStart:  a.sessionStart,
+		SessionName:   a.sessionSlug,
 		GitProject:    a.gitProject,
 		GitBranch:     a.gitBranch,
 		GitDirty:      a.gitDirty,
