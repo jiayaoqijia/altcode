@@ -888,6 +888,12 @@ func (e *Engine) contextWindowSize() int {
 		return 1000000
 	case strings.Contains(model, "claude"):
 		return 200000
+	case strings.Contains(model, "minimax-m2"):
+		return 1000000 // MiniMax M2-7: 1M context
+	case strings.Contains(model, "glm-4"):
+		return 128000 // GLM-4.7: 128K
+	case strings.Contains(model, "kimi"), strings.Contains(model, "k2"):
+		return 131072 // Kimi K2: 128K
 	case strings.Contains(model, "deepseek"):
 		return 64000
 	default:
@@ -1020,11 +1026,23 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 	case "deepseek":
 		return newOpenAICompat(cfg, "deepseek", "https://api.deepseek.com"), nil
 	case "zhipu", "glm":
-		return newOpenAICompat(cfg, "zhipu", "https://open.bigmodel.cn/api/paas/v4"), nil
+		// GLM coding plan: Anthropic-compat at api.z.ai/api/anthropic
+		// Regular API: OpenAI-compat at open.bigmodel.cn
+		return newChineseProvider(cfg, "zhipu",
+			"https://open.bigmodel.cn/api/paas/v4",
+			"https://api.z.ai/api/anthropic"), nil
 	case "moonshot", "kimi":
-		return newOpenAICompat(cfg, "moonshot", "https://api.moonshot.cn/v1"), nil
+		// Kimi coding plan: Anthropic-compat at api.kimi.com/coding/
+		// Regular API: OpenAI-compat at api.moonshot.cn/v1
+		return newChineseProvider(cfg, "moonshot",
+			"https://api.moonshot.cn/v1",
+			"https://api.kimi.com/coding/"), nil
 	case "minimax":
-		return newOpenAICompat(cfg, "minimax", "https://api.minimax.chat/v1"), nil
+		// MiniMax coding plan: Anthropic-compat at api.minimax.io/anthropic
+		// Regular API: OpenAI-compat at api.minimax.io/v1
+		return newChineseProvider(cfg, "minimax",
+			"https://api.minimax.io/v1",
+			"https://api.minimax.io/anthropic"), nil
 	case "altllm":
 		return newOpenAICompat(cfg, "altllm", "https://api.altllm.ai"), nil
 	case "qwen", "dashscope":
@@ -1049,6 +1067,33 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 		}
 		return nil, fmt.Errorf("unsupported provider: %s (set API key via config or env)", name)
 	}
+}
+
+// newChineseProvider creates a provider for Chinese AI services that offer
+// both OpenAI-compatible and Anthropic-compatible (coding plan) endpoints.
+// If the user's baseURL contains "/anthropic" or "/coding/", use the Anthropic
+// provider. Otherwise use OpenAI-compatible.
+func newChineseProvider(
+	cfg *config.Config,
+	name, defaultOpenAIBase, defaultAnthropicBase string,
+) provider.Provider {
+	pcfg := cfg.Provider[name]
+	base := pcfg.BaseURL
+
+	// Auto-detect: if baseURL points to an Anthropic-compat endpoint, use Anthropic provider
+	if base != "" && (strings.Contains(base, "/anthropic") || strings.Contains(base, "/coding")) {
+		return provider.NewAnthropic(provider.AnthropicConfig{
+			APIKey: pcfg.APIKey, BaseURL: base,
+		})
+	}
+
+	// Default: OpenAI-compatible
+	if base == "" {
+		base = defaultOpenAIBase
+	}
+	return provider.NewOpenAI(provider.OpenAIConfig{
+		APIKey: pcfg.APIKey, BaseURL: base,
+	})
 }
 
 func newOpenAICompat(cfg *config.Config, name, defaultBase string) provider.Provider {

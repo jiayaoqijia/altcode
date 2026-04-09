@@ -6,12 +6,22 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/workspace"
 )
+
+// validEnvKey matches POSIX-compliant env var names: [A-Za-z_][A-Za-z0-9_]*
+var validEnvKey = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+
+// isValidEnvKey returns true if the key is a safe POSIX identifier.
+// Rejects keys with shell metacharacters to prevent injection via tmux send-keys.
+func isValidEnvKey(key string) bool {
+	return validEnvKey.MatchString(key)
+}
 
 // TmuxRuntime launches agents in tmux split panes with real PTYs.
 // Each agent gets its own pane inside a shared tmux session, enabling
@@ -62,15 +72,19 @@ func (t *TmuxRuntime) Spawn(
 	}
 	paneID := strings.TrimSpace(out)
 
-	// Inject environment variables. Only escape the value side,
-	// not the KEY=VALUE pair (export 'KEY=VALUE' is invalid POSIX).
+	// Inject environment variables. Validate the key is a safe
+	// POSIX identifier to prevent shell injection via crafted env names.
 	for _, kv := range env {
 		eq := strings.IndexByte(kv, '=')
 		if eq < 0 {
 			continue
 		}
+		key := kv[:eq]
+		if !isValidEnvKey(key) {
+			continue // skip unsafe key
+		}
 		t.sendKeys(paneID,
-			"export "+kv[:eq]+"="+shellEscape(kv[eq+1:]))
+			"export "+key+"="+shellEscape(kv[eq+1:]))
 	}
 
 	// Launch the command. Each arg is shell-escaped to prevent
@@ -171,9 +185,12 @@ func (t *TmuxRuntime) IsRunning(
 	if !ok {
 		return false, nil
 	}
+	// Use #{pane_dead} to detect whether the process inside the pane
+	// has exited. A tmux pane persists after its process exits, so
+	// checking pane existence alone would always return true.
 	out, err := t.run(
 		"list-panes", "-t", t.session,
-		"-F", "#{pane_id} #{pane_pid}",
+		"-F", "#{pane_id} #{pane_dead}",
 	)
 	if err != nil {
 		return false, nil
@@ -182,7 +199,8 @@ func (t *TmuxRuntime) IsRunning(
 	for sc.Scan() {
 		fields := strings.Fields(sc.Text())
 		if len(fields) >= 2 && fields[0] == paneID {
-			return true, nil
+			// pane_dead is "1" when the process has exited, "0" when alive
+			return fields[1] == "0", nil
 		}
 	}
 	return false, nil

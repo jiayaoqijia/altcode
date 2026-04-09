@@ -35,6 +35,11 @@ func defaultPricing() map[string]ModelPricing {
 		"gpt-4":         {InputPerMillion: 2.50, OutputPerMillion: 10.0},
 		"gpt-5.4":       {InputPerMillion: 2.0, OutputPerMillion: 8.0},
 		"deepseek":      {InputPerMillion: 0.07, OutputPerMillion: 0.80},
+		"minimax":       {InputPerMillion: 0.10, OutputPerMillion: 0.30},
+		"moonshot":      {InputPerMillion: 0.12, OutputPerMillion: 0.40},
+		"kimi":          {InputPerMillion: 0.12, OutputPerMillion: 0.40},
+		"zhipu":         {InputPerMillion: 0.05, OutputPerMillion: 0.25},
+		"glm":           {InputPerMillion: 0.05, OutputPerMillion: 0.25},
 		"qwen":          {InputPerMillion: 0.0, OutputPerMillion: 0.0},
 	}
 }

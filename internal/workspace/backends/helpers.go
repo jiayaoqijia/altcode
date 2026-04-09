@@ -30,10 +30,13 @@ func maxTurns(requested, defaultMax int) int {
 }
 
 // checkPID parses a "pid:1234" handle and sends signal 0 to test liveness.
+// Returns (false, nil) for non-pid handles (e.g. "tmux:...") since those
+// are managed by TmuxRuntime.IsRunning instead.
 func checkPID(handleID string) (bool, error) {
 	parts := strings.SplitN(handleID, ":", 2)
 	if len(parts) != 2 || parts[0] != "pid" {
-		return false, fmt.Errorf("invalid handle format: %q", handleID)
+		// Non-pid handle (tmux, etc.) — not our responsibility.
+		return false, nil
 	}
 	pid, err := strconv.Atoi(parts[1])
 	if err != nil {

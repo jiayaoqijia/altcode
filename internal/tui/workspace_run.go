@@ -86,8 +86,17 @@ func (a *App) spawnWorkspaceAgents(
 					a.wsView.AppendAgentOutput(role, ev.Content)
 				}
 			}
-			// Agent exited
-			result := <-stream.Result
+			// Agent exited — use select to avoid blocking forever
+			// if the producer closes Events without sending to Result.
+			var result agent.ExternalAgentResult
+			select {
+			case r, ok := <-stream.Result:
+				if ok {
+					result = r
+				}
+			case <-time.After(5 * time.Second):
+				result = agent.ExternalAgentResult{ExitCode: -1}
+			}
 			if a.wsView != nil {
 				a.wsView.AppendAgentOutput(role,
 					fmt.Sprintf("[exited: code %d]", result.ExitCode))

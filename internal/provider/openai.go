@@ -46,8 +46,16 @@ func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan Strea
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
+	// Some providers include /v1 in their base URL (moonshot, zhipu).
+	// Detect and use /chat/completions instead of /v1/chat/completions to
+	// avoid the /v1/v1/... double-path bug.
+	completePath := openAICompletePath
+	trimmed := strings.TrimRight(p.cfg.BaseURL, "/")
+	if strings.HasSuffix(trimmed, "/v1") || strings.HasSuffix(trimmed, "/v4") {
+		completePath = "/chat/completions"
+	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
-		p.cfg.BaseURL+openAICompletePath, bytes.NewReader(body))
+		trimmed+completePath, bytes.NewReader(body))
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}

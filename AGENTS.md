@@ -280,6 +280,50 @@ GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1
 # Headless CLI for command changes
 ```
 
+## Workspace agent backends
+
+altcode ships with 8 agent backend definitions in `.altcode/agents/`:
+
+| Agent | Binary | Mode | Description |
+|-------|--------|------|-------------|
+| `claude-code` | `claude` | headless | Claude Code with `--permission-mode bypassPermissions` |
+| `codex-exec` | `codex` | headless | Codex CLI one-shot with `--dangerously-bypass-approvals-and-sandbox` |
+| `codex-tui` | `codex` | TUI (tmux) | Codex with full terminal UI |
+| `claude-code-tui` | `claude` | TUI (tmux) | Claude Code with full terminal UI |
+| `altcode` | `altcode` | headless | altcode itself (recursive) |
+| `opencode` | `opencode` | headless | OpenCode CLI |
+| `openclaw` | `openclaw` | headless | OpenClaw agent |
+| `aider` | `aider` | headless | Aider with `--no-auto-commits --yes` |
+
+### Custom agent registration
+
+Any CLI that accepts a task and produces output is a valid agent:
+
+```yaml
+# .altcode/agents/my-agent.yaml
+name: my-agent
+binary: /path/to/my-agent
+args: ["--headless", "--auto-approve"]
+task_flag: "--task"
+worktree: true
+tui: false
+detect: "my-agent --version"
+```
+
+Fields:
+- `task_flag`: how to pass the task (`--task`, `-p`, or empty for positional)
+- `tui: true`: agent needs a real PTY (launched in tmux pane with `--tmux`)
+- `worktree: true`: agent gets its own git worktree
+- `resume_flag`: flag for session resume (e.g. `--resume`)
+- `detect`: command to check if installed
+
+### Runtime modes
+
+- **processRuntime** (default): headless pipe-based execution with stdout capture
+- **TmuxRuntime** (`--tmux`): each agent in a tmux split pane with real PTY
+
+The runtime is selected per-workspace via `--tmux` flag. TUI agents (`tui: true`) work best with TmuxRuntime.
+
 ## Adding new agents
 
 Place agent skills in `.agents/skills/<name>/SKILL.md`. The SKILL.md follows the
@@ -293,9 +337,9 @@ same format as `.claude/skills/` but is designed for background execution:
 ## Build commands
 
 ```bash
-npm test             # run tests
-npm run build        # build project
-npm run lint         # lint code
+make build          # Build binary (dist/altcode)
+make test           # Run all tests with race detector
+make lint           # Run go vet
 ```
 
 ## Key conventions

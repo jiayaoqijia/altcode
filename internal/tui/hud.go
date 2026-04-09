@@ -18,17 +18,25 @@ type hudState struct {
 
 	// Session
 	SessionStart time.Time
+	SessionName  string // e.g. "starry-waddling-tulip"
 
 	// Git
 	GitBranch  string
 	GitProject string
+	GitDirty   bool // uncommitted changes
+
+	// Config counts (Claude Code parity)
+	ClaudeMDCount int // number of CLAUDE.md files loaded
+	MCPCount      int // number of MCP servers
+	HooksCount    int // number of hooks
 
 	// Tool counts
 	ToolCounts map[string]int // tool name → call count
 
 	// Tasks
-	TasksTotal int
-	TasksDone  int
+	TasksTotal     int
+	TasksDone      int
+	ActiveTaskName string // currently in-progress task description
 }
 
 // contextPercent returns 0-100 context usage.
@@ -73,28 +81,45 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		parts1 = append(parts1, bright.Bold(true).Render(short))
 	}
 
-	// Git context
+	// Git context (Claude Code style: project git:(branch*))
 	if h.GitProject != "" {
-		git := dim.Render(h.GitProject)
-		if h.GitBranch != "" {
-			git += dim.Render("@") + lipgloss.NewStyle().Foreground(theme.Secondary).Render(h.GitBranch)
+		branchDisplay := h.GitBranch
+		if h.GitDirty && branchDisplay != "" {
+			branchDisplay += "*"
+		}
+		git := lipgloss.NewStyle().Foreground(theme.Warning).Render(h.GitProject)
+		if branchDisplay != "" {
+			git += " " + dim.Render("git:(") +
+				lipgloss.NewStyle().Foreground(theme.Secondary).Render(branchDisplay) +
+				dim.Render(")")
 		}
 		parts1 = append(parts1, git)
 	}
 
-	// Tool activity with animated spinner
-	if info.ToolActive != "" {
-		spinnerText := spinnerView + " "
-		toolLabel := info.ToolActive
-		// Truncate long tool names on narrow terminals
-		if width < 80 && len(toolLabel) > 15 {
-			toolLabel = toolLabel[:12] + "..."
+	// Session name slug
+	if h.SessionName != "" && width >= 100 {
+		parts1 = append(parts1, dim.Render(h.SessionName))
+	}
+
+	// Tool activity: CC-style single line
+	// ◐ Bash: go test | ✓ Read ×12 | ✓ Edit ×3
+	{
+		var toolParts []string
+		if info.ToolActive != "" {
+			spinnerText := spinnerView + " "
+			toolLabel := info.ToolActive
+			if width < 80 && len(toolLabel) > 15 {
+				toolLabel = toolLabel[:12] + "..."
+			}
+			toolParts = append(toolParts,
+				lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(spinnerText+toolLabel))
 		}
-		parts1 = append(parts1, lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(spinnerText+toolLabel))
-	} else if len(h.ToolCounts) > 0 && width >= 60 {
-		// Drop tool counts on very narrow terminals
-		toolStr := renderToolCounts(h.ToolCounts, theme)
-		parts1 = append(parts1, toolStr)
+		if len(h.ToolCounts) > 0 && width >= 60 {
+			toolParts = append(toolParts, renderToolCounts(h.ToolCounts, theme))
+		}
+		if len(toolParts) > 0 {
+			parts1 = append(parts1, strings.Join(toolParts, sep))
+		}
 	}
 
 	// Session duration (drop on narrow terminals)
@@ -128,20 +153,44 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 			formatTokens(info.TokensIn), formatTokens(info.TokensOut))))
 	}
 
+	// Config counts (Claude Code parity: "2 CLAUDE.md | 4 MCPs | 3 hooks")
+	if h.ClaudeMDCount > 0 || h.MCPCount > 0 || h.HooksCount > 0 {
+		var cfgParts []string
+		if h.ClaudeMDCount > 0 {
+			cfgParts = append(cfgParts, fmt.Sprintf("%d CLAUDE.md", h.ClaudeMDCount))
+		}
+		if h.MCPCount > 0 {
+			cfgParts = append(cfgParts, fmt.Sprintf("%d MCPs", h.MCPCount))
+		}
+		if h.HooksCount > 0 {
+			cfgParts = append(cfgParts, fmt.Sprintf("%d hooks", h.HooksCount))
+		}
+		parts2 = append(parts2, dim.Render(strings.Join(cfgParts, " | ")))
+	}
+
 	// Cost
 	if info.CostUSD > 0 {
 		parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Success).Render(
 			fmt.Sprintf("$%.4f", info.CostUSD)))
 	}
 
-	// Tasks
+	// Tasks (Claude Code style: ▸ active task (completed/total))
 	if h.TasksTotal > 0 {
-		taskColor := theme.Muted
 		if h.TasksDone == h.TasksTotal {
-			taskColor = theme.Success
+			parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Success).Render(
+				fmt.Sprintf("✓ All tasks complete (%d/%d)", h.TasksDone, h.TasksTotal)))
+		} else if h.ActiveTaskName != "" {
+			taskName := h.ActiveTaskName
+			if len(taskName) > 50 {
+				taskName = taskName[:47] + "..."
+			}
+			parts2 = append(parts2, lipgloss.NewStyle().Foreground(theme.Warning).Render("▸ ")+
+				dim.Render(taskName)+" "+
+				dim.Render(fmt.Sprintf("(%d/%d)", h.TasksDone, h.TasksTotal)))
+		} else {
+			parts2 = append(parts2, dim.Render(
+				fmt.Sprintf("tasks %d/%d", h.TasksDone, h.TasksTotal)))
 		}
-		parts2 = append(parts2, lipgloss.NewStyle().Foreground(taskColor).Render(
-			fmt.Sprintf("tasks %d/%d", h.TasksDone, h.TasksTotal)))
 	}
 
 	line2 := ""
@@ -211,8 +260,8 @@ func formatDuration(d time.Duration) string {
 	return fmt.Sprintf("%dh%dm", int(d.Hours()), int(d.Minutes())%60)
 }
 
-// detectGitInfo reads current branch and project name.
-func detectGitInfo() (project, branch string) {
+// detectGitInfo reads current branch, project name, and dirty status.
+func detectGitInfo() (project, branch string, dirty bool) {
 	if out, err := exec.Command("git", "rev-parse", "--show-toplevel").Output(); err == nil {
 		full := strings.TrimSpace(string(out))
 		if i := strings.LastIndex(full, "/"); i >= 0 {
@@ -223,6 +272,9 @@ func detectGitInfo() (project, branch string) {
 	}
 	if out, err := exec.Command("git", "branch", "--show-current").Output(); err == nil {
 		branch = strings.TrimSpace(string(out))
+	}
+	if out, err := exec.Command("git", "status", "--porcelain").Output(); err == nil {
+		dirty = strings.TrimSpace(string(out)) != ""
 	}
 	return
 }

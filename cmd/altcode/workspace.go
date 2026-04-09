@@ -113,6 +113,13 @@ func runWorkspaceStart(
 		base = "main"
 	}
 
+	// Load YAML agent definitions so --agents can reference them.
+	home, _ := os.UserHomeDir()
+	_ = backends.LoadAgentDefsIntoRegistry(
+		filepath.Join(gitRoot, ".altcode", "agents"),
+		filepath.Join(home, ".config", "altcode", "agents"),
+	)
+
 	// Detect backends
 	available, err := backends.DetectBackends(ctx)
 	if err != nil {
@@ -191,7 +198,6 @@ func runWorkspaceStart(
 	// Create worktrees and inject context.
 	// Track created worktrees for cleanup on partial failure.
 	wksp := workspace.NewWorktreeWorkspace()
-	home, _ := os.UserHomeDir()
 	var createdWorktrees []string
 	setupErr := func() error {
 		for _, rec := range sess.Agents {

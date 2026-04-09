@@ -79,20 +79,21 @@ func cherryPickAgents(
 		if rec.WorktreePath == "" {
 			continue
 		}
-		head, err := runGit(
+		headRaw, err := runGit(
 			ctx, rec.WorktreePath,
 			"rev-parse", "HEAD")
 		if err != nil {
 			continue
 		}
-		base, err := runGit(
+		baseRaw, err := runGit(
 			ctx, rec.WorktreePath,
 			"merge-base", baseBranch, "HEAD")
 		if err != nil {
 			continue
 		}
-		if strings.TrimSpace(head) ==
-			strings.TrimSpace(base) {
+		head := strings.TrimSpace(headRaw)
+		base := strings.TrimSpace(baseRaw)
+		if head == base {
 			continue
 		}
 

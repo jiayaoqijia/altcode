@@ -28,12 +28,13 @@ func (d *SSEDecoder) Next() (eventType string, data string, err error) {
 			}
 			continue
 		}
-		if after, ok := strings.CutPrefix(line, "event: "); ok {
-			evtType = after
+		// SSE spec allows both "event: value" and "event:value"
+		if after, ok := strings.CutPrefix(line, "event:"); ok {
+			evtType = strings.TrimLeft(after, " ")
 			continue
 		}
-		if after, ok := strings.CutPrefix(line, "data: "); ok {
-			evtData = after
+		if after, ok := strings.CutPrefix(line, "data:"); ok {
+			evtData = strings.TrimLeft(after, " ")
 			continue
 		}
 	}

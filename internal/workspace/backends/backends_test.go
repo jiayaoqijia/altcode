@@ -102,10 +102,21 @@ func TestCheckPID(t *testing.T) {
 		}
 	})
 
-	t.Run("invalid format", func(t *testing.T) {
-		_, err := checkPID("bad-format")
-		if err == nil {
-			t.Error("expected error for bad format")
+	t.Run("non-pid handle returns false", func(t *testing.T) {
+		// Non-pid handles (tmux, etc.) return (false, nil) — managed by their runtime.
+		alive, err := checkPID("tmux:session:0")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if alive {
+			t.Error("expected non-pid handle to return false")
+		}
+		alive, err = checkPID("bad-format")
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		if alive {
+			t.Error("expected bad format to return false")
 		}
 	})
 

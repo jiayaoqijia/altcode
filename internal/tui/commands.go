@@ -240,7 +240,8 @@ func builtinHelpText() string {
 		{"Ctrl+K", "command palette"},
 		{"Ctrl+A", "switch sessions"},
 		{"@file", "file completion"},
-		{"Esc", "vim mode"},
+		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},
+		{"Esc", "cancel / vim mode"},
 		{"Esc Esc", "quit"},
 	}
 	wsKeys := []row{

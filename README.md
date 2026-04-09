@@ -2,10 +2,10 @@
 
 **[altcode.io](https://altcode.io)** · [Install](#install) · [Docs](#harness-architecture) · [Benchmarks](#benchmarks) · [Releases](https://github.com/jiayaoqijia/altcode/releases)
 
-**The open agent harness for coding.** One binary. Any model. Production-grade infrastructure for AI-assisted development.
+**The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and split-pane TUI.
 
 ```
-5ms startup · 10MB binary · 13 providers · 100+ models · 400+ tests
+5ms startup · 29MB binary · 13 providers · 100+ models · 8 agent backends
 ```
 
 ## Why a harness, not just a CLI?
@@ -32,20 +32,169 @@ curl -fsSL https://altcode.io/install.sh | bash
 # Log in with your ChatGPT subscription
 altcode login codex
 
-# Start coding
+# Start coding (single agent)
 altcode "fix the failing tests"
 
-# Or use workflow mode for complex tasks
-altcode workflow --mode ralph "implement the auth system"
+# Multi-agent workspace — orchestrate claude + codex together
+altcode workspace "build JWT authentication system"
+
+# Full TUI mode — each agent in its own tmux pane
+altcode workspace "implement payment flow" --tmux
+
+# Dry-run to preview the plan
+altcode workspace "add search feature" --dry-run
+
+# Workflow mode for structured phases
+altcode workflow ship-feature "add user profiles"
 ```
 
-**Zero config needed** if you already use Claude Code or Codex CLI — altcode auto-detects your credentials.
+**Zero config needed** — altcode auto-detects Claude Code, Codex CLI, and any other installed agents.
+
+## Multi-Agent Workspace
+
+The workspace command orchestrates multiple agents working on the same codebase:
+
+```
+altcode workspace "build auth system"
+  ├── architect (claude)     ← designs the architecture
+  ├── implementer (codex)    ← writes the code
+  └── reviewer (claude)      ← reviews for bugs + security
+
+Each agent gets:
+  • Its own git worktree (isolated branch)
+  • Live output streaming to split-pane TUI
+  • Turn checkpoints for rollback
+  • Automatic PR creation + CI tracking
+```
+
+### Workspace commands
+
+```bash
+altcode workspace "task"                 # start workspace
+altcode workspace "task" --tmux          # full TUI mode in tmux panes
+altcode workspace "task" --agents codex  # choose specific backends
+altcode workspace status                 # show all agent states
+altcode workspace list                   # list workspaces
+altcode workspace resume                 # re-attach to live agents
+altcode workspace spawn reviewer         # add an agent mid-run
+altcode workspace send architect "focus on JWT"  # message an agent
+altcode workspace rollback --turn 3      # undo to turn 3
+altcode workspace init                   # create .altcode/ config
+```
+
+### TUI mode (tmux panes)
+
+The `--tmux` flag launches each agent in its own tmux pane with a real PTY, so full-TUI agents like Claude Code and Codex work with their native interfaces:
+
+```bash
+# Launch workspace with agents in tmux panes
+altcode workspace "build auth" --tmux
+
+# Mix headless and TUI agents
+altcode workspace "build auth" --agents claude-code-tui,codex-exec --tmux
+```
+
+Two runtime modes:
+- **processRuntime** (default) — headless pipe-based execution, stdout captured and streamed
+- **TmuxRuntime** (`--tmux`) — each agent in a tmux split pane, real PTY, live observation
+
+TUI agent definitions (`.altcode/agents/claude-code-tui.yaml`, `codex-tui.yaml`) set `tui: true` to signal they need a real terminal.
+
+### Universal agent harness
+
+Any CLI agent can be registered via YAML — no Go code needed:
+
+```yaml
+# .altcode/agents/my-agent.yaml
+name: my-agent
+binary: /path/to/my-agent
+args: ["--headless", "--auto-approve"]
+task_flag: "--task"
+worktree: true
+detect: "my-agent --version"
+```
+
+Ships with 8 agent definitions: `claude-code`, `codex-exec`, `codex-tui`, `claude-code-tui`, `altcode`, `opencode`, `openclaw`, `aider`.
+
+### TUI dashboard
+
+The workspace TUI shows each agent in its own pane with live output:
+
+```
+[workspace:01hv3k] build auth | working | pr:2 ci:pass | [architect ✓] → [implementer ⟳]
+╭──── ARCHITECT (claude) [done] ────╮ ╭──── IMPLEMENTER (codex) [active] ──╮
+│ turns:3 $0.15 PR#42 CI:pass       │ │ turns:7 $0.32 PR#43 CI:pass        │
+│ ⎇ altcode/01hv/architect/auth      │ │ ⎇ altcode/01hv/implementer/auth     │
+│ Designed JWT token flow...         │ │ Writing /api/login endpoint...      │
+│ Created middleware spec            │ │ Running tests... ok                 │
+╰────────────────────────────────────╯ ╰─────────────────────────────────────╯
+  Ctrl+Z pause  Ctrl+Q abort  Ctrl+S send  Tab cycle
+```
+
+Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycle, `Ctrl+1/2/3` focus.
+
+### Workflow definitions
+
+Define multi-phase workflows in `.altcode/workflows/*.yaml`:
+
+```yaml
+# .altcode/workflows/ship-feature.yaml
+name: ship-feature
+phases:
+  - name: design
+    agents:
+      - role: architect
+        backend: claude
+        prompt: "Design the implementation for: {{.Task}}"
+  - name: implement
+    depends_on: [design]
+    agents:
+      - role: implementer
+        backend: codex
+        prompt: "Implement the feature: {{.Task}}"
+  - name: review
+    depends_on: [implement]
+    parallel: true
+    agents:
+      - role: reviewer
+        backend: claude
+      - role: challenger
+        backend: codex
+```
+
+Ships with 3 workflows: `ship-feature` (design/implement/review), `review` (parallel), `fix` (diagnose/fix/verify).
+
+### Agent-to-agent messaging
+
+Agents communicate via a shared mailbox:
+
+```bash
+# Send a message to a specific agent
+altcode workspace send architect "focus on JWT token flow"
+
+# From TUI: Ctrl+S pre-fills the send command
+/send implementer "use the architect's JWT design from PR #42"
+```
+
+Messages are targeted (role-specific) or broadcast. The mailbox persists to disk for resume support.
 
 ## Harness architecture
 
 ```
-cmd/altcode/         CLI entry point (login, workflow, team, sessions)
+cmd/altcode/         CLI entry point (login, workflow, workspace, team, sessions)
 internal/
+├── workspace/       Workspace orchestration — session, store, worktrees, task list,
+│   ├── backends/    8 agent backends (claude, codex, opencode, aider, openclaw,
+│   │                altcode, universal YAML, TmuxRuntime for full-TUI agents)
+│   ├── tasklist     Shared task list with dependencies + flock-guarded claiming
+│   ├── mailbox      Agent-to-agent messaging (targeted + broadcast)
+│   └── eventlog     Append-only JSONL event log (brain/hands/session decoupling)
+├── lifecycle/       State machine — 12 states, CI auto-fix loop, review routing,
+│                    stuck detection, turn checkpoints, auto-merge
+├── scm/             GitHub integration — REST API with token, PR/CI/review lifecycle,
+│                    rate-limit aware, cross-domain redirect protection
+├── wsctl/           Context injection — provider-aware (CLAUDE.md/AGENTS.md),
+│                    secret guard (7 patterns), 32KB context cap
 ├── engine/          Agent loop — tool dispatch, permission checks, hooks, auto-compact
 ├── provider/        13 providers — Anthropic, OpenAI, altllm, DeepSeek, GLM, Kimi,
 │                    MiniMax, Qwen, Ollama, LMStudio, OpenRouter + any OpenAI-compat
@@ -63,13 +212,44 @@ internal/
 ├── plugin/          Plugins — loads .altcode-plugin/ and .claude-plugin/ formats
 ├── memory/          Persistent memory — cross-session knowledge, MEMORY.md index
 ├── permission/      4 modes (default/auto/bypass/plan) with glob rules
-├── tui/             Terminal UI — HUD, tool tree, split panes, colored messages,
-│                    vim keys, command palette, inline diffs, 6 themes
+├── tui/             Terminal UI — workspace dashboard, agent panes, HUD, tool tree,
+│                    split panes, attention colors, phase breadcrumb, 6 themes
 ├── config/          JSONC config, env expansion, instruction cascade
 ├── store/           SQLite sessions with --last resume
 ├── exec/            Headless mode with banner, progress, cost tracking
 └── event/           Typed events (engine ↔ TUI ↔ exec)
 ```
+
+## Lifecycle state machine
+
+Each agent progresses through a 12-state lifecycle with automatic transitions:
+
+```
+spawning → working → pr_open → ci_checking ──→ approved → mergeable → merged → cleanup → done
+                                    │                ↑
+                                    ↓                │
+                               ci_failed ───→ changes_requested
+                              (auto-fix ×3)    (review routing)
+```
+
+- **CI auto-fix** — on CI failure, the failure log is routed to the agent for repair (up to 3 retries)
+- **Review routing** — PR review comments are extracted and sent to the agent as a follow-up task
+- **Turn checkpoints** — git commit per agent turn with JSON metadata for rollback
+- **Stuck detection** — agents idle >5 minutes get AttentionRed priority
+- **Auto-merge** — when CI passes and reviews approve, the PR is merged automatically
+
+## GitHub integration
+
+altcode connects to GitHub via direct REST API — no `gh` CLI required:
+
+```bash
+# Token discovery (in order):
+# 1. GITHUB_TOKEN env var
+# 2. GH_TOKEN env var
+# 3. gh auth token (if gh is installed)
+```
+
+Features: PR creation/merge, CI status polling, review feedback extraction, rate-limit aware requests, cross-domain redirect protection, HTTPS enforcement.
 
 ## The three pillars
 
@@ -119,6 +299,51 @@ altcode --model altllm/altllm-basic "add tests"
 altcode --model ollama/llama3 "explain this error"
 ```
 
+### Coding plans (MiniMax / GLM / Kimi)
+
+Chinese AI providers offer subscription-based coding plans with Anthropic-compatible APIs. altcode auto-detects the protocol from the configured `baseURL`:
+
+```jsonc
+// .altcode/config.json — MiniMax coding plan
+{
+  "model": "minimax/MiniMax-M2.7",
+  "provider": {
+    "minimax": {
+      "apiKey": "$MINIMAX_API_KEY",
+      "baseURL": "https://api.minimax.io/anthropic"  // Anthropic-compat
+    }
+  }
+}
+```
+
+```jsonc
+// GLM coding plan (Zhipu)
+{
+  "model": "zhipu/glm-4.7",
+  "provider": {
+    "zhipu": {
+      "apiKey": "$ZHIPU_API_KEY",
+      "baseURL": "https://api.z.ai/api/anthropic"
+    }
+  }
+}
+```
+
+```jsonc
+// Kimi coding plan (Moonshot)
+{
+  "model": "kimi/kimi-k2",
+  "provider": {
+    "moonshot": {
+      "apiKey": "$MOONSHOT_API_KEY",
+      "baseURL": "https://api.kimi.com/coding/"
+    }
+  }
+}
+```
+
+When `baseURL` contains `/anthropic` or `/coding`, altcode automatically uses the Anthropic API protocol (tool use, streaming). Otherwise it uses the OpenAI-compatible endpoint. No extra flags needed.
+
 ## Workflow mode
 
 Optional structured pipeline for complex tasks:
@@ -167,27 +392,38 @@ See [three-way benchmark](docs/benchmark-three-way.md).
 
 ## Install
 
-**macOS / Linux:**
+**Quick install (macOS / Linux):**
 ```bash
 curl -fsSL https://altcode.io/install.sh | bash
 ```
 
+**Go install:**
+```bash
+go install github.com/jiayaoqijia/altcode/cmd/altcode@latest
+```
+
 **Build from source:**
 ```bash
-git clone git@github.com:jiayaoqijia/altcode.git
+git clone https://github.com/jiayaoqijia/altcode.git
 cd altcode && make build
 sudo cp dist/altcode /usr/local/bin/
 ```
 
 **Pre-built binaries** from [Releases](https://github.com/jiayaoqijia/altcode/releases):
 
-| Platform | Size |
-|----------|:----:|
-| macOS Apple Silicon | 16MB |
-| macOS Intel | 17MB |
-| Linux x86_64 | 17MB |
-| Linux ARM64 | 16MB |
-| Windows x64 | 17MB |
+| Platform | Binary | Size |
+|----------|--------|:----:|
+| macOS Apple Silicon | `altcode-darwin-arm64` | 16MB |
+| macOS Intel | `altcode-darwin-amd64` | 17MB |
+| Linux x86_64 | `altcode-linux-amd64` | 17MB |
+| Linux ARM64 | `altcode-linux-arm64` | 16MB |
+| Windows x64 | `altcode-windows-amd64.exe` | 17MB |
+
+```bash
+# Manual download (Linux x86_64 example)
+curl -L https://github.com/jiayaoqijia/altcode/releases/latest/download/altcode-linux-amd64 -o altcode
+chmod +x altcode && sudo mv altcode /usr/local/bin/
+```
 
 No runtime dependencies. No Node.js. No Python. Single binary.
 
