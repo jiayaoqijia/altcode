@@ -46,6 +46,14 @@ func (t *agentTool) Parameters() json.RawMessage {
 			"description": {
 				"type": "string",
 				"description": "Short (3-5 word) description of the task"
+			},
+			"backend": {
+				"type": "string",
+				"description": "Which agent backend to use: claude, codex, altcode. Default: auto-detect best available."
+			},
+			"model": {
+				"type": "string",
+				"description": "Model override for the subagent, e.g. minimax/MiniMax-M2.7, kimi/kimi-k2, zhipu/glm-4.7"
 			}
 		},
 		"required": ["prompt"]
@@ -56,6 +64,8 @@ func (t *agentTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 	var params struct {
 		Prompt      string `json:"prompt"`
 		Description string `json:"description"`
+		Backend     string `json:"backend"`
+		Model       string `json:"model"`
 	}
 	if err := json.Unmarshal(input, &params); err != nil {
 		return nil, fmt.Errorf("parse input: %w", err)
@@ -64,17 +74,37 @@ func (t *agentTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 		return &Result{Error: fmt.Errorf("prompt is required")}, nil
 	}
 
-	// Find the best available agent CLI (claude > codex > opencode)
-	binary, backendName := findAgentBinary()
+	// Find backend: explicit > auto-detect
+	var binary, backendName string
+	if params.Backend != "" {
+		binary, backendName = findSpecificBinary(params.Backend)
+	}
+	if binary == "" {
+		binary, backendName = findAgentBinary()
+	}
 	if binary == "" {
 		return &Result{
-			Output: "No agent backend found. Install claude or codex CLI.",
+			Output: "No agent backend found. Install claude, codex, or altcode CLI.",
 			Error:  fmt.Errorf("no agent backend on PATH"),
 		}, nil
 	}
 
-	// Build command — use print mode for headless output
+	// Build command with optional model override
 	argv := buildAgentArgv(binary, backendName, params.Prompt)
+	if params.Model != "" {
+		switch backendName {
+		case "altcode":
+			// altcode --model minimax/MiniMax-M2.7 --json "prompt"
+			argv = []string{binary, "--model", params.Model, "--json", params.Prompt}
+		case "claude":
+			// claude --model claude-opus-4-6 -p "prompt"
+			argv = []string{binary,
+				"--permission-mode", "bypassPermissions",
+				"--model", params.Model,
+				"--max-turns", "10",
+				"-p", params.Prompt}
+		}
+	}
 
 	timeoutCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer cancel()
@@ -129,11 +159,27 @@ func (t *agentTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 	}, nil
 }
 
+// findSpecificBinary looks for a specific backend by name.
+func findSpecificBinary(name string) (binary, backendName string) {
+	binName := name
+	// Map logical names to binary names
+	switch name {
+	case "cc", "claude-code":
+		binName = "claude"
+		name = "claude"
+	}
+	if p, err := exec.LookPath(binName); err == nil {
+		return p, name
+	}
+	return "", ""
+}
+
 // findAgentBinary probes PATH for agent CLIs in preference order.
 func findAgentBinary() (binary, name string) {
 	for _, probe := range []struct{ binary, name string }{
 		{"claude", "claude"},
 		{"codex", "codex"},
+		{"altcode", "altcode"},
 		{"opencode", "opencode"},
 	} {
 		if p, err := exec.LookPath(probe.binary); err == nil {
@@ -157,6 +203,9 @@ func buildAgentArgv(binary, name, prompt string) []string {
 			"--dangerously-bypass-approvals-and-sandbox",
 			prompt,
 		}
+	case "altcode":
+		// altcode as subagent: headless mode with JSON output
+		return []string{binary, "--json", prompt}
 	default:
 		return []string{binary, "exec", prompt}
 	}
