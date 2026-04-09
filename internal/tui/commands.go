@@ -263,6 +263,8 @@ func builtinHelpText() string {
 		{"@file", "file completion"},
 		{"Up/Down", "browse prompt history"},
 		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},
+		{"Ctrl+L", "clear screen"},
+		{"Ctrl+R", "retry last prompt"},
 		{"Esc", "cancel / clear input / vim mode"},
 		{"Ctrl+D", "quit"},
 	}

@@ -118,6 +118,16 @@ func truncateLines(text string, n int) string {
 	return result
 }
 
+// lastUserMessage returns the last user prompt, or "".
+func (a *App) lastUserMessage() string {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].role == roleUser {
+			return a.messages[i].content
+		}
+	}
+	return ""
+}
+
 // thinkingVerbs are fun CC-style verbs that rotate during thinking.
 var thinkingVerbs = []string{
 	"Contemplating", "Pondering", "Reasoning", "Analyzing",

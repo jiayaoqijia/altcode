@@ -168,6 +168,21 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			}
 			return a, nil, true
 		}
+	case "ctrl+l":
+		// Ctrl+L = clear screen (like CC and bash)
+		a.messages = a.messages[:0]
+		a.streaming = ""
+		a.updateViewport()
+		return a, nil, true
+	case "ctrl+r":
+		// Ctrl+R = retry last prompt (re-submit previous user message)
+		if !a.busy {
+			if last := a.lastUserMessage(); last != "" {
+				a.input.SetValue(last)
+				return a, a.submit(), true
+			}
+		}
+		return a, nil, true
 	case "ctrl+d":
 		// Ctrl+D = quit
 		return a, tea.Quit, true
