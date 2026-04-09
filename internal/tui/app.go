@@ -95,6 +95,7 @@ type App struct {
 	turnCostStart  float64          // cost at turn start (for delta)
 	turnTokenStart int              // tokens at turn start (for delta)
 	prevContentLen int              // viewport content length for scroll stability
+	inputHistory   *inputHistory    // prompt history for up/down recall
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
@@ -139,6 +140,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
 		sessionSlug:     generateSessionSlug(),
+		inputHistory:    newInputHistory(),
 		toolCounts:      make(map[string]int),
 		spinner:         newSpinner(theme),
 		teamView:        newTeamView(),
@@ -350,6 +352,8 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 func (a *App) submit() tea.Cmd {
 	text := strings.TrimSpace(a.input.Value())
 	a.input.Reset()
+	a.inputHistory.Add(text)
+	a.inputHistory.Reset()
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
 	// Reset per-turn counters for the new turn's summary

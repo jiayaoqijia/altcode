@@ -150,8 +150,26 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			a.input.InsertString("\n")
 		}
 		return a, nil, true
+	case "up":
+		// Up arrow: recall previous prompt from history
+		if !a.busy {
+			if text, ok := a.inputHistory.Up(a.input.Value()); ok {
+				a.input.Reset()
+				a.input.SetValue(text)
+			}
+			return a, nil, true
+		}
+	case "down":
+		// Down arrow: recall next prompt from history
+		if !a.busy {
+			if text, ok := a.inputHistory.Down(); ok {
+				a.input.Reset()
+				a.input.SetValue(text)
+			}
+			return a, nil, true
+		}
 	case "ctrl+d":
-		// Ctrl+D = quit (like CC and standard terminal behavior)
+		// Ctrl+D = quit
 		return a, tea.Quit, true
 	case "ctrl+c":
 		return a.handleCtrlCKey()

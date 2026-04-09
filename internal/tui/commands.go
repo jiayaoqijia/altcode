@@ -261,6 +261,7 @@ func builtinHelpText() string {
 		{"Ctrl+K", "command palette"},
 		{"Ctrl+A", "switch sessions"},
 		{"@file", "file completion"},
+		{"Up/Down", "browse prompt history"},
 		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},
 		{"Esc", "cancel / clear input / vim mode"},
 		{"Ctrl+D", "quit"},
