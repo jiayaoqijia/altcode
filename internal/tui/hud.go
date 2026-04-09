@@ -56,6 +56,10 @@ func (h *hudState) contextPercent() int {
 // Line 1: [mode] model │ project@branch │ tools │ session time
 // Line 2: context bar [████████░░] 45% │ 12.3K/128K tokens │ $0.0123
 func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode bool, spinnerView string) string {
+	// Narrow terminal: single compact line
+	if width < 80 {
+		return renderCompactHUD(h, info, theme, width, spinnerView)
+	}
 	// ── LINE 1 ──
 	modeStyle := lipgloss.NewStyle().
 		Background(theme.Primary).
@@ -279,6 +283,36 @@ func renderToolCounts(counts map[string]int, theme Theme) string {
 			check, nameStyle.Render(displayName), cnt.Render(fmt.Sprintf("×%d", tc.count))))
 	}
 	return strings.Join(parts, " ")
+}
+
+// renderCompactHUD renders a single-line HUD for narrow terminals (<80 cols).
+// Shows only: [model] tool_activity timer
+func renderCompactHUD(h hudState, info statusBarInfo, theme Theme, width int, spinnerView string) string {
+	dim := lipgloss.NewStyle().Foreground(theme.Muted)
+	sep := lipgloss.NewStyle().Foreground(theme.Border).Render(" │ ")
+	var parts []string
+
+	// Model
+	if info.Model != "" {
+		short := info.Model
+		if i := strings.LastIndex(short, "/"); i >= 0 {
+			short = short[i+1:]
+		}
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Secondary).Bold(true).Render("["+short+"]"))
+	}
+
+	// Active tool or thinking
+	if info.ToolActive != "" {
+		parts = append(parts, lipgloss.NewStyle().Foreground(theme.Primary).Render(spinnerView+" "+info.ToolActive))
+	}
+
+	// Timer
+	if !h.SessionStart.IsZero() {
+		parts = append(parts, dim.Render(formatDuration(time.Since(h.SessionStart).Truncate(time.Second))))
+	}
+
+	line := strings.Join(parts, sep)
+	return lipgloss.NewStyle().Width(width).Background(theme.HeaderBg).Render(line)
 }
 
 func capitalizeFirst(s string) string {

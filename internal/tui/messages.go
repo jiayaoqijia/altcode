@@ -47,19 +47,20 @@ func (a *App) renderMessage(msg chatMessage) string {
 
 	var borderColor lipgloss.Color
 	var icon string
+	// Unified icon set — all geometric, same visual weight
 	switch msg.role {
 	case roleUser:
 		borderColor = a.theme.Secondary
-		icon = "▶"
+		icon = "❯"
 	case roleAssistant:
 		borderColor = a.theme.Primary
-		icon = "◆"
+		icon = "●"
 	case roleTool:
 		borderColor = a.theme.Muted
-		icon = "⚙"
+		icon = "◇"
 	case roleInfo:
 		borderColor = a.theme.Warning
-		icon = "ℹ"
+		icon = "◈"
 	case roleThinking:
 		borderColor = a.theme.Muted
 		icon = "💭"

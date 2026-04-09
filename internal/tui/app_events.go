@@ -84,7 +84,8 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		hasError := ev.ToolResult != nil && ev.ToolResult.Error != ""
 		elapsed := time.Since(a.toolStart)
 		if hasError {
-			a.tools.DoneWithError(title, elapsed)
+			// Show error details in tool tree — failure diagnosis
+			a.tools.DoneWithErrorOutput(title, elapsed, output)
 		} else {
 			// Use DoneWithOutput for tools that benefit from inline display
 			toolName := ""

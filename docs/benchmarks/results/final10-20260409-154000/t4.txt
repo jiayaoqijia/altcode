@@ -1,0 +1,45 @@
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+┃ ❯                                                                                                                               │ Files
+┃   Explain Go select statement in 3 sentences                                                                                    │ ────────────────────────────
+┃ ●                                                                                                                               │ no changes yet
+┃    select  lets a goroutine wait on multiple channel operations and proceed with whichever case becomes ready first. Each       │
+┃   case  is usually a send or receive on a channel, and if multiple cases are ready, Go chooses one pseudo-randomly. An          │
+┃   optional  default  case runs immediately if no channel operation is ready, so  select  won’t block.                           │
+┃ ╰ gpt-5.4 (2s)                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+                                                                                                                                  │
+[gpt-5.4] │ bench10 git:(master*) │ sharp-solving-lark │ 5s
+  [░░░░░░░░░░░░░░░░] 0% 0/1.0M
+┃ Ask anything... (Enter to submit, Ctrl+J newline, Esc to quit)
+┃
+┃

@@ -118,16 +118,29 @@ func (t *toolTree) findRunning() int {
 	return -1
 }
 
-// DoneWithError marks the active tool as failed.
+// DoneWithError marks the oldest running tool as failed with error output.
 func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
-	if t.active >= 0 && t.active < len(t.entries) {
-		t.entries[t.active].status = "error"
-		t.entries[t.active].elapsed = elapsed
+	idx := t.findRunning()
+	if idx >= 0 {
+		t.entries[idx].status = "error"
+		t.entries[idx].elapsed = elapsed
 		if title != "" {
-			t.entries[t.active].detail = title
+			t.entries[idx].detail = title
 		}
 	}
 	t.active = -1
+}
+
+// DoneWithErrorOutput marks as failed and stores the error message for display.
+func (t *toolTree) DoneWithErrorOutput(title string, elapsed time.Duration, errMsg string) {
+	t.DoneWithError(title, elapsed)
+	// Find the entry we just marked as error and add the error output
+	for i := len(t.entries) - 1; i >= 0; i-- {
+		if t.entries[i].status == "error" {
+			t.entries[i].output = errMsg
+			break
+		}
+	}
 }
 
 // Clear resets the tree for the next turn.
@@ -280,9 +293,13 @@ func (t *toolTree) Render(theme Theme, width int) string {
 
 			// Render output below the tool entry (CC style: ⎿ output lines)
 			if e.output != "" && e.status != "running" {
+				connColor := theme.Border
+				if e.status == "error" {
+					connColor = theme.Error // red connector for errors
+				}
 				outputLines := formatToolOutput(e.name, e.output, theme, width-6)
 				for _, ol := range outputLines {
-					sb.WriteString("   " + lipgloss.NewStyle().Foreground(theme.Border).Render("⎿") + "  " + ol + "\n")
+					sb.WriteString("   " + lipgloss.NewStyle().Foreground(connColor).Render("⎿") + "  " + ol + "\n")
 				}
 			}
 		}
