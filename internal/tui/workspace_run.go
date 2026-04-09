@@ -5,12 +5,13 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/workspace"
 	"github.com/altcode-ai/altcode/internal/workspace/backends"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// startWorkspaceFromTUI creates a workspace session from a task prompt
+// startWorkspaceFromTUI creates a workspace session, spawns real agents,
 // and activates the workspace dashboard. This is the /workspace slash command handler.
 func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
 	detected, _ := backends.DetectBackends(context.Background())
@@ -19,7 +20,7 @@ func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
 		return nil
 	}
 
-	// Build a lightweight session for the dashboard
+	// Build session with agent records
 	agents := make(map[string]*workspace.AgentRecord)
 	roleNames := []string{"architect", "implementer", "reviewer"}
 	for i, d := range detected {
@@ -41,7 +42,64 @@ func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
 	}
 
 	a.appendInfo(fmt.Sprintf("[workspace] Starting with %d agent(s): %s", len(detected), task))
+
+	// Spawn real agent processes in background
+	go a.spawnWorkspaceAgents(sess, detected, task)
+
 	return a.StartWorkspace(sess)
+}
+
+// spawnWorkspaceAgents launches real CLI agents for each role and
+// streams their output into the workspace view panes.
+func (a *App) spawnWorkspaceAgents(
+	sess *workspace.WorkspaceSession,
+	detected []backends.DetectedBackend,
+	task string,
+) {
+	ctx := context.Background()
+	roleNames := []string{"architect", "implementer", "reviewer"}
+
+	for i, d := range detected {
+		if i >= len(roleNames) {
+			break
+		}
+		role := roleNames[i]
+		rec := sess.Agents[role]
+		if rec == nil {
+			continue
+		}
+
+		// Spawn the agent process
+		cfg := agent.ExternalAgentConfig{
+			Backend: agent.CLIBackend(d.Name),
+			Role:    role,
+			WorkDir: a.projectRoot,
+			Timeout: 10 * time.Minute,
+		}
+
+		stream := agent.SpawnExternal(ctx, cfg, task)
+
+		// Stream output lines into the TUI pane
+		go func(role string, stream *agent.ExternalAgentStream) {
+			for ev := range stream.Events {
+				if a.wsView != nil && ev.Content != "" {
+					a.wsView.AppendAgentOutput(role, ev.Content)
+				}
+			}
+			// Agent exited
+			result := <-stream.Result
+			if a.wsView != nil {
+				a.wsView.AppendAgentOutput(role,
+					fmt.Sprintf("[exited: code %d]", result.ExitCode))
+			}
+			if rec != nil {
+				rec.ActivityState = workspace.ActivityExited
+				rec.ExitCode = result.ExitCode
+				now := time.Now()
+				rec.ExitedAt = &now
+			}
+		}(role, stream)
+	}
 }
 
 // StartWorkspace activates the workspace dashboard for the given session
