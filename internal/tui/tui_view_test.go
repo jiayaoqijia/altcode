@@ -1358,6 +1358,71 @@ func TestCCStyle_NameParenFormat(t *testing.T) {
 }
 
 // readOutput reads all output from a test model after it quits.
+func TestCCStyle_ThinkingIndicator(t *testing.T) {
+	app := testApp()
+	app.thinking = true
+	app.turnStart = time.Now().Add(-65 * time.Second)
+	app.tokensOut = 1500
+	app.theme = DefaultTheme
+
+	output := app.renderThinkingIndicator()
+	plain := stripANSI(output)
+
+	// Should have the star icon
+	if !strings.Contains(plain, "✶") {
+		t.Errorf("missing ✶ icon in thinking indicator:\n%s", plain)
+	}
+	// Should have a verb
+	hasVerb := false
+	for _, v := range thinkingVerbs {
+		if strings.Contains(plain, v) {
+			hasVerb = true
+			break
+		}
+	}
+	if !hasVerb {
+		t.Errorf("no thinking verb found in:\n%s", plain)
+	}
+	// Should show duration (1m 5s)
+	if !strings.Contains(plain, "1m 5s") {
+		t.Errorf("missing duration '1m 5s' in:\n%s", plain)
+	}
+	// Should show token count
+	if !strings.Contains(plain, "1.5K tokens") {
+		t.Errorf("missing token count in:\n%s", plain)
+	}
+	// Should have tip line with ⎿
+	if !strings.Contains(plain, "⎿") {
+		t.Errorf("missing tip connector ⎿ in:\n%s", plain)
+	}
+	if !strings.Contains(plain, "Esc") {
+		t.Errorf("missing Esc tip in:\n%s", plain)
+	}
+}
+
+func TestCCStyle_ThinkingVerbRotates(t *testing.T) {
+	app := testApp()
+	app.thinking = true
+	app.theme = DefaultTheme
+
+	// At 0s: first verb
+	app.turnStart = time.Now()
+	out1 := stripANSI(app.renderThinkingIndicator())
+
+	// At 3s: should rotate to next verb
+	app.turnStart = time.Now().Add(-3 * time.Second)
+	out2 := stripANSI(app.renderThinkingIndicator())
+
+	// At 6s: should rotate again
+	app.turnStart = time.Now().Add(-6 * time.Second)
+	out3 := stripANSI(app.renderThinkingIndicator())
+
+	// Not all three should be the same (rotation works)
+	if out1 == out2 && out2 == out3 {
+		t.Error("thinking verb should rotate over time")
+	}
+}
+
 func readOutput(t *testing.T, tm *teatest.TestModel) string {
 	t.Helper()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))

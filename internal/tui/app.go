@@ -736,6 +736,10 @@ func (a *App) updateViewport() {
 	if len(a.tools.entries) > 0 {
 		sb.WriteString(a.tools.Render(a.theme, a.width-6))
 	}
+	// CC-style thinking indicator: ✶ Contemplating… (1m 5s · ↑ 1.2k tokens)
+	if a.thinking && a.streaming == "" {
+		sb.WriteString(a.renderThinkingIndicator())
+	}
 	if a.streaming != "" {
 		sb.WriteString(a.renderMessage(chatMessage{role: roleAssistant, content: a.streaming}))
 	}

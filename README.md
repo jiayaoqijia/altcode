@@ -399,7 +399,7 @@ curl -fsSL https://altcode.io/install.sh | bash
 
 **Go install:**
 ```bash
-go install github.com/jiayaoqijia/altcode/cmd/altcode@latest
+go install github.com/altcode-ai/altcode/cmd/altcode@latest
 ```
 
 **Build from source:**

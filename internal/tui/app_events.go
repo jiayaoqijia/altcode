@@ -11,6 +11,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/event"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // handleEvent processes a streaming event from the engine.
@@ -258,6 +259,52 @@ func extractToolTarget(tc *event.ToolCall) string {
 		}
 	}
 	return s
+}
+
+// thinkingVerbs are fun CC-style verbs that rotate during thinking.
+var thinkingVerbs = []string{
+	"Contemplating", "Pondering", "Reasoning", "Analyzing",
+	"Deliberating", "Cogitating", "Synthesizing", "Evaluating",
+	"Formulating", "Assembling", "Considering", "Processing",
+	"Investigating", "Deciphering", "Constructing", "Architecting",
+}
+
+// renderThinkingIndicator returns the CC-style thinking display:
+// ✶ Contemplating… (1m 5s · ↑ 1.2k tokens)
+// ⎿  Tip: Press Esc to cancel, Ctrl+K for commands
+func (a *App) renderThinkingIndicator() string {
+	elapsed := time.Since(a.turnStart)
+	if elapsed < 0 {
+		elapsed = 0
+	}
+
+	// Rotate verb every 3 seconds
+	verbIdx := int(elapsed.Seconds()/3) % len(thinkingVerbs)
+	verb := thinkingVerbs[verbIdx]
+
+	star := lipgloss.NewStyle().Foreground(a.theme.Warning).Bold(true).Render("✶")
+	verbStyle := lipgloss.NewStyle().Foreground(a.theme.Primary).Bold(true).Render(verb + "…")
+
+	// Build info parts: duration · ↑ tokens
+	var infoParts []string
+	dur := formatToolDuration(elapsed)
+	infoParts = append(infoParts, dur)
+
+	if a.tokensOut > 0 {
+		infoParts = append(infoParts, "↑ "+formatTokens(a.tokensOut)+" tokens")
+	}
+
+	infoStr := lipgloss.NewStyle().Foreground(a.theme.Muted).
+		Render("(" + strings.Join(infoParts, " · ") + ")")
+
+	line1 := star + " " + verbStyle + " " + infoStr + "\n"
+
+	// Tip line
+	tip := lipgloss.NewStyle().Foreground(a.theme.Border).Render("  ⎿") + "  " +
+		lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
+			Render("Tip: Press Esc to cancel, Ctrl+K for commands") + "\n"
+
+	return line1 + tip
 }
 
 // lastAssistantMessage returns the last assistant response text, or "".
