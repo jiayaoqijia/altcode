@@ -63,13 +63,13 @@ func (a *App) renderMessage(msg chatMessage) string {
 		icon = "◈"
 	case roleThinking:
 		borderColor = a.theme.Muted
-		icon = "💭"
-		// Collapse long thinking blocks
-		if len(rendered) > 200 {
-			lines := strings.SplitN(rendered, "\n", 4)
-			if len(lines) > 3 {
-				rendered = strings.Join(lines[:3], "\n") + "\n..."
-			}
+		icon = "◌"
+		// CC-style: show first 3 lines + collapsible hint
+		lines := strings.Split(rendered, "\n")
+		if len(lines) > 4 {
+			rendered = strings.Join(lines[:3], "\n") +
+				"\n" + lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
+					Render(fmt.Sprintf("… +%d lines of reasoning", len(lines)-3))
 		}
 	}
 

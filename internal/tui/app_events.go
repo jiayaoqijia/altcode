@@ -173,12 +173,24 @@ func (a *App) renderThinkingIndicator() string {
 
 	line1 := star + " " + verbStyle + " " + infoStr + "\n"
 
-	// Only show tip after 5s of thinking — avoids orphaned "Tip." flash
+	// Show first line of actual thinking text if available
+	if a.thinkingText != "" {
+		preview := a.thinkingText
+		if i := strings.IndexByte(preview, '\n'); i > 0 {
+			preview = preview[:i]
+		}
+		if len(preview) > 80 {
+			preview = preview[:77] + "..."
+		}
+		line1 += lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
+			Render("  ⎿  "+preview) + "\n"
+	}
+
+	// Show tip after 5s
 	if elapsed >= 5*time.Second {
-		tip := lipgloss.NewStyle().Foreground(a.theme.Border).Render("  ⎿") + "  " +
+		line1 += lipgloss.NewStyle().Foreground(a.theme.Border).Render("  ⎿") + "  " +
 			lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
-				Render("Esc cancel · Ctrl+K commands") + "\n"
-		return line1 + tip
+				Render("Esc cancel · Ctrl+R retry · Ctrl+K commands") + "\n"
 	}
 
 	return line1

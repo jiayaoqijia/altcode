@@ -134,6 +134,18 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 			query := strings.Join(parts[1:], " ")
 			a.appendInfo(a.builtinSearchText(query))
 		}
+	case "/init":
+		return true, a.runInit()
+	case "/doctor":
+		a.appendInfo(a.runDoctor())
+	case "/compare":
+		if len(parts) < 2 {
+			a.appendInfo("Usage: /compare <prompt>\nRuns the same prompt through multiple models and compares results.")
+		} else {
+			task := strings.Join(parts[1:], " ")
+			a.appendInfo("[compare] Running across models... (use /workspace for full multi-agent)")
+			return true, a.startCompare(task)
+		}
 	case "/quit", "/exit", "/q":
 		return true, tea.Quit
 	default:
@@ -247,6 +259,9 @@ func builtinHelpText() string {
 		{"/workflow", "run phased workflow"},
 		{"/team", "multi-AI team config"},
 		{"/backends", "detected CLI backends"},
+		{"/init", "generate CLAUDE.md from codebase"},
+		{"/doctor", "check environment health"},
+		{"/compare", "A/B test prompt across models"},
 		{"/rollback", "rollback to turn N"},
 		{"/send", "send msg to agent"},
 		{"/context", "token breakdown"},
