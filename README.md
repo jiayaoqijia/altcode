@@ -5,7 +5,7 @@
 **The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and split-pane TUI.
 
 ```
-5ms startup · 29MB binary · 13 providers · 100+ models · 8 agent backends
+5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends
 ```
 
 ## Why a harness, not just a CLI?
@@ -17,7 +17,8 @@ A coding CLI sends prompts and prints responses. A coding **harness** gives you 
 | Agent loop | Run once | Multi-turn with verification gates + 50-iter cap |
 | Context | Send and hope | Token tracking, auto-compact at 90%, LLM summarization |
 | Tools | Call and pray | Permission system, pre/post hooks, auto-verify (go build) |
-| Agents | Single model | Multi-agent with mailbox IPC, roles, depth limits, history forking |
+| Agents | Single model | Multi-agent: cc+opus, codex+gpt, altcode+minimax/glm/kimi |
+| Tools | 10+ built-in | 15 tools incl. Agent (subagent spawn), TaskCreate/Update |
 | Workflow | Ad-hoc | Interview → plan → persistent execution (ralph) |
 | Quality | Trust output | Generator/evaluator loop, Codex adversarial review |
 | Memory | Session-only | Cross-session persistent memory with MEMORY.md index |
@@ -49,6 +50,35 @@ altcode workflow ship-feature "add user profiles"
 ```
 
 **Zero config needed** — altcode auto-detects Claude Code, Codex CLI, and any other installed agents.
+
+## Multi-Provider Agent Orchestration
+
+altcode is the **universal orchestrator** — it calls any combination of agents, each using their own credentials:
+
+```
+altcode (main: GPT / MiniMax / GLM / Kimi)
+  ├── Agent(claude)     → uses CC subscription (Opus)
+  ├── Agent(codex)      → uses Codex subscription (GPT)
+  ├── Agent(altcode, model=minimax/MiniMax-M2.7) → uses MiniMax API key
+  ├── Agent(altcode, model=kimi/kimi-k2)         → uses Kimi coding plan
+  └── Agent(altcode, model=zhipu/glm-4.7)        → uses GLM coding plan
+```
+
+Since Claude bans third-party agents from using CC's coding plan, altcode sidesteps this: **each subagent uses its own credentials**. The model decides when to spawn subagents based on task complexity — no manual setup needed.
+
+```bash
+# The model auto-spawns subagents for complex tasks
+altcode "Review this code for security issues, test coverage, and performance"
+# → spawns 3 Agent() calls in parallel, each with different backends
+
+# Or pick agents explicitly in workspace mode
+altcode workspace "build auth system" claude:architect codex:coder
+
+# Add agents mid-run
+/spawn reviewer altcode --model kimi/kimi-k2
+```
+
+15 built-in tools: Read, Write, Edit, Glob, Grep, Ls, Bash, Patch, WebFetch, WebSearch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet.
 
 ## Multi-Agent Workspace
 
@@ -131,7 +161,40 @@ The workspace TUI shows each agent in its own pane with live output:
   Ctrl+Z pause  Ctrl+Q abort  Ctrl+S send  Tab cycle
 ```
 
-Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycle, `Ctrl+1/2/3` focus.
+Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycle, `Ctrl+1/2/3` focus, mouse click to focus.
+
+### TUI features (Claude Code parity)
+
+```
+┃ ▶  Write a validator in Go and test it
+┃ ◆  I'll create the validator with RFC 5322 compliance.
+├─ ✓ write(email/validator.go) 25s
+│  ⎿  + func IsValid(email string) bool {
+│  ⎿  … +18 lines
+├─ ✓ bash(go test ./...) 3s
+│  ⎿  ok  internal/email  0.8s
+└─ ⟳ edit(validator.go) 5s
+✶ Analyzing… (42s · ↓ 24.2k tokens)
+  ⎿  Tip: Press Esc to cancel, Ctrl+K for commands
+
+[MiniMax-M2.7] │ altcode git:(main*) │ sharp-flying-pearl │ Edit: validator.go (5s) │ ✓ Write ×2 ✓ Bash ×1 │ ⏱️ 49s
+[█░░░░░░░░░░░░░░░░░░░] 2% 29.3K/1.0M │ 2 CLAUDE.md | 4 MCPs │ $0.03
+▸ Writing validators (2/5)
+```
+
+| Feature | Description |
+|---------|-------------|
+| `[Model]` badge | Model name in brackets |
+| `git:(branch*)` | Git branch with dirty indicator |
+| Session slug | Random name per session |
+| `✶ Verb…` | Rotating thinking indicator with token count |
+| `Name(target) Ns` | CC-style tool display with timing |
+| `⎿` output lines | Diff coloring (+green/-red), collapsed `… +N lines` |
+| `▸ task (n/m)` | Live task progress in HUD |
+| `✓ Tool ×N` | Completed tool counts (sorted, top 4) |
+| Config counts | `N CLAUDE.md \| N MCPs \| N hooks` |
+| `Ctrl+C` | Cancel (busy) / copy last response (idle) |
+| File sidebar | Tracks changed files with +/-N counts |
 
 ### Workflow definitions
 
@@ -204,7 +267,8 @@ internal/
 │                    depth limits, token budget sharing, team orchestration
 ├── workflow/        Structured workflows — interview (Socratic), plan (consensus),
 │                    ralph (persistent execution), keyword routing, state lifecycle
-├── tool/            10 built-in tools — concurrent dispatch, auto-verify after edits
+├── tool/            15 built-in tools — Agent, TaskCreate/Update/List/Get, Read, Write,
+│                    Edit, Glob, Grep, Ls, Bash, Patch, WebFetch, WebSearch
 ├── hooks/           13 events — command, prompt, and HTTP webhook hooks
 ├── oauth/           Native login — OAuth PKCE + device code flow for ChatGPT sub
 ├── mcp/             MCP client — stdio + SSE, auto-discovery, namespace isolation
