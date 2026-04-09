@@ -5,7 +5,7 @@
 **The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and split-pane TUI.
 
 ```
-5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends
+5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends · 20+ commands · CC-parity TUI
 ```
 
 ## Why a harness, not just a CLI?
@@ -33,20 +33,25 @@ curl -fsSL https://altcode.io/install.sh | bash
 # Log in with your ChatGPT subscription
 altcode login codex
 
-# Start coding (single agent)
+# Start coding — TUI with CC-parity display
 altcode "fix the failing tests"
 
+# Initialize project — auto-generate CLAUDE.md
+altcode            # then type /init
+
 # Multi-agent workspace — orchestrate claude + codex together
-altcode workspace "build JWT authentication system"
+altcode workspace "build JWT auth" claude:architect codex:coder
+
+# A/B test across models
+altcode            # then type /compare review this code
 
 # Full TUI mode — each agent in its own tmux pane
 altcode workspace "implement payment flow" --tmux
 
-# Dry-run to preview the plan
-altcode workspace "add search feature" --dry-run
-
-# Workflow mode for structured phases
-altcode workflow ship-feature "add user profiles"
+# Use any Chinese AI coding plan
+altcode --model minimax/MiniMax-M2.7 "add rate limiting"
+altcode --model kimi/kimi-k2 "write tests"
+altcode --model zhipu/glm-4.7 "review security"
 ```
 
 **Zero config needed** — altcode auto-detects Claude Code, Codex CLI, and any other installed agents.
@@ -78,7 +83,11 @@ altcode workspace "build auth system" claude:architect codex:coder
 /spawn reviewer altcode --model kimi/kimi-k2
 ```
 
-15 built-in tools: Read, Write, Edit, Glob, Grep, Ls, Bash, Patch, WebFetch, WebSearch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet.
+**15 built-in tools**: Read, Write, Edit, Glob, Grep, Ls, Bash, Patch, WebFetch, WebSearch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet.
+
+**20+ slash commands**: `/help` `/status` `/tools` `/init` `/doctor` `/compare` `/workspace` `/spawn` `/review` `/ship` `/evaluate` `/investigate` `/codex` `/cost` `/clear` `/compact` `/memory` `/diff` `/quit`
+
+**12 keyboard shortcuts**: `Up/Down` history, `Ctrl+C` cancel/copy, `Ctrl+L` clear, `Ctrl+R` retry, `Ctrl+K` palette, `Ctrl+J` newline, `Ctrl+D` quit, `Tab` complete, `@` files, `Esc` cancel/vim, `PgUp/Down` scroll
 
 ## Multi-Agent Workspace
 
@@ -166,35 +175,42 @@ Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycl
 ### TUI features (Claude Code parity)
 
 ```
-┃ ▶  Write a validator in Go and test it
-┃ ◆  I'll create the validator with RFC 5322 compliance.
-├─ ✓ write(email/validator.go) 25s
-│  ⎿  + func IsValid(email string) bool {
-│  ⎿  … +18 lines
-├─ ✓ bash(go test ./...) 3s
-│  ⎿  ok  internal/email  0.8s
-└─ ⟳ edit(validator.go) 5s
-✶ Analyzing… (42s · ↓ 24.2k tokens)
-  ⎿  Tip: Press Esc to cancel, Ctrl+K for commands
+┃ ❯  Review internal/tui/ for bugs
+├─ ✓ TaskCreate(TaskCreate) 2s
+├─ ✓ glob(ls internal/tui (39 entries)) <1s
+├─ ⟳ grep Running… (4s · timeout 2m)
+├─ ⟳ read Running… (2s · timeout 2m)
+└─ ⟳ bash
+✶ Deliberating… (13s · ↓ 1.2K tokens · thinking with max effort)
+  ⎿  Analyzing function lengths and race conditions...
+  ⎿  Esc cancel · Ctrl+R retry · Ctrl+K commands
 
-[MiniMax-M2.7] │ altcode git:(main*) │ sharp-flying-pearl │ Edit: validator.go (5s) │ ✓ Write ×2 ✓ Bash ×1 │ ⏱️ 49s
-[█░░░░░░░░░░░░░░░░░░░] 2% 29.3K/1.0M │ 2 CLAUDE.md | 4 MCPs │ $0.03
-▸ Writing validators (2/5)
+[gpt-5.4] │ altcode git:(main*) │ merry-singing-dawn │ thinking (14s) │ ✓ TaskCreate ×1 ✓ Ls ×1 │ 16s
+[░░░░░░░░░░░░░░░░] 2% 1.2K/1.0M │ 2 CLAUDE.md | 4 MCPs │ $0.03
+▸ Reviewing codebase (1/3)
 ```
 
 | Feature | Description |
 |---------|-------------|
 | `[Model]` badge | Model name in brackets |
 | `git:(branch*)` | Git branch with dirty indicator |
-| Session slug | Random name per session |
-| `✶ Verb…` | Rotating thinking indicator with token count |
-| `Name(target) Ns` | CC-style tool display with timing |
-| `⎿` output lines | Diff coloring (+green/-red), collapsed `… +N lines` |
+| Session slug | Random name per session (e.g. `merry-singing-dawn`) |
+| `✶ Verb…` | Rotating thinking indicator with per-turn token count |
+| Thinking preview | First line of model reasoning visible live |
+| `Name(target) Ns` | CC-style tool display with smart basename truncation |
+| `Running… (Ns · timeout 2m)` | Live elapsed + timeout on running tools |
+| `⎿` output lines | Diff coloring (+green/-red), collapsed `… +N lines (ctrl+o to expand)` |
 | `▸ task (n/m)` | Live task progress in HUD |
-| `✓ Tool ×N` | Completed tool counts (sorted, top 4) |
+| `✓ Tool ×N` | Completed tool counts (sorted by frequency, top 4) |
 | Config counts | `N CLAUDE.md \| N MCPs \| N hooks` |
+| Turn summary | `✓ 2 files changed · 1 command · $0.03 · 1.2K tokens · 20s` |
+| `Up/Down` | Input history — recall previous prompts |
 | `Ctrl+C` | Cancel (busy) / copy last response (idle) |
+| `Ctrl+L` | Clear screen |
+| `Ctrl+R` | Retry last prompt |
 | File sidebar | Tracks changed files with +/-N counts |
+| Focused pane | `▸` marker + bright border on focused workspace pane |
+| No flicker | Viewport stays stable during tool execution |
 
 ### Workflow definitions
 
