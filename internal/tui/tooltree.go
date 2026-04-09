@@ -304,17 +304,13 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 					Render(" " + formatToolDuration(e.elapsed))
 			}
 			// CC-style running tool: elapsed + timeout + background hint
-			var runHint string
+			// Running tool: show elapsed. Only show ctrl+b hint on the LAST running
+			// tool to avoid flooding the screen when many tools run concurrently.
 			if e.status == "running" && !e.startedAt.IsZero() {
 				runElapsed := time.Since(e.startedAt)
 				if runElapsed >= time.Second {
-					// Show: Running… (22s · timeout 2m)
 					timing = lipgloss.NewStyle().Foreground(theme.Warning).
 						Render(" Running… (" + formatToolDuration(runElapsed) + " · timeout 2m)")
-				}
-				if runElapsed >= 10*time.Second {
-					runHint = lipgloss.NewStyle().Foreground(theme.Muted).Italic(true).
-						Render("   (ctrl+b to run in background)")
 				}
 			}
 
@@ -322,9 +318,6 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 				Render(prefix+" ") + iconRendered + " " + nameRendered + detailRendered + timing
 			sb.WriteString(line)
 			sb.WriteByte('\n')
-			if runHint != "" {
-				sb.WriteString(runHint + "\n")
-			}
 
 			// Render output below the tool entry (CC style: ⎿ output lines)
 			if e.output != "" && e.status != "running" {
