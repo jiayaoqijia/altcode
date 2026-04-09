@@ -142,16 +142,20 @@ func (a *App) renderThinkingIndicator() string {
 	star := lipgloss.NewStyle().Foreground(a.theme.Warning).Bold(true).Render("✶")
 	verbStyle := lipgloss.NewStyle().Foreground(a.theme.Primary).Bold(true).Render(verb + "…")
 
-	// Build info parts: duration · ↑ tokens
+	// Build info parts: duration · ↓ tokens · effort
 	var infoParts []string
 	dur := formatToolDuration(elapsed)
 	infoParts = append(infoParts, dur)
 
-	// During thinking, model consumes input context (↓ incoming).
-	// CC shows "↓ 24.2k tokens" not "↑".
-	totalTokens := a.tokensIn + a.tokensOut
-	if totalTokens > 0 {
-		infoParts = append(infoParts, "↓ "+formatTokens(totalTokens)+" tokens")
+	// Per-turn token delta (CC shows "↓ 24.2k tokens" during thinking)
+	turnTokens := (a.tokensIn + a.tokensOut) - a.turnTokenStart
+	if turnTokens > 0 {
+		infoParts = append(infoParts, "↓ "+formatTokens(turnTokens)+" tokens")
+	}
+
+	// CC shows "thinking with max effort" for long waits
+	if elapsed >= 30*time.Second {
+		infoParts = append(infoParts, "thinking with max effort")
 	}
 
 	infoStr := lipgloss.NewStyle().Foreground(a.theme.Muted).

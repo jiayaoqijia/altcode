@@ -96,7 +96,13 @@ func (a *App) buildToolActive() string {
 		}
 		return s
 	}
-	if a.busy && a.thinking {
+	if a.busy {
+		// Show "thinking" with elapsed time in HUD (like CC's ◐ thinking)
+		if !a.turnStart.IsZero() {
+			if el := time.Since(a.turnStart); el >= time.Second {
+				return "thinking (" + formatDuration(el) + ")"
+			}
+		}
 		return "thinking"
 	}
 	return ""
