@@ -1423,6 +1423,135 @@ func TestCCStyle_ThinkingVerbRotates(t *testing.T) {
 	}
 }
 
+// === Focus + Scroll Behavior Tests ===
+
+func TestWorkspace_ClickFocusHorizontal(t *testing.T) {
+	sess := &workspace.WorkspaceSession{
+		ID: "01CLICK", Task: "click test", Status: workspace.WSSWorking,
+		Agents: map[string]*workspace.AgentRecord{
+			"alpha": {Role: "alpha", Backend: "claude", ActivityState: workspace.ActivityActive},
+			"beta":  {Role: "beta", Backend: "codex", ActivityState: workspace.ActivityActive},
+			"gamma": {Role: "gamma", Backend: "claude", ActivityState: workspace.ActivityActive},
+		},
+	}
+	wv := NewWorkspaceView(sess)
+	wv.SetSize(120, 30) // horizontal layout (3 agents, 120 cols)
+
+	// Click in first pane area (x=10)
+	wv.FocusByClick(10, 15)
+	if wv.FocusedRole() != wv.order[0] {
+		t.Errorf("click x=10 should focus first pane, got %q", wv.FocusedRole())
+	}
+
+	// Click in last pane area (x=100)
+	wv.FocusByClick(100, 15)
+	if wv.FocusedRole() != wv.order[2] {
+		t.Errorf("click x=100 should focus third pane, got %q", wv.FocusedRole())
+	}
+}
+
+func TestWorkspace_ClickFocusVertical(t *testing.T) {
+	sess := &workspace.WorkspaceSession{
+		ID: "01VERT", Task: "vert test", Status: workspace.WSSWorking,
+		Agents: map[string]*workspace.AgentRecord{
+			"a": {Role: "a", Backend: "claude", ActivityState: workspace.ActivityActive},
+			"b": {Role: "b", Backend: "codex", ActivityState: workspace.ActivityActive},
+			"c": {Role: "c", Backend: "claude", ActivityState: workspace.ActivityActive},
+			"d": {Role: "d", Backend: "codex", ActivityState: workspace.ActivityActive},
+		},
+	}
+	wv := NewWorkspaceView(sess)
+	wv.SetSize(80, 40) // vertical layout (4 agents, <120 cols)
+
+	// Click near top → first pane
+	wv.FocusByClick(40, 3)
+	if wv.FocusedRole() != wv.order[0] {
+		t.Errorf("click y=3 should focus first pane, got %q", wv.FocusedRole())
+	}
+
+	// Click near bottom → last pane
+	wv.FocusByClick(40, 35)
+	if wv.FocusedRole() != wv.order[3] {
+		t.Errorf("click y=35 should focus last pane, got %q", wv.FocusedRole())
+	}
+}
+
+func TestWorkspace_ScrollPane(t *testing.T) {
+	sess := &workspace.WorkspaceSession{
+		ID: "01SCROLL2", Task: "scroll", Status: workspace.WSSWorking,
+		Agents: map[string]*workspace.AgentRecord{
+			"worker": {Role: "worker", Backend: "codex", ActivityState: workspace.ActivityActive},
+		},
+	}
+	wv := NewWorkspaceView(sess)
+	wv.SetSize(80, 20)
+	wv.CycleFocus() // focus the worker pane
+
+	// Add 100 lines
+	for i := 0; i < 100; i++ {
+		wv.AppendAgentOutput("worker", fmt.Sprintf("line-%d", i))
+	}
+
+	// Scroll up
+	wv.ScrollPane(-10)
+	pane := wv.panes["worker"]
+	if pane.scrollOffset != 10 {
+		t.Errorf("scroll up: offset should be 10, got %d", pane.scrollOffset)
+	}
+
+	// Scroll back down
+	wv.ScrollPane(5)
+	if pane.scrollOffset != 5 {
+		t.Errorf("scroll down: offset should be 5, got %d", pane.scrollOffset)
+	}
+
+	// Scroll past bottom clamps to 0
+	wv.ScrollPane(100)
+	if pane.scrollOffset != 0 {
+		t.Errorf("scroll past bottom: offset should be 0, got %d", pane.scrollOffset)
+	}
+}
+
+func TestWorkspace_FocusedPaneRendering(t *testing.T) {
+	sess := &workspace.WorkspaceSession{
+		ID: "01FOCUS", Task: "focus", Status: workspace.WSSWorking,
+		Agents: map[string]*workspace.AgentRecord{
+			"alpha": {Role: "alpha", Backend: "claude", ActivityState: workspace.ActivityActive},
+			"beta":  {Role: "beta", Backend: "codex", ActivityState: workspace.ActivityActive},
+		},
+	}
+	wv := NewWorkspaceView(sess)
+	wv.SetSize(120, 25)
+	wv.CycleFocus() // focus first pane
+
+	output := wv.Render(DefaultTheme)
+	plain := stripANSI(output)
+
+	// Focused pane should have ▸ marker
+	if !strings.Contains(plain, "▸") {
+		t.Errorf("focused pane should show ▸ marker, got:\n%s", plain)
+	}
+}
+
+func TestWorkspace_UserFriendlyLabels(t *testing.T) {
+	tests := []struct {
+		state workspace.ActivityState
+		want  string
+	}{
+		{workspace.ActivityActive, "working"},
+		{workspace.ActivitySpawning, "starting"},
+		{workspace.ActivityExited, "done"},
+		{workspace.ActivityBlocked, "STUCK"},
+		{workspace.ActivityWaitInput, "needs input"},
+	}
+	for _, tc := range tests {
+		got := activityIcon(tc.state)
+		if !strings.Contains(got, tc.want) {
+			t.Errorf("activityIcon(%v) = %q, want containing %q", tc.state, got, tc.want)
+		}
+	}
+}
+
 func readOutput(t *testing.T, tm *teatest.TestModel) string {
 	t.Helper()
 	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))

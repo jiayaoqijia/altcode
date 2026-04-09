@@ -187,7 +187,7 @@ func (wv *WorkspaceView) FocusByClick(x, y int) bool {
 }
 
 // ScrollPane scrolls the focused pane's output by delta lines.
-// Positive delta = scroll down (newer), negative = scroll up (older).
+// Negative delta = scroll up (show older lines), positive = scroll down.
 func (wv *WorkspaceView) ScrollPane(delta int) {
 	wv.mu.Lock()
 	defer wv.mu.Unlock()
@@ -198,7 +198,8 @@ func (wv *WorkspaceView) ScrollPane(delta int) {
 	if p == nil {
 		return
 	}
-	p.scrollOffset += delta
+	// Invert: negative delta = scroll up = increase offset (older lines)
+	p.scrollOffset -= delta
 	if p.scrollOffset < 0 {
 		p.scrollOffset = 0
 	}
