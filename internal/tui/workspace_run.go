@@ -11,19 +11,34 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
-// startWorkspaceFromTUI creates a workspace session, spawns real agents,
-// and activates the workspace dashboard. This is the /workspace slash command handler.
+// workspaceDetectedMsg carries detected backends from the background probe.
+type workspaceDetectedMsg struct {
+	detected []backends.DetectedBackend
+	task     string
+}
+
+// startWorkspaceFromTUI kicks off backend detection in the background
+// and shows a "detecting..." message. The actual spawn happens when
+// workspaceDetectedMsg arrives in Update.
 func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
-	detected, _ := backends.DetectBackends(context.Background())
-	if len(detected) == 0 {
+	a.appendInfo("[workspace] Detecting agent backends...")
+	// Run detection in background — it probes each binary with --version (3s timeout each)
+	return func() tea.Msg {
+		detected, _ := backends.DetectBackends(context.Background())
+		return workspaceDetectedMsg{detected: detected, task: task}
+	}
+}
+
+// handleWorkspaceDetected is called when backend detection completes.
+func (a *App) handleWorkspaceDetected(msg workspaceDetectedMsg) tea.Cmd {
+	if len(msg.detected) == 0 {
 		a.appendInfo("[workspace] No CLI backends found. Install claude, codex, or opencode.")
 		return nil
 	}
 
-	// Build session with agent records
 	agents := make(map[string]*workspace.AgentRecord)
 	roleNames := []string{"architect", "implementer", "reviewer"}
-	for i, d := range detected {
+	for i, d := range msg.detected {
 		if i >= len(roleNames) {
 			break
 		}
@@ -36,16 +51,13 @@ func (a *App) startWorkspaceFromTUI(task string) tea.Cmd {
 
 	sess := &workspace.WorkspaceSession{
 		ID:     fmt.Sprintf("tui-%d", time.Now().UnixMilli()),
-		Task:   task,
+		Task:   msg.task,
 		Status: workspace.WSSSpawning,
 		Agents: agents,
 	}
 
-	a.appendInfo(fmt.Sprintf("[workspace] Starting with %d agent(s): %s", len(detected), task))
-
-	// Spawn real agent processes in background
-	go a.spawnWorkspaceAgents(sess, detected, task)
-
+	a.appendInfo(fmt.Sprintf("[workspace] Starting with %d agent(s): %s", len(msg.detected), msg.task))
+	go a.spawnWorkspaceAgents(sess, msg.detected, msg.task)
 	return a.StartWorkspace(sess)
 }
 
@@ -147,20 +159,30 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 	}
 
 	bellNeeded := false
+	allExited := len(sess.Agents) > 0
 	for _, rec := range sess.Agents {
 		a.wsView.UpdateAgent(rec)
 		if rec.Priority() == workspace.AttentionRed {
 			bellNeeded = true
 		}
+		if rec.ActivityState != workspace.ActivityExited {
+			allExited = false
+		}
 	}
 
-	// Populate phase breadcrumb from agent states (spec gap 3)
+	// Populate phase breadcrumb from agent states
 	a.wsView.updatePhases()
+
+	// All agents done — unlock input and show summary
+	if allExited {
+		a.busy = false
+		a.appendInfo("[workspace] All agents finished.")
+		return nil // stop polling
+	}
 
 	// Ring bell at most once per cooldown period
 	if bellNeeded && time.Since(a.lastBell) > bellCooldown {
 		a.lastBell = time.Now()
-		// Use tea.Printf to safely write through Bubbletea's renderer
 		return tea.Batch(
 			tea.Printf("\a"),
 			a.workspacePollTick(),

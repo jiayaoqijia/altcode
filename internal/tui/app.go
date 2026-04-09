@@ -232,6 +232,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.activeToolDetail = fmt.Sprintf("running for %s", elapsed)
 		}
 		return a, nil
+	case workspaceDetectedMsg:
+		return a, a.handleWorkspaceDetected(msg)
 	case workspacePollMsg:
 		return a, a.handleWorkspacePoll()
 	case workspaceTransitionMsg:
