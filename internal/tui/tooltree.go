@@ -27,12 +27,13 @@ func formatToolDuration(d time.Duration) string {
 
 // toolEntry records a single tool call for the tool tree display.
 type toolEntry struct {
-	name    string
-	detail  string // e.g. file path, command
-	status  string // "running", "done", "error"
-	elapsed time.Duration
-	output  string // truncated result output (diff lines, bash output)
-	input   string // raw command/input for display (Bash command, etc.)
+	name      string
+	detail    string // e.g. file path, command
+	status    string // "running", "done", "error"
+	elapsed   time.Duration
+	startedAt time.Time // when the tool started (for live elapsed display)
+	output    string    // truncated result output (diff lines, bash output)
+	input     string    // raw command/input for display (Bash command, etc.)
 }
 
 // toolTree manages the list of tool calls for the current turn.
@@ -48,9 +49,10 @@ func newToolTree() *toolTree {
 // Start records a new tool call starting.
 func (t *toolTree) Start(name, detail string) {
 	t.entries = append(t.entries, toolEntry{
-		name:   name,
-		detail: detail,
-		status: "running",
+		name:      name,
+		detail:    detail,
+		status:    "running",
+		startedAt: time.Now(),
 	})
 	t.active = len(t.entries) - 1
 }
@@ -228,6 +230,14 @@ func (t *toolTree) Render(theme Theme, width int) string {
 				timing = lipgloss.NewStyle().Foreground(theme.Muted).
 					Render(" " + formatToolDuration(e.elapsed))
 			}
+			// CC-style: show elapsed time for running tools
+			if e.status == "running" && !e.startedAt.IsZero() {
+				runElapsed := time.Since(e.startedAt)
+				if runElapsed >= time.Second {
+					timing = lipgloss.NewStyle().Foreground(theme.Muted).
+						Render(" " + formatToolDuration(runElapsed))
+				}
+			}
 
 			line := lipgloss.NewStyle().Foreground(theme.Border).
 				Render(prefix+" ") + iconRendered + " " + nameRendered + detailRendered + timing
@@ -276,8 +286,9 @@ func formatDiffOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 
 	for _, line := range lines {
 		if len(result) >= maxLines {
+			// CC-style collapsed output hint
 			result = append(result,
-				ctxStyle.Render(fmt.Sprintf("… %d more lines", len(lines)-maxLines)))
+				ctxStyle.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		display := truncateStr(line, maxWidth)
@@ -300,7 +311,7 @@ func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… %d more lines", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		if strings.TrimSpace(line) == "" {
@@ -319,7 +330,7 @@ func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int) []
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… %d more lines", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		trimmed := strings.TrimSpace(line)

@@ -1311,8 +1311,8 @@ func TestCCStyle_OutputTruncation(t *testing.T) {
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
 
-	// Should show truncation indicator
-	if !strings.Contains(plain, "more lines") {
+	// Should show truncation indicator (CC style: "… +N lines")
+	if !strings.Contains(plain, "+12 lines") {
 		t.Errorf("missing truncation indicator in:\n%s", plain)
 	}
 	// Should show first lines
