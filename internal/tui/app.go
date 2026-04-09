@@ -437,8 +437,10 @@ func (a *App) updateViewport() {
 	if len(a.tools.entries) > 0 {
 		sb.WriteString(a.tools.RenderLive(a.theme, a.width-6))
 	}
-	// CC-style thinking indicator
-	if a.thinking && a.streaming == "" {
+	// CC-style thinking indicator — show whenever busy and not streaming.
+	// Using a.busy (not a.thinking) prevents the indicator from flickering
+	// off between consecutive tool calls when a.thinking briefly toggles.
+	if a.busy && a.streaming == "" {
 		sb.WriteString(a.renderThinkingIndicator())
 	}
 	if a.streaming != "" {
