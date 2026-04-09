@@ -290,8 +290,11 @@ func (a *App) renderThinkingIndicator() string {
 	dur := formatToolDuration(elapsed)
 	infoParts = append(infoParts, dur)
 
-	if a.tokensOut > 0 {
-		infoParts = append(infoParts, "↑ "+formatTokens(a.tokensOut)+" tokens")
+	// During thinking, model consumes input context (↓ incoming).
+	// CC shows "↓ 24.2k tokens" not "↑".
+	totalTokens := a.tokensIn + a.tokensOut
+	if totalTokens > 0 {
+		infoParts = append(infoParts, "↓ "+formatTokens(totalTokens)+" tokens")
 	}
 
 	infoStr := lipgloss.NewStyle().Foreground(a.theme.Muted).

@@ -594,13 +594,14 @@ func (a *App) View() string {
 	toolActive := ""
 	if a.activeToolName != "" {
 		toolActive = a.activeToolName
-		if a.activeToolDetail != "" {
-			// CC style: "Bash: go test ./..." for targets,
-			// "Bash (running for 35s)" for stuck warnings
-			if strings.HasPrefix(a.activeToolDetail, "running for") {
-				toolActive += " (" + a.activeToolDetail + ")"
-			} else {
-				toolActive += ": " + a.activeToolDetail
+		if a.activeToolDetail != "" && !strings.HasPrefix(a.activeToolDetail, "running for") {
+			toolActive += ": " + a.activeToolDetail
+		}
+		// Always show live elapsed for the active tool (CC style)
+		if !a.toolStart.IsZero() {
+			elapsed := time.Since(a.toolStart)
+			if elapsed >= time.Second {
+				toolActive += " (" + formatDuration(elapsed) + ")"
 			}
 		}
 	}

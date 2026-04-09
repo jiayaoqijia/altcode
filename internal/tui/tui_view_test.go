@@ -1387,9 +1387,9 @@ func TestCCStyle_ThinkingIndicator(t *testing.T) {
 	if !strings.Contains(plain, "1m 5s") {
 		t.Errorf("missing duration '1m 5s' in:\n%s", plain)
 	}
-	// Should show token count
-	if !strings.Contains(plain, "1.5K tokens") {
-		t.Errorf("missing token count in:\n%s", plain)
+	// Should show token count with ↓ (input/context direction during thinking)
+	if !strings.Contains(plain, "↓") || !strings.Contains(plain, "tokens") {
+		t.Errorf("missing token count with ↓ in:\n%s", plain)
 	}
 	// Should have tip line with ⎿
 	if !strings.Contains(plain, "⎿") {
