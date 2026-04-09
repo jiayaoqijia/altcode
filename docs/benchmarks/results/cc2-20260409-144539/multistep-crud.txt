@@ -1,0 +1,3 @@
+
+
+`internal/store/store.go` already has exactly what you described — `User{ID, Name, Email}` with `NewStore`, `Create`, `Get`, `Update`, `Delete`, and `List`, all concurrency-safe with `sync.RWMutex`. It's complete and correct.

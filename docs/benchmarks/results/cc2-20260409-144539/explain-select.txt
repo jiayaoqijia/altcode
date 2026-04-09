@@ -1,0 +1,3 @@
+
+
+A `select` statement in Go blocks until one of its `case` channel operations can proceed, then executes that case. If multiple cases are ready simultaneously, one is chosen at random. A `default` case, if present, makes it non-blocking — executing immediately when no other case is ready.

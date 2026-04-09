@@ -1,0 +1,101 @@
+
+
+Needs its own directory to avoid package conflicts. Let me fix:
+Package created at `internal/store/store.go`. Here's the complete implementation:
+
+```go
+package store
+
+import (
+	"errors"
+	"sync"
+)
+
+var (
+	ErrNotFound = errors.New("user not found")
+	ErrExists   = errors.New("user already exists")
+)
+
+type User struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Email string `json:"email"`
+}
+
+type Store struct {
+	mu    sync.RWMutex
+	users map[string]User
+}
+
+func NewStore() *Store {
+	return &Store{
+		users: make(map[string]User),
+	}
+}
+
+func (s *Store) Create(user User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, exists := s.users[user.ID]; exists {
+		return ErrExists
+	}
+
+	s.users[user.ID] = user
+	return nil
+}
+
+func (s *Store) Get(id string) (User, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	user, ok := s.users[id]
+	if !ok {
+		return User{}, ErrNotFound
+	}
+
+	return user, nil
+}
+
+func (s *Store) Update(user User) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.users[user.ID]; !ok {
+		return ErrNotFound
+	}
+
+	s.users[user.ID] = user
+	return nil
+}
+
+func (s *Store) Delete(id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.users[id]; !ok {
+		return ErrNotFound
+	}
+
+	delete(s.users, id)
+	return nil
+}
+
+func (s *Store) List() []User {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	users := make([]User, 0, len(s.users))
+	for _, user := range s.users {
+		users = append(users, user)
+	}
+
+	return users
+}
+```
+
+**Features:**
+- Thread-safe with `sync.RWMutex` (concurrent reads, exclusive writes)
+- Returns `ErrNotFound` / `ErrExists` for clear error handling
+- `List()` allocates exact capacity slice
+- All methods properly locked/unlocked via defer

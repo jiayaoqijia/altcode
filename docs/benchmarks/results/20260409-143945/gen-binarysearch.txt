@@ -1,0 +1,19 @@
+
+
+```go
+func BinarySearch(sorted []int, target int) int {
+	lo, hi := 0, len(sorted)-1
+	for lo <= hi {
+		mid := lo + (hi-lo)/2
+		if sorted[mid] == target {
+			return mid
+		}
+		if sorted[mid] < target {
+			lo = mid + 1
+		} else {
+			hi = mid - 1
+		}
+	}
+	return -1
+}
+```

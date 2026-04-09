@@ -1,0 +1,23 @@
+```go
+func RunWorkerPool(jobs []func(), workers int) {
+	ch := make(chan func())
+	var wg sync.WaitGroup
+
+	for i := 0; i < workers; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for job := range ch {
+				job()
+			}
+		}()
+	}
+
+	for _, job := range jobs {
+		ch <- job
+	}
+	close(ch)
+
+	wg.Wait()
+}
+```

@@ -1,0 +1,1 @@
+The test references `IsPalindrome` which doesn't exist. Let me create both the implementation and test:

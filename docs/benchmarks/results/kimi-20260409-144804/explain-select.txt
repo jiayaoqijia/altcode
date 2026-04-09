@@ -1,0 +1,3 @@
+ I'll explain Go's `select` statement in 3 sentences:
+
+Go's `select` lets you **wait on multiple channel operations simultaneously**, blocking until at least one case can proceed (or running a `default` case immediately if no channels are ready). It **chooses randomly among ready cases** to prevent starvation, making it fair but nondeterministic when multiple channels are available. You use it for timeouts (`time.After`), cancellation (`context.Done`), merging channel streams, or any scenario where you need to **react to whichever event arrives first** without polling.

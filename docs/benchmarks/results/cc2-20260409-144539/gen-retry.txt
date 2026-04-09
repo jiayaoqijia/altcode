@@ -1,0 +1,14 @@
+```go
+func Retry(fn func() error, maxAttempts int, delay time.Duration) error {
+	var err error
+	for i := 0; i < maxAttempts; i++ {
+		if err = fn(); err == nil {
+			return nil
+		}
+		if i < maxAttempts-1 {
+			time.Sleep(delay)
+		}
+	}
+	return err
+}
+```

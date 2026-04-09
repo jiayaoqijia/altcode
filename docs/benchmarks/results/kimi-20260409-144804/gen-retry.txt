@@ -1,0 +1,1 @@
+ I'll analyze the codebase structure and implement the retry function with exponential backoff, following the altcode harness rules.                           

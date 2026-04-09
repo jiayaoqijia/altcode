@@ -1,0 +1,4 @@
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+
+
+A `select` statement blocks until one of its `case` channel operations can proceed, then executes that case — if multiple are ready simultaneously, one is chosen at random. A `default` case makes it non-blocking, executing immediately if no channel is ready. It's the idiomatic way to multiplex, timeout (`time.After`), or cancel (`ctx.Done()`) across multiple concurrent channel operations.

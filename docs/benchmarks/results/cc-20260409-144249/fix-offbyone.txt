@@ -1,0 +1,12 @@
+Warning: no stdin data received in 3s, proceeding without it. If piping from a slow command, redirect stdin explicitly: < /dev/null to skip, or wait longer.
+
+
+```go
+func Reverse(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b)/2; i++ {
+		b[i], b[len(b)-1-i] = b[len(b)-1-i], b[i]
+	}
+	return string(b)
+}
+```

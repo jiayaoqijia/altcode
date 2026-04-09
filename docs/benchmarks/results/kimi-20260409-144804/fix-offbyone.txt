@@ -1,0 +1,13 @@
+  The bug is that the function uses `[]byte` which breaks multi-byte UTF-8 characters. Here's the fixed function:
+
+```go
+func Reverse(s string) string {
+	r := []rune(s)
+	for i, j := 0, len(r)-1; i < j; i, j = i+1, j-1 {
+		r[i], r[j] = r[j], r[i]
+	}
+	return string(r)
+}
+```
+
+Also fixed the index bug: `b[len(b)-i]` should be `b[len(b)-1-i]`.

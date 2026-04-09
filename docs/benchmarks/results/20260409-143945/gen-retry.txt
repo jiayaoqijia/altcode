@@ -1,0 +1,17 @@
+
+
+```go
+func Retry(fn func() error, maxAttempts int, delay time.Duration) error {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
+		lastErr = fn()
+		if lastErr == nil {
+			return nil
+		}
+		if attempt < maxAttempts-1 {
+			time.Sleep(delay)
+		}
+	}
+	return lastErr
+}
+```

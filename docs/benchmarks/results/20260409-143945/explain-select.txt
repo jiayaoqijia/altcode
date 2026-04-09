@@ -1,0 +1,1 @@
+Go's `select` statement lets a goroutine wait on multiple channel operations simultaneously, blocking until one of them is ready to proceed. It randomly picks among the ready cases when multiple channels have data, preventing bias. If no channel is ready, it optionally execute a `default` case or keep blocking.

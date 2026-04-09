@@ -1,0 +1,13 @@
+
+
+```go
+func Reverse(s string) string {
+	b := []byte(s)
+	for i := 0; i < len(b)/2; i++ {
+		b[i], b[len(b)-1-i] = b[len(b)-1-i], b[i]
+	}
+	return string(b)
+}
+```
+
+The bug: `len(b)-i` should be `len(b)-1-i`. Array indices are 0-based, so the last element is at `len(b)-1`, not `len(b)`.

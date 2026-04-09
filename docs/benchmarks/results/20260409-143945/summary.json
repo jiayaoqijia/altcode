@@ -1,0 +1,9 @@
+{
+  "binary": "/tmp/altcode-bench",
+  "config": "/tmp/minimax-config2.json",
+  "total": 10,
+  "passed": 8,
+  "failed": 2,
+  "score": 80,
+  "timestamp": "2026-04-09T14:42:30+00:00"
+}
