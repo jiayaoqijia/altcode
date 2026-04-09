@@ -151,7 +151,8 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		return a, nil, true
 	case "ctrl+d":
-		return a.handleEnterKey()
+		// Ctrl+D = quit (like CC and standard terminal behavior)
+		return a, tea.Quit, true
 	case "ctrl+c":
 		return a.handleCtrlCKey()
 	case "a", "1":

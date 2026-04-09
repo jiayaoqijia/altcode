@@ -134,6 +134,8 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 			query := strings.Join(parts[1:], " ")
 			a.appendInfo(a.builtinSearchText(query))
 		}
+	case "/quit", "/exit", "/q":
+		return true, tea.Quit
 	default:
 		return false, nil
 	}
