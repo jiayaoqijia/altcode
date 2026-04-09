@@ -202,10 +202,17 @@ func (a *App) repromptForAPIKey(provider string) {
 }
 
 func (a *App) welcomeHeader(logoStyle, mutedStyle lipgloss.Style, version string) []string {
+	model := a.activeModel()
+	short := model
+	if i := strings.LastIndex(short, "/"); i >= 0 {
+		short = short[i+1:]
+	}
 	return []string{
 		logoStyle.Render("⌬ altcode") +
-			lipgloss.NewStyle().Foreground(a.theme.Muted).Render("  v"+displayVersion(version)) +
-			lipgloss.NewStyle().Foreground(a.theme.Secondary).Render("  "+a.activeModel()),
+			mutedStyle.Render("  v"+displayVersion(version)) +
+			lipgloss.NewStyle().Foreground(a.theme.Secondary).Bold(true).Render("  ["+short+"]"),
+		"",
+		mutedStyle.Render("  Type a prompt to start. /help for commands. Ctrl+K for palette."),
 	}
 }
 

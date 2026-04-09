@@ -149,9 +149,53 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 		})
 		a.streaming = ""
 	}
+	// Turn completion summary — compact line showing what happened
+	if summary := a.buildTurnSummary(); summary != "" {
+		a.messages = append(a.messages, chatMessage{
+			role: roleInfo, content: summary,
+		})
+	}
 	a.busy = false
 	a.updateViewport()
 	return a, nil
+}
+
+// buildTurnSummary creates a compact "✓ 2 files · 1 command · $0.03 · 45s" line.
+func (a *App) buildTurnSummary() string {
+	if a.turnToolCount == 0 {
+		return "" // pure text response, no tools used
+	}
+	var parts []string
+	writes := a.turnWrites
+	reads := a.turnReads
+	bashes := a.turnBashes
+
+	if writes > 0 {
+		parts = append(parts, fmt.Sprintf("%d file%s changed", writes, plural(writes)))
+	}
+	if reads > 0 {
+		parts = append(parts, fmt.Sprintf("%d file%s read", reads, plural(reads)))
+	}
+	if bashes > 0 {
+		parts = append(parts, fmt.Sprintf("%d command%s", bashes, plural(bashes)))
+	}
+	if a.costUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.2f", a.costUSD))
+	}
+	if !a.turnStart.IsZero() {
+		parts = append(parts, formatDuration(time.Since(a.turnStart)))
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "✓ " + strings.Join(parts, " · ")
+}
+
+func plural(n int) string {
+	if n == 1 {
+		return ""
+	}
+	return "s"
 }
 
 // buildTurnMeta returns "model (duration)" for the response attribution line.
@@ -200,13 +244,29 @@ func (a *App) recordToolSuccess(ev event.Event, title string, elapsed time.Durat
 
 // recordToolMeta updates tool counts, task tracking, and sidebar.
 func (a *App) recordToolMeta(ev event.Event, title string) {
-	if ev.ToolCall != nil && ev.ToolCall.Name != "" {
-		a.toolCounts[ev.ToolCall.Name]++
+	toolName := ""
+	if ev.ToolCall != nil {
+		toolName = ev.ToolCall.Name
+	}
+	if toolName == "" {
+		toolName = a.activeToolName // fallback from ToolStart
+	}
+	if toolName != "" {
+		a.toolCounts[toolName]++
+		a.turnToolCount++
+		switch toolName {
+		case "Write", "Edit":
+			a.turnWrites++
+		case "Read":
+			a.turnReads++
+		case "Bash":
+			a.turnBashes++
+		}
+	}
+	if ev.ToolCall != nil {
 		a.trackTaskFromTool(ev.ToolCall)
 	}
-	if ev.ToolCall != nil && (ev.ToolCall.Name == "Edit" || ev.ToolCall.Name == "Write") {
-		if title != "" {
-			a.sidebar.AddFile(title, 1, 0)
-		}
+	if (toolName == "Edit" || toolName == "Write") && title != "" {
+		a.sidebar.AddFile(title, 1, 0)
 	}
 }

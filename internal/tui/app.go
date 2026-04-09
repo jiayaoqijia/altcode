@@ -88,6 +88,10 @@ type App struct {
 	tasksTotal     int              // total tasks created
 	tasksDone      int              // tasks completed
 	activeTaskName string           // currently in-progress task name
+	turnToolCount  int              // tools used this turn (for summary)
+	turnWrites     int              // files written this turn
+	turnReads      int              // files read this turn
+	turnBashes     int              // commands run this turn
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
 	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
 	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
@@ -345,6 +349,11 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
+	// Reset per-turn counters for the new turn's summary
+	a.turnToolCount = 0
+	a.turnWrites = 0
+	a.turnReads = 0
+	a.turnBashes = 0
 
 	if handled, cmd := a.handleBuiltinCommand(text); handled {
 		if cmd == nil {

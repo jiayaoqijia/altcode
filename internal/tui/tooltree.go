@@ -266,14 +266,19 @@ func (t *toolTree) Render(theme Theme, width int) string {
 
 			iconRendered := lipgloss.NewStyle().Foreground(iconColor).Render(icon)
 
-			// CC style: "Edit(app.go)" / "Bash(go test ./...)" not "Edit app.go"
-			// Basename-first truncation: show filename, trim path prefix
+			// Dim completed entries to create visual hierarchy —
+			// active tool pops, completed fades into background
+			nameColor := theme.Primary
+			if e.status == "done" && i < len(items)-1 {
+				nameColor = theme.Muted // dim historical tools
+			}
+
 			nameText := e.name
 			if e.detail != "" {
 				det := smartTruncate(e.detail, width-len(prefix)-len(e.name)-14)
 				nameText = e.name + "(" + det + ")"
 			}
-			nameRendered := lipgloss.NewStyle().Foreground(theme.Primary).Bold(true).Render(nameText)
+			nameRendered := lipgloss.NewStyle().Foreground(nameColor).Bold(e.status == "running").Render(nameText)
 			detailRendered := "" // detail is now inside the name parens
 
 			timing := ""
