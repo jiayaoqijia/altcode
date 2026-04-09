@@ -67,14 +67,68 @@ Unit tests only verify data flow. They miss rendering bugs (word wrap, overflow,
 alignment, color, viewport scrolling) that only appear in a real terminal.
 
 How to test TUI changes:
-1. Use `script -qc './dist/altcode' /dev/null` to capture TTY output
-2. Use `tmux` to run altcode in a controlled terminal size: `tmux new-session -x 80 -y 24 ./dist/altcode`
-3. For automated TUI testing, use `expect` or `go-expect` to script terminal interactions
-4. Always test at small viewport sizes (80x24) — most rendering bugs surface there
-5. Record the terminal output and check alignment by eye or with a snapshot comparison
+
+**Method 1: tmux E2E testing (PREFERRED — proven to work)**
+```bash
+# Build the binary
+GOFLAGS=-mod=mod go build -o /tmp/altcode-test ./cmd/altcode/
+
+# Start in tmux with controlled size
+tmux new-session -d -s altcode-tui -x 120 -y 30 "/tmp/altcode-test"
+sleep 3
+
+# Send commands
+tmux send-keys -t altcode-tui "/help" Enter
+sleep 2
+
+# Capture and verify the rendered output
+tmux capture-pane -t altcode-tui -p
+
+# Test workspace with real agents
+tmux send-keys -t altcode-tui "/workspace create a hello function" Enter
+sleep 15
+tmux capture-pane -t altcode-tui -p  # verify agent panes + streaming
+
+# Clean up
+tmux kill-session -t altcode-tui
+```
+
+**Method 2: Headless CLI testing (for non-interactive features)**
+```bash
+# Test workspace commands
+timeout 5 /tmp/altcode-test workspace "test" --dry-run
+timeout 3 /tmp/altcode-test workspace list --json
+timeout 3 /tmp/altcode-test workspace status
+```
+
+**Method 3: Unit tests for render functions**
+```go
+// Test WorkspaceView rendering
+wv := NewWorkspaceView(sess)
+wv.SetSize(120, 30)
+output := wv.Render(DefaultTheme)
+// Check output contains expected elements
+```
+
+**What to verify in tmux captures:**
+- Header renders: `[workspace:ID] task status`
+- Agent panes: bordered boxes with role, backend, activity state
+- Phase breadcrumb: `[architect ✓] → [implementer ⟳]`
+- Footer key hints: `Ctrl+Z pause Ctrl+Q abort Ctrl+S send`
+- HUD: model, git branch, timer, context bar
+- Agent output scrolls in panes (codex output visible)
+- No line overflow beyond terminal width
+- Colors render (attention priority: green/yellow/orange/red)
+
+**Workspace E2E test checklist (run before every workspace PR):**
+1. `altcode workspace "task" --dry-run` — shows plan
+2. `altcode workspace "task" --agents codex` — agents spawn, output streams
+3. `altcode workspace list` — shows workspace
+4. `altcode workspace status <id>` — shows per-agent status
+5. tmux TUI test — `/workspace` shows dashboard with live agent output
 
 If a TUI change passes unit tests but breaks visual rendering, the unit tests
-are insufficient. Add a visual recording to the PR description.
+are insufficient. Add a tmux capture to the PR description.
 
 Common CI failures and how to avoid them:
 - `found packages internal (bench_test.go) and main (main.go)` → model-generated `main.go` in internal/. Delete it.
