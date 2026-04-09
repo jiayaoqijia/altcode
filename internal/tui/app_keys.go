@@ -198,14 +198,16 @@ func (a *App) handleEscKey() (tea.Model, tea.Cmd, bool) {
 
 // handleEnterKey submits the prompt or starts setup.
 func (a *App) handleEnterKey() (tea.Model, tea.Cmd, bool) {
+	// If user typed text, always submit it — don't redirect to setup
+	if !a.busy && strings.TrimSpace(a.input.Value()) != "" {
+		return a, a.submit(), true
+	}
+	// Empty input + startup prompt → start setup
 	if strings.TrimSpace(a.startupPrompt) != "" {
 		a.startRecommendedSetup()
 		return a, nil, true
 	}
-	if a.busy || strings.TrimSpace(a.input.Value()) == "" {
-		return a, nil, true
-	}
-	return a, a.submit(), true
+	return a, nil, true
 }
 
 // handleCtrlCKey cancels generation or copies last response.
