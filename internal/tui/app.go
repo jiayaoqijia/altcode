@@ -352,8 +352,6 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
-	// Clear previous turn's tool tree (deferred from onDone to avoid shrink flicker)
-	a.tools.Clear()
 	// Reset per-turn counters for the new turn's summary
 	a.turnToolCount = 0
 	a.turnWrites = 0
