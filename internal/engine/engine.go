@@ -137,6 +137,7 @@ func New(params EngineParams) (*Engine, error) {
 	registry.Register(tool.NewWebFetchTool())
 	registry.Register(tool.NewWebSearchTool())
 	registry.Register(tool.NewPatchTool())
+	registry.Register(tool.NewAgentTool())
 
 	tq := params.TaskQueue
 	if tq == nil {
