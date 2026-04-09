@@ -91,9 +91,18 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 			if ev.ToolCall != nil {
 				toolName = ev.ToolCall.Name
 			}
-			if toolName == "Edit" || toolName == "Bash" || toolName == "Write" {
+			switch toolName {
+			case "Edit", "Bash", "Write":
 				a.tools.DoneWithOutput(title, elapsed, output)
-			} else {
+			case "Read":
+				// Show first 3 lines as preview
+				preview := truncateLines(output, 3)
+				a.tools.DoneWithOutput(title, elapsed, preview)
+			case "Grep":
+				// Show match count + first few matches
+				preview := truncateLines(output, 4)
+				a.tools.DoneWithOutput(title, elapsed, preview)
+			default:
 				a.tools.Done(title, elapsed)
 			}
 		}
@@ -147,8 +156,16 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		a.updateViewport()
 		return a, nil
 	case event.Done:
+		// Append tool tree BEFORE final text (CC renders tools above response)
+		if len(a.tools.entries) > 0 {
+			tree := a.tools.Render(a.theme, a.width-6)
+			// Use roleInfo instead of roleTool to avoid the ⚙ icon —
+			// the tree already has its own ├─ ✓ icons
+			a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
+			a.tools.Clear()
+		}
 		if a.streaming != "" {
-			// Add response time + model info (using real turn timing)
+			// Add response time + model info
 			meta := ""
 			if a.engine != nil && !a.turnStart.IsZero() {
 				elapsed := time.Since(a.turnStart)
@@ -160,12 +177,6 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 			}
 			a.messages = append(a.messages, chatMessage{role: roleAssistant, content: a.streaming, meta: meta})
 			a.streaming = ""
-		}
-		// Append tool tree as a tool message if there were tool calls
-		if len(a.tools.entries) > 0 {
-			tree := a.tools.Render(a.theme, a.width-6)
-			a.messages = append(a.messages, chatMessage{role: roleTool, content: tree})
-			a.tools.Clear()
 		}
 		a.busy = false
 		a.updateViewport()
@@ -259,6 +270,21 @@ func extractToolTarget(tc *event.ToolCall) string {
 		}
 	}
 	return s
+}
+
+// truncateLines returns the first n lines of text, adding "… +N lines" if truncated.
+func truncateLines(text string, n int) string {
+	if text == "" {
+		return ""
+	}
+	lines := strings.Split(strings.TrimRight(text, "\n"), "\n")
+	if len(lines) <= n {
+		return text
+	}
+	result := strings.Join(lines[:n], "\n")
+	remaining := len(lines) - n
+	result += fmt.Sprintf("\n… +%d lines", remaining)
+	return result
 }
 
 // thinkingVerbs are fun CC-style verbs that rotate during thinking.

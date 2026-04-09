@@ -385,19 +385,28 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return a, nil, true
 		}
 		if a.busy {
+			// Cancel current generation (like CC)
 			if a.cancel != nil {
 				a.cancel()
 			}
 			a.busy = false
+			a.streaming = ""
+			a.appendInfo("[cancelled]")
 			return a, nil, true
 		}
-		// Enter vim mode instead of quitting on first Esc.
-		if !a.vimMode && strings.TrimSpace(a.startupPrompt) == "" {
+		// Clear input if there's text (like CC)
+		if strings.TrimSpace(a.input.Value()) != "" {
+			a.input.Reset()
+			return a, nil, true
+		}
+		// Enter vim mode on empty input
+		if !a.vimMode {
 			a.vimMode = true
 			a.input.Blur()
 			return a, nil, true
 		}
-		return a, tea.Quit, true
+		// Already in vim mode with empty input — do nothing (don't quit)
+		return a, nil, true
 	case "a", "1":
 		if strings.TrimSpace(a.startupPrompt) != "" {
 			a.beginSetup("anthropic")
@@ -495,8 +504,8 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		a.input.Focus()
 		return a, nil, true
 	case "esc":
-		// Second Esc in vim mode quits.
-		return a, tea.Quit, true
+		// Stay in vim mode — don't quit. Use Ctrl+D or /quit to exit.
+		return a, nil, true
 	case "ctrl+c":
 		return a, tea.Quit, true
 	case "ctrl+k":

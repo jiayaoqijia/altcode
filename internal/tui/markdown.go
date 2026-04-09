@@ -66,18 +66,30 @@ func (r *MarkdownRenderer) renderWithGlamour(input string) string {
 
 // stripHeadingMarkers converts "### Header" to "**Header**" so glamour
 // renders them as bold text instead of showing the # markers literally.
+// If the heading contains backticks, just strip the # markers without
+// adding ** to avoid glamour rendering conflicts.
 func stripHeadingMarkers(input string) string {
 	lines := strings.Split(input, "\n")
 	for i, line := range lines {
 		trimmed := strings.TrimLeft(line, " ")
-		if strings.HasPrefix(trimmed, "# ") {
-			lines[i] = "**" + strings.TrimPrefix(trimmed, "# ") + "**"
-		} else if strings.HasPrefix(trimmed, "## ") {
-			lines[i] = "**" + strings.TrimPrefix(trimmed, "## ") + "**"
-		} else if strings.HasPrefix(trimmed, "### ") {
-			lines[i] = "**" + strings.TrimPrefix(trimmed, "### ") + "**"
-		} else if strings.HasPrefix(trimmed, "#### ") {
-			lines[i] = "**" + strings.TrimPrefix(trimmed, "#### ") + "**"
+		var content string
+		switch {
+		case strings.HasPrefix(trimmed, "#### "):
+			content = strings.TrimPrefix(trimmed, "#### ")
+		case strings.HasPrefix(trimmed, "### "):
+			content = strings.TrimPrefix(trimmed, "### ")
+		case strings.HasPrefix(trimmed, "## "):
+			content = strings.TrimPrefix(trimmed, "## ")
+		case strings.HasPrefix(trimmed, "# "):
+			content = strings.TrimPrefix(trimmed, "# ")
+		default:
+			continue
+		}
+		// Don't wrap in ** if content has backticks — causes glamour garble
+		if strings.Contains(content, "`") {
+			lines[i] = content
+		} else {
+			lines[i] = "**" + content + "**"
 		}
 	}
 	return strings.Join(lines, "\n")

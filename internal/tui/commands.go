@@ -260,8 +260,8 @@ func builtinHelpText() string {
 		{"Ctrl+A", "switch sessions"},
 		{"@file", "file completion"},
 		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},
-		{"Esc", "cancel / vim mode"},
-		{"Esc Esc", "quit"},
+		{"Esc", "cancel / clear input / vim mode"},
+		{"Ctrl+D", "quit"},
 	}
 	wsKeys := []row{
 		{"Ctrl+Z", "pause workspace/workflow"},
