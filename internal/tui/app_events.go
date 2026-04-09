@@ -328,12 +328,15 @@ func (a *App) renderThinkingIndicator() string {
 
 	line1 := star + " " + verbStyle + " " + infoStr + "\n"
 
-	// Tip line
-	tip := lipgloss.NewStyle().Foreground(a.theme.Border).Render("  ⎿") + "  " +
-		lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
-			Render("Tip: Press Esc to cancel, Ctrl+K for commands") + "\n"
+	// Only show tip after 5s of thinking — avoids orphaned "Tip." flash
+	if elapsed >= 5*time.Second {
+		tip := lipgloss.NewStyle().Foreground(a.theme.Border).Render("  ⎿") + "  " +
+			lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
+				Render("Esc cancel · Ctrl+K commands") + "\n"
+		return line1 + tip
+	}
 
-	return line1 + tip
+	return line1
 }
 
 // lastAssistantMessage returns the last assistant response text, or "".

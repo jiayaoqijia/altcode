@@ -617,9 +617,9 @@ func (a *App) View() string {
 	if toolActive == "" && a.busy {
 		if a.thinking {
 			toolActive = "thinking"
-		} else {
-			toolActive = "streaming"
 		}
+		// Don't show "streaming" in HUD — the ◆ icon in viewport already signals it.
+		// Reduces the "◆ streaming" + HUD "░ streaming" duplication CC reviewer flagged.
 	}
 	info := statusBarInfo{
 		Model:      model,
