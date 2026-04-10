@@ -40,6 +40,13 @@ func NewSummarizer(p provider.Provider, model string) *Summarizer {
 // then returns a minimal message list: [system context, summary, recent turns].
 // keepRecent controls how many recent user turns to preserve verbatim.
 func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, keepRecent int) ([]provider.Message, error) {
+	// Defensive: a negative keepRecent used to make cutoff = len+|n|
+	// and panic with slice-bounds-out-of-range on messages[:cutoff].
+	// Clamp to at least 1 so the compaction always preserves at least
+	// one recent turn.
+	if keepRecent < 1 {
+		keepRecent = 1
+	}
 	if len(messages) <= keepRecent*2+2 {
 		// Too short to compact
 		return messages, nil
@@ -49,6 +56,9 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 	cutoff := len(messages) - keepRecent*2
 	if cutoff < 2 {
 		cutoff = 2
+	}
+	if cutoff > len(messages) {
+		cutoff = len(messages)
 	}
 	old := messages[:cutoff]
 	recent := messages[cutoff:]
@@ -96,10 +106,16 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 	// 3. Recent turns verbatim
 	compacted := make([]provider.Message, 0, len(recent)+4)
 
-	// Reinject initial context: keep first system message if present
-	// (like Codex's insert_initial_context_before_last_real_user_or_summary)
-	if len(old) > 0 && old[0].Role == "system" {
-		compacted = append(compacted, old[0])
+	// Reinject initial context: keep ALL leading system messages, not
+	// just the first one. Multi-part system prompts (e.g., persona +
+	// tools + project instructions assembled separately) would
+	// otherwise lose everything after the first block on the first
+	// compaction.
+	for _, m := range old {
+		if m.Role != "system" {
+			break
+		}
+		compacted = append(compacted, m)
 	}
 
 	compacted = append(compacted, provider.TextMessage("user", SummaryPrefix))

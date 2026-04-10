@@ -80,3 +80,26 @@ func makeString(n int) string {
 	}
 	return string(b)
 }
+
+// Regression for the negative keepRecent panic GPT flagged: the old
+// cutoff math produced messages[:len+|n|] and panicked with slice
+// bounds out of range. Use a short enough conversation that the
+// 'too short to compact' early-exit fires — so we don't reach the
+// nil provider's Stream method and test only the cutoff math.
+func TestSummarizerCompact_NegativeKeepRecentNoPanic(t *testing.T) {
+	msgs := []provider.Message{
+		{Role: "system", Content: "sys"},
+		{Role: "user", Content: "u1"},
+		{Role: "assistant", Content: "a1"},
+	}
+	s := compact.NewSummarizer(nil, "")
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("Compact panicked on negative keepRecent: %v", r)
+		}
+	}()
+	_, _ = s.Compact(nil, msgs, -5)
+	_, _ = s.Compact(nil, msgs, 0)
+	_, _ = s.Compact(nil, msgs, -2147483648)
+}
