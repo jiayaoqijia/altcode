@@ -50,7 +50,10 @@ func (a *App) onTextDelta(ev event.Event) (tea.Model, tea.Cmd) {
 
 func (a *App) onThinkingDelta(ev event.Event) (tea.Model, tea.Cmd) {
 	a.thinking = true
-	a.thinkingText = ev.Thinking
+	// Providers stream thinking as incremental deltas (each Delta holds
+	// the new fragment, not the running total). Overwriting would drop
+	// everything except the last fragment and make the preview jump.
+	a.thinkingText += ev.Thinking
 	a.updateViewport()
 	return a, a.waitForEvent()
 }
@@ -134,6 +137,7 @@ func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
 	if provider := a.authErrorProvider(ev.Error); provider != "" {
 		a.busy = false
 		a.streaming = ""
+		a.resetTurnTransientState()
 		a.repromptForAPIKey(provider)
 		return a, nil
 	}
@@ -141,8 +145,22 @@ func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
 		chatMessage{role: roleInfo, content: ev.Error, meta: "error"})
 	a.streaming = ""
 	a.busy = false
+	a.resetTurnTransientState()
 	a.updateViewport()
 	return a, nil
+}
+
+// resetTurnTransientState clears the UI bits that should not persist
+// after a turn ends abnormally (provider error, auth failure). Without
+// this the HUD keeps the last-seen tool name, the tool tree keeps a
+// stale ⟳ next to a tool that never completed, and the thinking
+// indicator keeps flashing even though nothing is happening.
+func (a *App) resetTurnTransientState() {
+	a.thinking = false
+	a.thinkingText = ""
+	a.activeToolName = ""
+	a.activeToolDetail = ""
+	a.tools.SweepRunning()
 }
 
 func (a *App) onDone() (tea.Model, tea.Cmd) {
