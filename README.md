@@ -178,8 +178,8 @@ Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycl
 ┃ ❯  Review internal/tui/ for bugs
 ├─ ✓ TaskCreate(TaskCreate) 2s
 ├─ ✓ glob(ls internal/tui (39 entries)) <1s
-├─ ⟳ grep Running… (4s · timeout 2m)
-├─ ⟳ read Running… (2s · timeout 2m)
+├─ ⟳ grep 4s
+├─ ⟳ read 2s
 └─ ⟳ bash
 ✶ Deliberating… (13s · ↓ 1.2K tokens · thinking with max effort)
   ⎿  Analyzing function lengths and race conditions...
@@ -198,7 +198,7 @@ Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycl
 | `✶ Verb…` | Rotating thinking indicator with per-turn token count |
 | Thinking preview | First line of model reasoning visible live |
 | `Name(target) Ns` | CC-style tool display with smart basename truncation |
-| `Running… (Ns · timeout 2m)` | Live elapsed + timeout on running tools |
+| `⟳ tool Ns` | Live elapsed time on running tools |
 | `⎿` output lines | Diff coloring (+green/-red), collapsed `… +N lines (ctrl+o to expand)` |
 | `▸ task (n/m)` | Live task progress in HUD |
 | `✓ Tool ×N` | Completed tool counts (sorted by frequency, top 4) |

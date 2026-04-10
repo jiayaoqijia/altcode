@@ -327,14 +327,14 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 				timing = lipgloss.NewStyle().Foreground(theme.Muted).
 					Render(" " + formatToolDuration(e.elapsed))
 			}
-			// CC-style running tool: elapsed + timeout + background hint
-			// Running tool: show elapsed. Only show ctrl+b hint on the LAST running
-			// tool to avoid flooding the screen when many tools run concurrently.
+			// Running tool: show elapsed time only. We intentionally don't
+			// advertise the tool's max timeout here — users were reading
+			// "timeout 2m" on every running tool as if a timeout had fired.
 			if e.status == "running" && !e.startedAt.IsZero() {
 				runElapsed := time.Since(e.startedAt)
 				if runElapsed >= time.Second {
 					timing = lipgloss.NewStyle().Foreground(theme.Warning).
-						Render(" Running… (" + formatToolDuration(runElapsed) + " · timeout 2m)")
+						Render(" " + formatToolDuration(runElapsed))
 				}
 			}
 
