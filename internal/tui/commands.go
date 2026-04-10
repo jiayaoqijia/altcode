@@ -76,11 +76,24 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 	case "/workspace":
 		if len(parts) < 2 {
 			a.appendInfo("Usage: /workspace <task> [backend:role ...]\n" +
+				"       /workspace list            (show saved workspaces)\n" +
+				"       /workspace status          (current workspace status)\n" +
 				"Starts a multi-agent workspace.\n" +
 				"Examples:\n" +
 				"  /workspace add JWT auth                    (auto-detect agents)\n" +
 				"  /workspace add auth claude:architect codex:coder   (pick agents)\n" +
 				"  /workspace add auth codex:all              (single agent)")
+			return true, nil
+		}
+		// Route bare subcommands (list/status) to their dedicated
+		// handlers so they don't get interpreted as a single-word task
+		// and spawn a workspace with 'list' or 'status' as the goal.
+		switch strings.ToLower(parts[1]) {
+		case "list":
+			a.appendInfo(a.builtinWorkspaceListText())
+			return true, nil
+		case "status":
+			a.appendInfo(a.builtinWorkspaceStatusText())
 			return true, nil
 		}
 		// Parse backend:role pairs from the end of the command
@@ -765,6 +778,64 @@ func (a *App) builtinWorkflowResumeText() string {
 		return "No paused workflows to resume."
 	}
 	return fmt.Sprintf("Resumed %d workflow(s).", n)
+}
+
+// builtinWorkspaceListText lists all saved workspace sessions under
+// the project's .altcode/workspace directory. Returns a friendly
+// message when nothing has been saved yet.
+func (a *App) builtinWorkspaceListText() string {
+	root := a.projectRoot
+	if root == "" {
+		return "[workspace] could not detect project root."
+	}
+	wsDir := filepath.Join(root, ".altcode", "workspace")
+	store := workspace.NewStore(wsDir)
+	ids, err := store.ListSessions()
+	if err != nil {
+		return fmt.Sprintf("[workspace] list failed: %v", err)
+	}
+	if len(ids) == 0 {
+		return "[workspace] no saved workspaces.\nStart one with /workspace <task>."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Saved workspaces (%d):\n", len(ids)))
+	for _, id := range ids {
+		sess, err := store.LoadSession(id)
+		if err != nil || sess == nil {
+			sb.WriteString(fmt.Sprintf("  %s  (failed to load)\n", id))
+			continue
+		}
+		task := sess.Task
+		if len(task) > 50 {
+			task = task[:49] + "…"
+		}
+		sb.WriteString(fmt.Sprintf("  %s  %-20s  %s\n", id, sess.Status, task))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// builtinWorkspaceStatusText reports the state of the active workspace
+// if there is one, otherwise points users at /workspace list.
+func (a *App) builtinWorkspaceStatusText() string {
+	if a.wsView == nil || !a.wsView.IsActive() {
+		return "[workspace] no active workspace. Use '/workspace list' to see saved ones."
+	}
+	sess := a.wsView.Session()
+	if sess == nil {
+		return "[workspace] active but session data unavailable."
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Workspace: %s\n", sess.ID))
+	sb.WriteString(fmt.Sprintf("  Task:     %s\n", sess.Task))
+	sb.WriteString(fmt.Sprintf("  Status:   %s\n", sess.Status))
+	sb.WriteString(fmt.Sprintf("  Agents:   %d\n", len(sess.Agents)))
+	for role, rec := range sess.Agents {
+		if rec == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("    %s  (%s)  %s\n", role, rec.Backend, rec.ActivityState))
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (a *App) builtinAgentsText() string {
