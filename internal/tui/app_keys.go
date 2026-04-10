@@ -96,12 +96,14 @@ func (a *App) handleWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		return a, nil, true
 	case "enter":
-		// Handle ALL slash commands directly in workspace mode
+		// Handle ALL slash commands directly in workspace mode. Check
+		// handled FIRST so unknown or plugin-provided commands aren't
+		// silently eaten by a premature Reset(); fall through to the
+		// global handler with the input intact if we can't route it.
 		text := strings.TrimSpace(a.input.Value())
 		if strings.HasPrefix(text, "/") {
-			a.input.Reset()
-			handled, cmd := a.handleBuiltinCommand(text)
-			if handled {
+			if handled, cmd := a.handleBuiltinCommand(text); handled {
+				a.input.Reset()
 				return a, cmd, true
 			}
 		}
