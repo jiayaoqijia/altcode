@@ -155,13 +155,21 @@ func processOpenAINonStream(body io.ReadCloser, ch chan<- StreamEvent) {
 // --- request types ---
 
 type openaiRequest struct {
-	Model              string          `json:"model"`
-	Messages           []openaiMessage `json:"messages"`
-	Tools              []openaiTool    `json:"tools,omitempty"`
-	MaxTokens          int             `json:"max_tokens,omitempty"`
-	Temperature        *float64        `json:"temperature,omitempty"`
-	Stream             bool            `json:"stream"`
-	ParallelToolCalls  *bool           `json:"parallel_tool_calls,omitempty"`
+	Model              string                `json:"model"`
+	Messages           []openaiMessage       `json:"messages"`
+	Tools              []openaiTool          `json:"tools,omitempty"`
+	MaxTokens          int                   `json:"max_tokens,omitempty"`
+	Temperature        *float64              `json:"temperature,omitempty"`
+	Stream             bool                  `json:"stream"`
+	StreamOptions      *openaiStreamOptions  `json:"stream_options,omitempty"`
+	ParallelToolCalls  *bool                 `json:"parallel_tool_calls,omitempty"`
+}
+
+// openaiStreamOptions asks the server to include a usage block on the
+// final streaming chunk. Without this, chat-completions streams omit
+// token counts entirely and the cost tracker stays empty forever.
+type openaiStreamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type openaiMessage struct {
@@ -227,6 +235,7 @@ func buildOpenAIRequest(req *Request) ([]byte, error) {
 		MaxTokens:         req.MaxTokens,
 		Temperature:       req.Temperature,
 		Stream:            true,
+		StreamOptions:     &openaiStreamOptions{IncludeUsage: true},
 		ParallelToolCalls: &parallel,
 	}
 	return json.Marshal(r)
