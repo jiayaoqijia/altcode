@@ -46,7 +46,7 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 	case "/sessions":
 		a.appendInfo(a.builtinSessionsText())
 	case "/memory":
-		a.appendInfo(a.builtinMemoryText())
+		a.appendInfo(a.builtinMemoryText(parts))
 	case "/version":
 		a.appendInfo(a.builtinVersionText())
 	case "/cost":
@@ -477,16 +477,70 @@ func (a *App) builtinSessionsText() string {
 	return strings.TrimRight(sb.String(), "\n")
 }
 
-func (a *App) builtinMemoryText() string {
+func (a *App) builtinMemoryText(parts []string) string {
 	if a.engine == nil || a.engine.MemoryStore() == nil {
 		return "No memory store loaded."
 	}
-	memories, err := a.engine.MemoryStore().List()
+	store := a.engine.MemoryStore()
+
+	// /memory add <text>    → create a new memory file
+	// /memory rm <id>       → delete by id
+	// /memory search <query> → fuzzy search stored memories
+	// /memory               → list (default)
+	if len(parts) >= 2 {
+		sub := strings.ToLower(parts[1])
+		switch sub {
+		case "add":
+			if len(parts) < 3 {
+				return "Usage: /memory add <text>"
+			}
+			content := strings.Join(parts[2:], " ")
+			content = strings.Trim(content, "'\"")
+			if content == "" {
+				return "Usage: /memory add <text>"
+			}
+			id := fmt.Sprintf("tui-%d", time.Now().Unix())
+			title := firstLineOf(content, 60)
+			if err := store.Save(id, title, content); err != nil {
+				return fmt.Sprintf("Error saving memory: %v", err)
+			}
+			return fmt.Sprintf("Saved memory %q (%d bytes).", title, len(content))
+		case "rm", "delete", "remove":
+			if len(parts) < 3 {
+				return "Usage: /memory rm <id>"
+			}
+			if err := store.Delete(parts[2]); err != nil {
+				return fmt.Sprintf("Error deleting memory: %v", err)
+			}
+			return fmt.Sprintf("Deleted memory %q.", parts[2])
+		case "search", "find":
+			if len(parts) < 3 {
+				return "Usage: /memory search <query>"
+			}
+			query := strings.Join(parts[2:], " ")
+			matches, err := store.Search(query)
+			if err != nil {
+				return fmt.Sprintf("Error searching memories: %v", err)
+			}
+			if len(matches) == 0 {
+				return fmt.Sprintf("No memories match %q.", query)
+			}
+			var sb strings.Builder
+			sb.WriteString(fmt.Sprintf("Found %d memory match(es):\n", len(matches)))
+			for _, m := range matches {
+				sb.WriteString(fmt.Sprintf("  - %s\n", m.Title))
+			}
+			return strings.TrimRight(sb.String(), "\n")
+		}
+		// Unknown subcommand → fall through to list.
+	}
+
+	memories, err := store.List()
 	if err != nil {
 		return fmt.Sprintf("Error loading memories: %v", err)
 	}
 	if len(memories) == 0 {
-		return "No memories stored."
+		return "No memories stored.\nUse '/memory add <text>' to save one."
 	}
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Loaded memories (%d):\n", len(memories)))
@@ -494,6 +548,22 @@ func (a *App) builtinMemoryText() string {
 		sb.WriteString(fmt.Sprintf("  - %s\n", m.Title))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// firstLineOf returns the first non-empty line of text, trimmed to
+// maxLen runes. Used to derive a short title from memory content.
+func firstLineOf(s string, maxLen int) string {
+	for _, line := range strings.Split(s, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		if len(line) > maxLen {
+			return line[:maxLen-1] + "…"
+		}
+		return line
+	}
+	return ""
 }
 
 func (a *App) builtinCostText() string {
