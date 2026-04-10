@@ -281,9 +281,13 @@ func truncate(s string, n int) string {
 	return s[:n] + "..."
 }
 
-// Messages returns the current conversation history.
+// Messages returns a snapshot of the current conversation history.
+// Returns a copy so callers can't mutate the engine's backing slice
+// concurrently with a running turn.
 func (e *Engine) Messages() []provider.Message {
-	return e.messages
+	out := make([]provider.Message, len(e.messages))
+	copy(out, e.messages)
+	return out
 }
 
 // SessionID returns the current session ID.
@@ -669,7 +673,7 @@ func (e *Engine) dispatchTools(
 				},
 			})
 		case permission.ActionAsk:
-			result := e.askPermission(tc, out)
+			result := e.askPermission(ctx, tc, out)
 			if result.Error != nil {
 				calls = append(calls, tool.Call{
 					ID: tc.ID, Tool: t, Input: tc.Input,
@@ -765,22 +769,33 @@ func (e *Engine) checkPermission(t tool.Tool, tc collectedToolCall) permission.A
 	return e.perm.CheckWithReadOnly(tc.Name, pattern, t.IsReadOnly())
 }
 
-func (e *Engine) askPermission(tc collectedToolCall, out chan<- event.Event) tool.Result {
+func (e *Engine) askPermission(ctx context.Context, tc collectedToolCall, out chan<- event.Event) tool.Result {
 	respCh := make(chan event.PermResponse, 1)
-	out <- event.Event{
+	select {
+	case out <- event.Event{
 		Type: event.PermissionRequest,
 		Permission: &event.PermReq{
 			ToolName: tc.Name,
 			Pattern:  tc.Name + ":" + string(tc.Input),
 			Response: respCh,
 		},
+	}:
+	case <-ctx.Done():
+		return tool.Result{Error: ctx.Err()}
 	}
 
-	resp, ok := <-respCh
-	if !ok || resp.Action != event.Allow {
-		return tool.Result{Error: fmt.Errorf("permission denied by user")}
+	// Don't deadlock on <-respCh if the TUI disappears or the user
+	// cancels the turn while waiting for a permission answer. Select
+	// on ctx.Done() too so cancellation cleanly unblocks the engine.
+	select {
+	case resp, ok := <-respCh:
+		if !ok || resp.Action != event.Allow {
+			return tool.Result{Error: fmt.Errorf("permission denied by user")}
+		}
+		return tool.Result{}
+	case <-ctx.Done():
+		return tool.Result{Error: ctx.Err()}
 	}
-	return tool.Result{}
 }
 
 // maxToolResultLen caps tool result text stored in context to prevent bloat.
