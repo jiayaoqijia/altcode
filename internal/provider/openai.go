@@ -8,7 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-	"time"
 )
 
 const (
@@ -34,7 +33,7 @@ func NewOpenAI(cfg OpenAIConfig) Provider {
 	}
 	return &openaiProvider{
 		cfg:    cfg,
-		client: &http.Client{Timeout: 5 * time.Minute},
+		client: newStreamingClient(),
 	}
 }
 
