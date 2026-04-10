@@ -31,7 +31,14 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 	case "/context":
 		a.appendInfo(a.builtinContextText())
 	case "/model":
-		a.appendInfo(a.builtinModelText())
+		if len(parts) > 1 {
+			a.appendInfo(fmt.Sprintf(
+				"Current model: %s\n\n/model %s — mid-session model switching isn't supported yet; restart altcode with --model %s or set 'model' in your config.",
+				a.activeModel(), parts[1], parts[1],
+			))
+		} else {
+			a.appendInfo(a.builtinModelText())
+		}
 	case "/clear":
 		a.builtinClear()
 	case "/tools":
