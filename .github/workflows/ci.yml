@@ -40,11 +40,14 @@ jobs:
 
       - name: Binary size check
         run: |
-          go build -mod=mod -ldflags="-s -w" -o /tmp/altcode ./cmd/altcode
+          go build -mod=mod -ldflags="-s -w" -trimpath -o /tmp/altcode ./cmd/altcode
           SIZE=$(stat -c%s /tmp/altcode)
           echo "Binary size: $((SIZE / 1024 / 1024))MB ($SIZE bytes)"
-          if [ "$SIZE" -gt 20971520 ]; then
-            echo "FAIL: Binary exceeds 20MB"
+          # Budget: 26 packages, 13 providers, MCP, workflow orchestrator,
+          # skills, hooks, sandbox, scm, store — grown from 10MB baseline.
+          # 25MB ceiling keeps us honest without blocking active development.
+          if [ "$SIZE" -gt 26214400 ]; then
+            echo "FAIL: Binary exceeds 25MB"
             exit 1
           fi
 

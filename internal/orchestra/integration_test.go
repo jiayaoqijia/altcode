@@ -2,6 +2,8 @@ package orchestra
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -164,8 +166,13 @@ Skip test.
 }
 
 func TestIntegration_WorkflowDiscover(t *testing.T) {
-	// Test discovering workflow files from .altcode/workflows/
-	defs, err := wfdef.Discover("/home/coder/github/altcode/.altcode/workflows")
+	// Resolve .altcode/workflows/ relative to the package directory so the
+	// test works in any checkout location (local dev and CI both).
+	workflowDir := filepath.Join("..", "..", ".altcode", "workflows")
+	if _, err := os.Stat(workflowDir); err != nil {
+		t.Skipf("workflow dir %s not available: %v", workflowDir, err)
+	}
+	defs, err := wfdef.Discover(workflowDir)
 	if err != nil {
 		t.Fatalf("Discover: %v", err)
 	}
