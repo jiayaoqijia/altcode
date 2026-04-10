@@ -37,3 +37,6 @@
 [submodule "vendor/wshobson-agents"]
 	path = vendor/wshobson-agents
 	url = https://github.com/wshobson/agents.git
+[submodule "vendor/goose"]
+	path = vendor/goose
+	url = https://github.com/aaif-goose/goose.git
