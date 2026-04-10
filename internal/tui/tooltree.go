@@ -398,7 +398,7 @@ func formatDiffOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 		if len(result) >= maxLines {
 			// CC-style collapsed output hint
 			result = append(result,
-				ctxStyle.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
+				ctxStyle.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		display := truncateStr(line, maxWidth)
@@ -421,7 +421,7 @@ func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		if strings.TrimSpace(line) == "" {
@@ -440,7 +440,7 @@ func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int) []
 	for _, line := range lines {
 		if len(result) >= maxLines {
 			result = append(result,
-				dim.Render(fmt.Sprintf("… +%d lines (ctrl+o to expand)", len(lines)-maxLines)))
+				dim.Render(fmt.Sprintf("… +%d lines", len(lines)-maxLines)))
 			break
 		}
 		trimmed := strings.TrimSpace(line)
