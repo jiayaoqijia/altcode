@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"os/exec"
+	"strings"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/sandbox"
@@ -94,6 +95,17 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 			output += "\n"
 		}
 		output += stderr.String()
+	}
+
+	// If the context deadline fired, annotate the output so the agent
+	// knows the command was killed by timeout (not a crash) and can
+	// retry with an explicit larger `timeout` parameter if needed.
+	timedOut := errors.Is(ctx.Err(), context.DeadlineExceeded)
+	if timedOut {
+		if output != "" && !strings.HasSuffix(output, "\n") {
+			output += "\n"
+		}
+		output += fmt.Sprintf("[bash: command killed after %s — pass a larger `timeout` (ms) to run longer]", timeout)
 	}
 
 	output = truncateOutput(output)

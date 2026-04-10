@@ -96,6 +96,24 @@ func TestBashTool(t *testing.T) {
 	}
 }
 
+// A command killed by its own timeout must surface a clear annotation
+// so the agent knows to retry with a larger `timeout` parameter instead
+// of interpreting the exit as a script bug.
+func TestBashTool_TimeoutAnnotation(t *testing.T) {
+	bt := tool.NewBashTool()
+	input, _ := json.Marshal(map[string]any{
+		"command": "sleep 5",
+		"timeout": 100, // 100ms — will trip
+	})
+	result, err := bt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Output, "killed") || !strings.Contains(result.Output, "timeout") {
+		t.Fatalf("expected timeout annotation in output, got %q", result.Output)
+	}
+}
+
 func TestEditTool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")

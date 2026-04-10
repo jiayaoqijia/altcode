@@ -834,6 +834,35 @@ func TestToolTree_RunningNotCollapsed(t *testing.T) {
 	}
 }
 
+// Regression guard for the "a lot of timeout" user complaint: running
+// tools must NOT render the word "timeout" in their elapsed label. Users
+// read "⟳ grep Running… (4s · timeout 2m)" on every concurrent tool and
+// mistook the static 2m cap for actual timeouts firing. We now show only
+// the elapsed duration.
+func TestToolTree_RunningHasNoTimeoutLabel(t *testing.T) {
+	tree := newToolTree()
+	for _, name := range []string{"Grep", "Read", "Bash"} {
+		tree.Start(name, "target")
+		// Backdate startedAt so the elapsed branch fires (>= 1s).
+		last := len(tree.entries) - 1
+		tree.entries[last].startedAt = time.Now().Add(-3 * time.Second)
+	}
+
+	output := tree.RenderLive(DefaultTheme, 120)
+	plain := stripANSI(output)
+
+	if strings.Contains(strings.ToLower(plain), "timeout") {
+		t.Errorf("running tools must not mention 'timeout'; got:\n%s", plain)
+	}
+	if strings.Contains(plain, "Running…") {
+		t.Errorf("Running… prefix should be gone; got:\n%s", plain)
+	}
+	// Sanity: elapsed time should still be visible on at least one tool.
+	if !strings.Contains(plain, "3s") {
+		t.Errorf("expected elapsed time '3s' on running tools; got:\n%s", plain)
+	}
+}
+
 // === CC Feature Parity Verification Tests ===
 // Each test verifies one CC TUI feature is actually working in altcode.
 
