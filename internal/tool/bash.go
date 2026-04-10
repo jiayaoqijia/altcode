@@ -71,6 +71,7 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 			return &Result{
 				Output: fmt.Sprintf("Error: %v", err),
 				Title:  "sandbox:blocked",
+				Error:  err,
 			}, nil
 		}
 	}

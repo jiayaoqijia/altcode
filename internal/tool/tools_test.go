@@ -114,6 +114,37 @@ func TestBashTool_TimeoutAnnotation(t *testing.T) {
 	}
 }
 
+// Error-path tools must set Result.Error so the tree renders a red ✗
+// instead of a misleading green ✓. Previously `Read /nonexistent` came
+// back with `Error: ...` in Output but nil Error field, so the TUI
+// cheerfully showed it as successful.
+func TestReadTool_ErrorFieldSetOnFailure(t *testing.T) {
+	rt := tool.NewReadTool()
+	input, _ := json.Marshal(map[string]any{"file_path": "/nonexistent/no-such-file.txt"})
+	result, err := rt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error == nil {
+		t.Fatalf("expected Result.Error set on missing file; output was %q", result.Output)
+	}
+	if !strings.Contains(result.Output, "no such file") {
+		t.Errorf("expected 'no such file' in output, got %q", result.Output)
+	}
+}
+
+func TestLsTool_ErrorFieldSetOnFailure(t *testing.T) {
+	lt := tool.NewLsTool()
+	input, _ := json.Marshal(map[string]any{"path": "/nonexistent/no-such-dir"})
+	result, err := lt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error == nil {
+		t.Fatalf("expected Result.Error set on missing dir; output was %q", result.Output)
+	}
+}
+
 func TestEditTool(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")

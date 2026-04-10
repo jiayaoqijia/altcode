@@ -92,7 +92,7 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 	} else {
 		a.recordToolSuccess(ev, title, elapsed, output)
 	}
-	a.recordToolMeta(ev, title)
+	a.recordToolMeta(ev, title, hasError)
 	// Lightweight git dirty refresh after file-changing tools
 	tn := a.activeToolName
 	if ev.ToolCall != nil && ev.ToolCall.Name != "" {
@@ -266,7 +266,9 @@ func (a *App) recordToolSuccess(ev event.Event, title string, elapsed time.Durat
 }
 
 // recordToolMeta updates tool counts, task tracking, and sidebar.
-func (a *App) recordToolMeta(ev event.Event, title string) {
+// hasError tools still get a turn tick (they happened) but don't
+// inflate the per-type success counters shown in the HUD / turn summary.
+func (a *App) recordToolMeta(ev event.Event, title string, hasError bool) {
 	toolName := ""
 	if ev.ToolCall != nil {
 		toolName = ev.ToolCall.Name
@@ -275,24 +277,28 @@ func (a *App) recordToolMeta(ev event.Event, title string) {
 		toolName = a.activeToolName // fallback from ToolStart
 	}
 	if toolName != "" {
-		a.toolCounts[toolName]++
 		a.turnToolCount++
-		switch strings.ToLower(toolName) {
-		case "write", "edit", "apply_patch":
-			a.turnWrites++
-		case "read":
-			a.turnReads++
-		case "bash":
-			a.turnBashes++
+		if !hasError {
+			a.toolCounts[toolName]++
+			switch strings.ToLower(toolName) {
+			case "write", "edit", "apply_patch":
+				a.turnWrites++
+			case "read":
+				a.turnReads++
+			case "bash":
+				a.turnBashes++
+			}
 		}
 	}
 	if ev.ToolCall != nil {
 		a.trackTaskFromTool(ev.ToolCall)
 	}
-	switch strings.ToLower(toolName) {
-	case "edit", "write", "apply_patch":
-		if title != "" {
-			a.sidebar.AddFile(title, 1, 0)
+	if !hasError {
+		switch strings.ToLower(toolName) {
+		case "edit", "write", "apply_patch":
+			if title != "" {
+				a.sidebar.AddFile(title, 1, 0)
+			}
 		}
 	}
 }

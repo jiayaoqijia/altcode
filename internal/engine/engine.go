@@ -668,10 +668,24 @@ func (e *Engine) dispatchTools(
 
 	for i, r := range results {
 		e.journalToolResult(toolCalls[i], r)
+		// Propagate tool errors so the TUI can render the tree line
+		// with a red ✗ instead of a misleading green ✓. Some tools set
+		// r.Error explicitly; others leak 'Error: ...' through Output —
+		// fall back on a prefix sniff so both styles surface correctly.
+		errStr := ""
+		if r.Error != nil {
+			errStr = r.Error.Error()
+		} else if strings.HasPrefix(strings.TrimSpace(r.Output), "Error:") {
+			errStr = strings.TrimSpace(r.Output)
+		}
 		out <- event.Event{
-			Type:       event.ToolResultEvent,
-			ToolResult: &event.Result{Output: r.Output, Title: r.Title},
-			ToolCall:   &event.ToolCall{ID: toolCalls[i].ID, Name: toolCalls[i].Name},
+			Type: event.ToolResultEvent,
+			ToolResult: &event.Result{
+				Output: r.Output,
+				Title:  r.Title,
+				Error:  errStr,
+			},
+			ToolCall: &event.ToolCall{ID: toolCalls[i].ID, Name: toolCalls[i].Name},
 		}
 	}
 

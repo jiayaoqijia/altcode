@@ -44,6 +44,7 @@ func (t *lsTool) Execute(_ context.Context, input json.RawMessage) (*Result, err
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  "ls",
+			Error:  err,
 		}, nil
 	}
 

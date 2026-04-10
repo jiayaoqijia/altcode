@@ -54,6 +54,7 @@ func (t *editTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		return &Result{
 			Output: fmt.Sprintf("Error reading file: %v", err),
 			Title:  "edit",
+			Error:  err,
 		}, nil
 	}
 

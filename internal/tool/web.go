@@ -70,6 +70,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		return &Result{
 			Output: "Error: url is required",
 			Title:  "web_fetch",
+			Error:  fmt.Errorf("url is required"),
 		}, nil
 	}
 	if params.MaxLength <= 0 {
@@ -82,6 +83,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  "web_fetch " + params.URL,
+			Error:  err,
 		}, nil
 	}
 	req.Header.Set("User-Agent", "altcode/1.0")
@@ -91,6 +93,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  "web_fetch " + params.URL,
+			Error:  err,
 		}, nil
 	}
 	defer resp.Body.Close()
@@ -99,6 +102,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		return &Result{
 			Output: fmt.Sprintf("Error: HTTP %d", resp.StatusCode),
 			Title:  "web_fetch " + params.URL,
+			Error:  fmt.Errorf("http %d", resp.StatusCode),
 		}, nil
 	}
 
@@ -107,6 +111,7 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		return &Result{
 			Output: fmt.Sprintf("Error reading body: %v", err),
 			Title:  "web_fetch " + params.URL,
+			Error:  err,
 		}, nil
 	}
 

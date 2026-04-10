@@ -48,6 +48,7 @@ func (t *patchTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 		return &Result{
 			Output: "Error: patch is required",
 			Title:  "apply_patch",
+			Error:  fmt.Errorf("patch is required"),
 		}, nil
 	}
 

@@ -66,6 +66,7 @@ func (t *readTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  params.FilePath,
+			Error:  err,
 		}, nil
 	}
 
