@@ -752,6 +752,15 @@ func (a *App) builtinSearchText(query string) string {
 	lower := strings.ToLower(query)
 	var matches []string
 	for i, msg := range a.messages {
+		// Skip slash-command user messages and info bubbles so a
+		// '/search foo' doesn't match its own command line and
+		// '/help' dumps don't flood the result list.
+		if msg.role == roleUser && strings.HasPrefix(strings.TrimSpace(msg.content), "/") {
+			continue
+		}
+		if msg.role == roleInfo {
+			continue
+		}
 		if strings.Contains(strings.ToLower(msg.content), lower) {
 			// Show message number, role, and a snippet
 			snippet := msg.content
@@ -916,28 +925,44 @@ func (a *App) engineMemoryCount() int {
 	return len(memories)
 }
 
+// parseTurnArg parses a decimal turn number. Returns -1 on parse error.
+func parseTurnArg(s string) int {
+	if s == "" {
+		return -1
+	}
+	n := 0
+	for _, c := range s {
+		if c < '0' || c > '9' {
+			return -1
+		}
+		n = n*10 + int(c-'0')
+	}
+	return n
+}
+
 // builtinRollbackText handles /rollback --turn N.
 func (a *App) builtinRollbackText(parts []string) string {
 	if a.engine == nil {
 		return "No engine available."
 	}
 
+	// Accept both '/rollback --turn N' (flag form) and '/rollback N'
+	// (positional form) to match how other commands work. Return a
+	// clean usage message on invalid args.
 	turn := -1
-	for i, p := range parts {
-		if p == "--turn" && i+1 < len(parts) {
-			n := 0
-			for _, c := range parts[i+1] {
-				if c < '0' || c > '9' {
-					return "Usage: /rollback --turn N (N must be a positive integer)"
-				}
-				n = n*10 + int(c-'0')
-			}
-			turn = n
+	for i, p := range parts[1:] {
+		if p == "--turn" && i+2 < len(parts) {
+			turn = parseTurnArg(parts[i+2])
+			break
+		}
+		// positional: first non-flag arg is the turn number
+		if !strings.HasPrefix(p, "--") {
+			turn = parseTurnArg(p)
 			break
 		}
 	}
 	if turn < 0 {
-		return "Usage: /rollback --turn N\n  Rolls back the conversation to turn N."
+		return "Usage: /rollback <N>  (or /rollback --turn <N>)\n  Rolls back the conversation to turn N."
 	}
 
 	msgs := a.engine.Messages()
