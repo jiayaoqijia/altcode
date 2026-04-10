@@ -805,8 +805,27 @@ func (a *App) builtinAgentsText() string {
 		}
 	}
 
-	// Skills
+	// Skills / MCPs / plugins / memories — /agents used to only show
+	// a lonely 'Skills: N' line, which felt misleading under the
+	// 'Agent & Session Dashboard' title. Surface everything the user
+	// would plausibly want to know about what's wired into the session.
 	sb.WriteString(fmt.Sprintf("\n  Skills:         %d discovered\n", len(a.engine.Skills())))
+	if cfg := a.engine.Config(); cfg != nil {
+		sb.WriteString(fmt.Sprintf("  MCP servers:    %d configured\n", len(cfg.MCP)))
+		sb.WriteString(fmt.Sprintf("  Providers:      %d configured\n", len(cfg.Provider)))
+		if len(cfg.Hooks) > 0 {
+			total := 0
+			for _, ms := range cfg.Hooks {
+				total += len(ms)
+			}
+			sb.WriteString(fmt.Sprintf("  Hooks:          %d matchers across %d events\n", total, len(cfg.Hooks)))
+		}
+	}
+	if a.engine.MemoryStore() != nil {
+		if mems, err := a.engine.MemoryStore().List(); err == nil {
+			sb.WriteString(fmt.Sprintf("  Memories:       %d loaded\n", len(mems)))
+		}
+	}
 
 	// Workflow state
 	wfStatus := workflow.StatusText(a.projectRoot)

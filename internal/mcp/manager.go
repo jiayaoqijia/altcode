@@ -21,6 +21,10 @@ type ToolProvider interface {
 type Manager struct {
 	stdioClients map[string]*Client
 	sseClients   map[string]*SSEClient
+	// Errors accumulated during connect/register so callers (e.g.
+	// /doctor) can surface them instead of having them corrupt the
+	// TUI by leaking to stderr.
+	Errors []string
 }
 
 // NewManager connects to all configured MCP servers in parallel.
@@ -58,7 +62,10 @@ func NewManager(ctx context.Context, servers map[string]config.MCPServerConfig) 
 	for i := 0; i < stdioCount; i++ {
 		r := <-ch
 		if r.err != nil {
-			fmt.Fprintf(os.Stderr, "mcp: failed to connect %s: %v\n", r.name, r.err)
+			// Previously: fmt.Fprintf(os.Stderr, ...) which corrupted
+			// the TUI display. Accumulate instead and let callers
+			// decide how to surface it.
+			m.Errors = append(m.Errors, fmt.Sprintf("mcp: failed to connect %s: %v", r.name, r.err))
 			continue
 		}
 		m.stdioClients[r.name] = r.client
@@ -70,12 +77,12 @@ func NewManager(ctx context.Context, servers map[string]config.MCPServerConfig) 
 func (m *Manager) RegisterAll(ctx context.Context, registry *tool.Registry) {
 	for name, client := range m.stdioClients {
 		if err := RegisterMCPTools(ctx, registry, client, name); err != nil {
-			fmt.Fprintf(os.Stderr, "mcp: tool discovery failed for %s: %v\n", name, err)
+			m.Errors = append(m.Errors, fmt.Sprintf("mcp: tool discovery failed for %s: %v", name, err))
 		}
 	}
 	for name, client := range m.sseClients {
 		if err := RegisterSSETools(ctx, registry, client, name); err != nil {
-			fmt.Fprintf(os.Stderr, "mcp: SSE tool discovery failed for %s: %v\n", name, err)
+			m.Errors = append(m.Errors, fmt.Sprintf("mcp: SSE tool discovery failed for %s: %v", name, err))
 		}
 	}
 }
