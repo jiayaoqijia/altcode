@@ -162,6 +162,8 @@ func (a *App) appendInfo(text string) {
 }
 
 // slashCommandNames returns all known slash command names for tab completion.
+// Keep this in sync with handleBuiltinCommand in commands.go — a missing
+// entry here means Tab won't complete to that command.
 func (a *App) slashCommandNames() []string {
 	builtins := []string{
 		"/help", "/status", "/context", "/model", "/clear", "/tools",
@@ -170,8 +172,10 @@ func (a *App) slashCommandNames() []string {
 		"/backends", "/undo", "/redo", "/search",
 		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
 		"/plan", "/rollback", "/send", "/workspace",
+		"/spawn", "/init", "/doctor", "/compare",
+		"/quit", "/exit",
 	}
-	// Add discovered slash commands
+	// Add discovered slash commands (plugins + user commands)
 	for name := range a.commands {
 		builtins = append(builtins, "/"+name)
 	}

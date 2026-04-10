@@ -834,6 +834,35 @@ func TestToolTree_RunningNotCollapsed(t *testing.T) {
 	}
 }
 
+// Tab completion must know about every slash command the app actually
+// handles. Otherwise typing '/doc' + Tab auto-completes past '/doctor'
+// to '/document-release' (the only listed match), which is both wrong
+// and confusing.
+func TestSlashCommandNames_CoversAllBuiltins(t *testing.T) {
+	app := New(nil, DefaultTheme, "test", "")
+	names := make(map[string]bool, 64)
+	for _, n := range app.slashCommandNames() {
+		names[n] = true
+	}
+	// Every command that handleBuiltinCommand switches on must be
+	// present here. If you add a new case there, add it here too.
+	required := []string{
+		"/help", "/status", "/context", "/model", "/clear", "/tools",
+		"/cost", "/history", "/diff", "/compact", "/sessions", "/memory",
+		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
+		"/backends", "/undo", "/redo", "/search",
+		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
+		"/plan", "/rollback", "/send", "/workspace",
+		"/spawn", "/init", "/doctor", "/compare",
+		"/quit", "/exit",
+	}
+	for _, r := range required {
+		if !names[r] {
+			t.Errorf("slashCommandNames missing %q — Tab completion won't find it", r)
+		}
+	}
+}
+
 // Regression guard for the "a lot of timeout" user complaint: running
 // tools must NOT render the word "timeout" in their elapsed label. Users
 // read "⟳ grep Running… (4s · timeout 2m)" on every concurrent tool and

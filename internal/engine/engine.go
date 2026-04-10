@@ -3,6 +3,7 @@ package engine
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -449,7 +450,12 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 
 	for i := 0; i < maxIterations; i++ {
 		if ctx.Err() != nil {
-			out <- event.Event{Type: event.ErrorEvent, Error: ctx.Err().Error()}
+			// User cancels (Ctrl+C / Esc) surface as context.Canceled.
+			// The TUI already prints '[cancelled]' when it cancels, so
+			// don't double up with a bogus error message.
+			if !errors.Is(ctx.Err(), context.Canceled) {
+				out <- event.Event{Type: event.ErrorEvent, Error: ctx.Err().Error()}
+			}
 			return
 		}
 
@@ -464,7 +470,10 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 				stream, err = e.callProvider(ctx)
 			}
 			if err != nil {
-				out <- event.Event{Type: event.ErrorEvent, Error: err.Error()}
+				// Same filter: swallow cancel-induced provider errors.
+				if !errors.Is(err, context.Canceled) && !errors.Is(ctx.Err(), context.Canceled) {
+					out <- event.Event{Type: event.ErrorEvent, Error: err.Error()}
+				}
 				return
 			}
 		}

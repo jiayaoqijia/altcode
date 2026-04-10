@@ -1,7 +1,9 @@
 package engine
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 
 	"github.com/altcode-ai/altcode/internal/event"
@@ -112,7 +114,11 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 
 		case provider.StreamError:
 			flushAll()
-			out <- event.Event{Type: event.ErrorEvent, Error: sev.Error.Error()}
+			// Don't surface a user-initiated cancel as an error. The
+			// TUI already writes '[cancelled]' when it cancels.
+			if sev.Error != nil && !errors.Is(sev.Error, context.Canceled) {
+				out <- event.Event{Type: event.ErrorEvent, Error: sev.Error.Error()}
+			}
 			return result
 
 		case provider.StreamDone:
