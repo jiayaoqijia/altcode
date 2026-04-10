@@ -186,6 +186,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.busy {
 			var cmd tea.Cmd
 			a.spinner, cmd = a.spinner.Update(msg)
+			// Re-render viewport while a tool is running so its
+			// elapsed time label actually ticks. Without this the
+			// tree freezes at "⟳ bash" until the next engine event.
+			if a.tools.HasRunning() {
+				a.updateViewport()
+			}
 			return a, cmd
 		}
 	case tea.KeyMsg:

@@ -118,6 +118,13 @@ func (t *toolTree) findRunning() int {
 	return -1
 }
 
+// HasRunning reports whether any tool entry is still running.
+// Used by the TUI to decide whether to re-render on spinner ticks so
+// elapsed-time labels update live.
+func (t *toolTree) HasRunning() bool {
+	return t.findRunning() >= 0
+}
+
 // DoneWithError marks the oldest running tool as failed with error output.
 func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
 	idx := t.findRunning()

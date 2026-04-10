@@ -59,3 +59,9 @@ The last release before the workspace-driven orchestration pivot. Everything bel
 - Technical design spec (`docs/superpowers/specs/2026-04-07-team-orchestration-design.md`)
 
 ## [Unreleased]
+
+### Fixed
+- **Misleading "timeout 2m" on every running tool** — the tool tree used to render `Running… (Ns · timeout 2m)` on every live tool line, which made long reviews look like timeouts were firing constantly. Running tools now show only elapsed time.
+- **Long agent turns killed mid-stream by a 5-minute HTTP cap** — both OpenAI and Anthropic providers had `http.Client{Timeout: 5 * time.Minute}`. In Go that covers the entire request lifetime including streaming body reads, so any turn longer than five minutes (extended thinking + multi-step tool use + slow providers) got cut off with a confusing timeout error. Replaced with a `Transport` that has granular dial/TLS/header/idle timeouts and no stream-length cap; user cancel still flows through the request context.
+- **Silent bash tool timeouts** — when a Bash command was killed by its own timeout, the agent saw only `exit code -1` with partial stdout. It now gets `[bash: command killed after <d> — pass a larger timeout (ms)]`, so retries can widen the window explicitly instead of guessing.
+
