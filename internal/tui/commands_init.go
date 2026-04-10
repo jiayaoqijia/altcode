@@ -53,17 +53,37 @@ func buildClaudeMD(root string) string {
 	}
 	sb.WriteString("```\n\n")
 
-	// Project structure
+	// Project structure — pure Go walk so we don't depend on `find`
+	// being on PATH and don't silently swallow exec errors. List the
+	// top-level directories, skipping dot-files, vendor, node_modules,
+	// and OS clutter that almost never belongs in a project guide.
 	sb.WriteString("## Structure\n\n```\n")
-	if out, err := exec.Command("find", root, "-maxdepth", "2", "-type", "d",
-		"-not", "-path", "*/.*", "-not", "-path", "*/vendor/*", "-not", "-path", "*/node_modules/*").Output(); err == nil {
-		lines := strings.Split(strings.TrimSpace(string(out)), "\n")
-		for _, l := range lines {
-			rel, _ := filepath.Rel(root, l)
-			if rel != "" && rel != "." {
-				sb.WriteString(rel + "/\n")
+	if entries, err := os.ReadDir(root); err == nil {
+		written := 0
+		for _, e := range entries {
+			if !e.IsDir() {
+				continue
+			}
+			name := e.Name()
+			if strings.HasPrefix(name, ".") {
+				continue
+			}
+			switch name {
+			case "vendor", "node_modules", "dist", "build", "target", "__pycache__":
+				continue
+			}
+			sb.WriteString(name + "/\n")
+			written++
+			if written >= 30 {
+				sb.WriteString("...\n")
+				break
 			}
 		}
+		if written == 0 {
+			sb.WriteString("# (no directories detected)\n")
+		}
+	} else {
+		sb.WriteString("# (failed to read directory: " + err.Error() + ")\n")
 	}
 	sb.WriteString("```\n\n")
 
