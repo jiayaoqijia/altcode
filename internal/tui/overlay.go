@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/altcode-ai/altcode/internal/command"
 	"github.com/altcode-ai/altcode/internal/engine"
@@ -157,6 +158,29 @@ func (a *App) switchToSession(sessionID string) {
 	a.messages = nil
 	a.streaming = ""
 	a.busy = false
+
+	// Rehydrate the TUI message display from the loaded provider
+	// messages — previously we only loaded them into the engine and
+	// left the viewport empty, so the user saw '[info] Switched to
+	// session X' and nothing else. Now the history actually shows up.
+	for _, pm := range providerMsgs {
+		content := strings.TrimSpace(pm.Content)
+		if content == "" {
+			continue
+		}
+		var role messageRole
+		switch pm.Role {
+		case "user":
+			role = roleUser
+		case "assistant":
+			role = roleAssistant
+		case "tool":
+			role = roleTool
+		default:
+			continue
+		}
+		a.messages = append(a.messages, chatMessage{role: role, content: content})
+	}
 
 	sess, err := db.GetSession(sessionID)
 	title := sessionID[:8]
