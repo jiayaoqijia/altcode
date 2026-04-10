@@ -7,6 +7,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os/exec"
@@ -64,6 +65,7 @@ type ExternalAgentResult struct {
 	Elapsed   time.Duration
 	ExitCode  int
 	SessionID string
+	TimedOut  bool // true when the process was killed by its own ctx deadline
 }
 
 // ExternalAgentStream provides real-time output from an external agent.
@@ -197,6 +199,12 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 			}
 		}
 
+		// Detect timeout kill: if the per-run context's deadline
+		// fired, the process was SIGKILLed by us, not by a crash.
+		// The caller (workspace TUI) uses this to show a clear
+		// '[timed out after <d>]' message instead of 'exit -1'.
+		timedOut := errors.Is(runCtx.Err(), context.DeadlineExceeded)
+
 		result <- ExternalAgentResult{
 			Role:     cfg.Role,
 			Backend:  cfg.Backend,
@@ -204,6 +212,7 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 			Error:    waitErr,
 			Elapsed:  time.Since(start),
 			ExitCode: exitCode,
+			TimedOut: timedOut,
 		}
 	}()
 

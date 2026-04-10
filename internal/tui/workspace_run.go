@@ -169,8 +169,7 @@ func (a *App) spawnWorkspaceAgents(
 				result = agent.ExternalAgentResult{ExitCode: -1}
 			}
 			if a.wsView != nil {
-				a.wsView.AppendAgentOutput(role,
-					fmt.Sprintf("[exited: code %d]", result.ExitCode))
+				a.wsView.AppendAgentOutput(role, formatAgentExitMessage(result))
 			}
 			if rec != nil {
 				sess.Lock()
@@ -238,8 +237,7 @@ func (a *App) spawnAdditionalAgent(role, backendName string) tea.Cmd {
 				result = agent.ExternalAgentResult{ExitCode: -1}
 			}
 			if a.wsView != nil {
-				a.wsView.AppendAgentOutput(role,
-					fmt.Sprintf("[exited: code %d]", result.ExitCode))
+				a.wsView.AppendAgentOutput(role, formatAgentExitMessage(result))
 			}
 			sess.Lock()
 			rec.ActivityState = workspace.ActivityExited
@@ -318,4 +316,15 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 	}
 
 	return a.workspacePollTick()
+}
+
+// formatAgentExitMessage produces the one-line footer the workspace pane
+// shows when an external agent finishes. A normal exit prints just the
+// code; a process killed by its own ctx deadline prints a clear
+// "[timed out after <d>]" so users don't confuse a timeout with a crash.
+func formatAgentExitMessage(r agent.ExternalAgentResult) string {
+	if r.TimedOut {
+		return fmt.Sprintf("[timed out after %s — bump the backend timeout to run longer]", r.Elapsed.Truncate(time.Second))
+	}
+	return fmt.Sprintf("[exited: code %d]", r.ExitCode)
 }
