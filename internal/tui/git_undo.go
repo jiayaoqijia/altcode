@@ -8,31 +8,71 @@ import (
 	"time"
 )
 
-// builtinUndoText executes git stash to save and revert changes.
+// builtinUndoText reverts the last file operations altcode performed in
+// this session. It targets ONLY files the agent touched (tracked via
+// the history journal) so a bag of unrelated working-tree changes
+// from the user's own editor don't get clobbered by git stash.
 func (a *App) builtinUndoText() string {
 	root := a.projectRoot
 	if root == "" {
 		return "[undo] could not detect project root."
 	}
-
-	// Check for uncommitted changes first.
-	status, err := gitRun(root, "status", "--porcelain")
-	if err != nil {
-		return fmt.Sprintf("[undo] git status failed: %v", err)
+	if a.engine == nil || a.engine.FileJournal() == nil {
+		return "[undo] no file journal available."
 	}
-	if strings.TrimSpace(status) == "" {
-		return "[undo] nothing to undo (no uncommitted changes)."
+	entries := a.engine.FileJournal().Entries()
+	if len(entries) == 0 {
+		return "[undo] nothing to undo (altcode hasn't modified any files this session)."
+	}
+
+	// Collect unique agent-touched paths (journal may have duplicates
+	// for write+edit on the same file).
+	agentFiles := map[string]bool{}
+	for _, e := range entries {
+		if e.Path != "" && (e.Tool == "write" || e.Tool == "edit") {
+			agentFiles[e.Path] = true
+		}
+	}
+	if len(agentFiles) == 0 {
+		return "[undo] nothing to undo (journal has no write/edit entries)."
 	}
 
 	ts := time.Now().Format("20060102-150405")
 	label := "altcode-undo-" + ts
 
-	_, err = gitRun(root, "stash", "push", "-u", "-m", label)
+	// Safety: bail if the working tree has uncommitted changes to files
+	// altcode DIDN'T touch — the old `git stash push -u` would scoop
+	// them up silently and surprise the user. We only stash the paths
+	// listed in agentFiles; anything else is the user's own work and
+	// we refuse to trample it.
+	status, err := gitRun(root, "status", "--porcelain")
 	if err != nil {
-		return fmt.Sprintf("[undo] git stash failed: %v", err)
+		return fmt.Sprintf("[undo] git status failed: %v", err)
+	}
+	stashArgs := []string{"stash", "push", "-u", "-m", label, "--"}
+	anyAgentFileDirty := false
+	for _, line := range strings.Split(strings.TrimSpace(status), "\n") {
+		if line == "" {
+			continue
+		}
+		// Each porcelain line looks like "XY path" (3-char prefix).
+		if len(line) < 4 {
+			continue
+		}
+		p := strings.TrimSpace(line[3:])
+		if agentFiles[p] {
+			stashArgs = append(stashArgs, p)
+			anyAgentFileDirty = true
+		}
+	}
+	if !anyAgentFileDirty {
+		return "[undo] nothing to undo (altcode's files have no uncommitted changes; the file may already be committed or live outside the git repo)."
 	}
 
-	return fmt.Sprintf("[undo] stashed changes as %q. Use /redo to restore.", label)
+	if _, err := gitRun(root, stashArgs...); err != nil {
+		return fmt.Sprintf("[undo] git stash failed: %v", err)
+	}
+	return fmt.Sprintf("[undo] stashed %d agent-modified file(s) as %q. Use /redo to restore.", len(stashArgs)-5, label)
 }
 
 // builtinRedoText pops the latest altcode undo stash.
