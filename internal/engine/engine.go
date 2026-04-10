@@ -728,7 +728,14 @@ func (e *Engine) dispatchTools(
 				Title:  r.Title,
 				Error:  errStr,
 			},
-			ToolCall: &event.ToolCall{ID: toolCalls[i].ID, Name: toolCalls[i].Name},
+			// Carry the original Input forward so the TUI can key its
+			// sidebar / bookkeeping off file_path instead of each
+			// tool's bespoke Title string.
+			ToolCall: &event.ToolCall{
+				ID:    toolCalls[i].ID,
+				Name:  toolCalls[i].Name,
+				Input: toolCalls[i].Input,
+			},
 		}
 	}
 
