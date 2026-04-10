@@ -88,7 +88,13 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 	a.thinking = false
 	title, output := extractToolOutput(ev)
 	hasError := ev.ToolResult != nil && ev.ToolResult.Error != ""
-	elapsed := time.Since(a.toolStart)
+	// Guard against orphaned result events (ToolResult without a
+	// matching ToolStart): time.Since(zero) would otherwise render as
+	// a two-thousand-year duration next to the tool line.
+	var elapsed time.Duration
+	if !a.toolStart.IsZero() {
+		elapsed = time.Since(a.toolStart)
+	}
 
 	if hasError {
 		a.tools.DoneWithErrorOutput(title, elapsed, output)
@@ -160,6 +166,7 @@ func (a *App) resetTurnTransientState() {
 	a.thinkingText = ""
 	a.activeToolName = ""
 	a.activeToolDetail = ""
+	a.toolStart = time.Time{}
 	a.tools.SweepRunning()
 }
 
