@@ -46,9 +46,22 @@ func (a *App) toggleSessionSwitcher() {
 	if a.engine != nil && a.engine.StoreInstance() != nil {
 		_ = a.sessionSwitcher.Load(a.engine.StoreInstance())
 	}
-	a.sessionSwitcher.SetWidth(a.width)
+	a.sessionSwitcher.SetWidth(a.mainBodyWidth())
 	a.sessionSwitcher.Show()
 	a.input.Blur()
+}
+
+// mainBodyWidth returns the width of the main area (total minus sidebar).
+// Overlays render into this space, not the full terminal width.
+func (a *App) mainBodyWidth() int {
+	if a.width >= 100 {
+		sidebar := a.width / 4
+		if sidebar > 30 {
+			sidebar = 30
+		}
+		return a.width - sidebar
+	}
+	return a.width
 }
 
 // handlePaletteKey routes keys while the palette is open.

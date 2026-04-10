@@ -93,6 +93,13 @@ func (db *DB) LatestSession(projectID string) (*Session, error) {
 	return s, nil
 }
 
+// UpdateSessionTitle updates the title and bumps updated_at.
+// Exposed so the engine can backfill a title on the first user message
+// of a session (the TUI creates sessions with empty titles up front).
+func (db *DB) UpdateSessionTitle(id, title string) error {
+	return db.updateSessionTitle(id, title)
+}
+
 // updateSessionTitle updates the title and bumps updated_at.
 func (db *DB) updateSessionTitle(id, title string) error {
 	now := time.Now().UnixMilli()

@@ -239,8 +239,12 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
-		a.palette.SetWidth(msg.Width)
-		a.sessionSwitcher.SetWidth(msg.Width)
+		// Overlays (palette + session switcher) render into mainBody,
+		// which lives inside mainWidth — NOT the full terminal width.
+		// Passing msg.Width makes the rounded border spill into the
+		// sidebar column and stack '╮│' / '╯│' at the right edge.
+		a.palette.SetWidth(mainWidth)
+		a.sessionSwitcher.SetWidth(mainWidth)
 		a.updateViewport()
 		return a, nil
 	case eventMsg:

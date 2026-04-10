@@ -111,6 +111,7 @@ type Engine struct {
 	tokenBudget         *TokenBudget
 	cachedContextWindow int // cached from /v1/models API, 0 = not fetched
 	compactCount        int // consecutive compactions (thrash detection)
+	titleSet            bool // true once the session title has been backfilled
 }
 
 // New creates an Engine from the given parameters.
@@ -420,6 +421,39 @@ func (e *Engine) persistMessage(role string, msg provider.Message) {
 		return
 	}
 	e.store.AddMessage(e.sessionID, role, data, e.model, 0, 0)
+
+	// Backfill session title on the first user message so the session
+	// switcher stops showing '(untitled)' for every row. We only write
+	// the title once per engine instance to avoid a DB roundtrip on
+	// every turn.
+	if role == "user" && !e.titleSet {
+		e.titleSet = true
+		if title := deriveSessionTitle(msg); title != "" {
+			_ = e.store.UpdateSessionTitle(e.sessionID, title)
+		}
+	}
+}
+
+// deriveSessionTitle pulls a short, one-line title from the first user
+// message. Slash commands and control text are ignored.
+func deriveSessionTitle(msg provider.Message) string {
+	text := strings.TrimSpace(msg.Content)
+	if text == "" {
+		return ""
+	}
+	if strings.HasPrefix(text, "/") {
+		return "" // slash commands aren't meaningful titles
+	}
+	// First line only, trimmed to ~60 chars.
+	if i := strings.IndexByte(text, '\n'); i >= 0 {
+		text = text[:i]
+	}
+	text = strings.TrimSpace(text)
+	const maxTitleLen = 60
+	if len(text) > maxTitleLen {
+		text = text[:maxTitleLen-1] + "…"
+	}
+	return text
 }
 
 func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event) {
