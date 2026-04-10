@@ -459,11 +459,16 @@ func (a *App) updateViewport() {
 
 	newContent := sb.String()
 	a.viewport.SetContent(newContent)
-	// Only auto-scroll when content actually grew — prevents visual jumping
-	// when tool tree toggles on/off at similar height. Uses raw content
-	// length (not viewport.View() which is clamped to viewport height).
+	// Scroll behaviour:
+	//  - content grew  → GotoBottom so new output is visible
+	//  - content shrank drastically (e.g. /clear) → GotoTop so the
+	//    viewport doesn't linger on a YOffset that's now past EOF
+	//  - otherwise hold position to prevent visual jumping when the
+	//    live tool tree toggles on/off at similar height.
 	if len(newContent) > a.prevContentLen {
 		a.viewport.GotoBottom()
+	} else if len(newContent)*2 < a.prevContentLen {
+		a.viewport.GotoTop()
 	}
 	a.prevContentLen = len(newContent)
 }
