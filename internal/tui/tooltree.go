@@ -306,11 +306,14 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 			nameText := e.name
 			if e.detail != "" {
 				// Tool titles sometimes repeat the tool name (e.g. "read /path").
-				// Strip the duplicate prefix so we don't render "read(read /path)".
+				// Strip the duplicate prefix — case-insensitive — so we don't
+				// render "read(read /path)" or "Read(Read /path)".
 				detail := e.detail
-				if strings.HasPrefix(detail, e.name+" ") {
-					detail = detail[len(e.name)+1:]
-				} else if strings.HasPrefix(detail, e.name+":") {
+				lowerDetail := strings.ToLower(detail)
+				lowerName := strings.ToLower(e.name)
+				if strings.HasPrefix(lowerDetail, lowerName+" ") {
+					detail = strings.TrimSpace(detail[len(e.name)+1:])
+				} else if strings.HasPrefix(lowerDetail, lowerName+":") {
 					detail = strings.TrimSpace(detail[len(e.name)+1:])
 				}
 				det := smartTruncate(detail, width-len(prefix)-len(e.name)-14)

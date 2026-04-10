@@ -827,13 +827,32 @@ func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string 
 // we stop compacting to avoid infinite loops (matches Claude Code behavior).
 const maxConsecutiveCompactions = 3
 
+// messageBytes estimates the serialized size of the current message history.
+// This is a byte-level safety check for the API's 20MB request ceiling,
+// which token-based estimates can miss when tool results contain dense data.
+func (e *Engine) messageBytes() int {
+	total := 0
+	for _, m := range e.messages {
+		total += len(m.Content)
+		for _, p := range m.Parts {
+			total += len(p.Text) + len(p.Content) + len(p.Input)
+		}
+	}
+	return total
+}
+
+// maxRequestBytes is a safety margin below the API's 20MB hard limit.
+// When we cross this, compact aggressively to avoid "request too large" errors.
+const maxRequestBytes = 15 * 1024 * 1024
+
 // maybePreTurnCompact runs BEFORE sending a request to the provider.
-// Uses a higher threshold than post-tool compact to proactively prevent overflow.
+// Triggers on either token count (90% of window) or byte count (15MB).
 func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 	tokens := compact.EstimateTokens(e.messages)
 	limit := e.contextWindowSize()
-	// Trigger at 90% of context window (pre-turn is proactive)
-	if tokens < limit*9/10 {
+	bytes := e.messageBytes()
+	// Trigger at 90% of context window OR 15MB of raw bytes
+	if tokens < limit*9/10 && bytes < maxRequestBytes {
 		e.compactCount = 0 // reset thrash counter when below threshold
 		return
 	}

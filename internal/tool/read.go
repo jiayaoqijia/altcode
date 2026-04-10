@@ -47,11 +47,25 @@ func (t *readTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
+	// Safety cap: refuse to load files larger than 2MB without explicit limit.
+	// At 4 chars per token, a 2MB file eats ~500k tokens and blows the request
+	// budget long before it reaches the API's 20MB payload ceiling.
+	const maxReadBytes = 2 * 1024 * 1024
+	if params.Limit == 0 {
+		if fi, err := os.Stat(params.FilePath); err == nil && fi.Size() > maxReadBytes {
+			return &Result{
+				Output: fmt.Sprintf("Error: file is %d bytes (>2MB). Pass limit=<lines> to read a slice, or use grep/glob instead.", fi.Size()),
+				Title:  fmt.Sprintf("%s (too large: %.1fMB)", params.FilePath, float64(fi.Size())/1024/1024),
+				Error:  fmt.Errorf("file too large for full read"),
+			}, nil
+		}
+	}
+
 	data, err := os.ReadFile(params.FilePath)
 	if err != nil {
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
-			Title:  "read " + params.FilePath,
+			Title:  params.FilePath,
 		}, nil
 	}
 
@@ -60,7 +74,7 @@ func (t *readTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 	if params.Offset > 0 || params.Limit > 0 {
 		start := params.Offset
 		if start >= len(lines) {
-			return &Result{Output: "", Title: "read " + params.FilePath}, nil
+			return &Result{Output: "", Title: params.FilePath}, nil
 		}
 		end := len(lines)
 		if params.Limit > 0 && start+params.Limit < end {
@@ -77,6 +91,6 @@ func (t *readTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 
 	return &Result{
 		Output: sb.String(),
-		Title:  fmt.Sprintf("read %s (%d lines)", params.FilePath, len(lines)),
+		Title:  fmt.Sprintf("%s (%d lines)", params.FilePath, len(lines)),
 	}, nil
 }
