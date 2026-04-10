@@ -56,6 +56,14 @@ func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if msg.String() == "ctrl+c" {
 		return a, tea.Quit, true
 	}
+	if msg.String() == "esc" {
+		// Palette has its own Esc-handler that hides itself, but the
+		// overlay wrapper must re-focus the textarea — otherwise the
+		// main input stays blurred and subsequent keystrokes are eaten.
+		a.palette.Hide()
+		a.input.Focus()
+		return a, nil, true
+	}
 	if msg.String() == "enter" {
 		selected, ok := a.palette.Selected()
 		if ok {
@@ -83,6 +91,14 @@ func (a *App) handlePaletteKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 func (a *App) handleSwitcherKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	if msg.String() == "ctrl+c" {
 		return a, tea.Quit, true
+	}
+	if msg.String() == "esc" {
+		// Same fix as the palette: hide the overlay AND give the
+		// main input its focus back. The switcher's own UpdateKey
+		// only hides itself; it can't touch the app's textarea.
+		a.sessionSwitcher.Hide()
+		a.input.Focus()
+		return a, nil, true
 	}
 	if msg.String() == "enter" {
 		id := a.sessionSwitcher.SelectedID()
