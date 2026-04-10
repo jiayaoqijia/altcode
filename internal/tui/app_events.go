@@ -70,6 +70,8 @@ func (a *App) trackTaskFromTool(tc *event.ToolCall) {
 
 // extractToolTarget extracts a human-readable target from a tool call
 // (file path for Read/Edit/Write, pattern for Grep/Glob, command for Bash).
+// Tool names are normalized to lowercase to match the runtime registry
+// as well as legacy capitalised names.
 func extractToolTarget(tc *event.ToolCall) string {
 	if tc == nil || len(tc.Input) == 0 {
 		return ""
@@ -79,8 +81,8 @@ func extractToolTarget(tc *event.ToolCall) string {
 		return ""
 	}
 	var s string
-	switch tc.Name {
-	case "Read", "Write", "Edit":
+	switch strings.ToLower(tc.Name) {
+	case "read", "write", "edit", "apply_patch":
 		if v, ok := input["file_path"]; ok {
 			json.Unmarshal(v, &s)
 		}
@@ -88,11 +90,11 @@ func extractToolTarget(tc *event.ToolCall) string {
 		if i := strings.LastIndex(s, "/"); i >= 0 {
 			s = s[i+1:]
 		}
-	case "Grep", "Glob":
+	case "grep", "glob":
 		if v, ok := input["pattern"]; ok {
 			json.Unmarshal(v, &s)
 		}
-	case "Bash":
+	case "bash":
 		if v, ok := input["command"]; ok {
 			json.Unmarshal(v, &s)
 		}

@@ -110,12 +110,12 @@ func (a *App) runDoctor() string {
 			if pcfg.APIKey != "" {
 				status = "✓ configured"
 			}
-			sb.WriteString(fmt.Sprintf("  %s: %s\n", name, status))
+			sb.WriteString(fmt.Sprintf("  %-12s %s\n", name+":", status))
 		}
 	}
 
 	// Check tools
-	sb.WriteString(fmt.Sprintf("\nTools: %d registered\n", len(a.engine.Registry().All())))
+	sb.WriteString(fmt.Sprintf("\nTools:       %d registered\n", len(a.engine.Registry().All())))
 
 	// Check MCP
 	if a.engine != nil {
@@ -124,15 +124,18 @@ func (a *App) runDoctor() string {
 
 	// Check git
 	if _, err := exec.Command("git", "rev-parse", "--git-dir").Output(); err == nil {
-		sb.WriteString("Git: ✓ repository detected\n")
+		sb.WriteString("Git:         ✓ repository detected\n")
 	} else {
-		sb.WriteString("Git: ✗ not a git repository\n")
+		sb.WriteString("Git:         ✗ not a git repository\n")
 	}
 
 	// Check CLI agents
+	sb.WriteString("\nAgents:\n")
 	for _, bin := range []string{"claude", "codex", "opencode"} {
 		if p, err := exec.LookPath(bin); err == nil {
-			sb.WriteString(fmt.Sprintf("Agent %s: ✓ %s\n", bin, p))
+			sb.WriteString(fmt.Sprintf("  %-12s ✓ %s\n", bin+":", p))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %-12s ✗ not installed\n", bin+":"))
 		}
 	}
 

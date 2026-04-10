@@ -98,7 +98,8 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 	if ev.ToolCall != nil && ev.ToolCall.Name != "" {
 		tn = ev.ToolCall.Name
 	}
-	if tn == "Write" || tn == "Edit" || tn == "Bash" {
+	switch strings.ToLower(tn) {
+	case "write", "edit", "bash", "apply_patch":
 		a.gitDirty = detectGitDirty()
 	}
 	a.activeToolName = ""
@@ -145,6 +146,9 @@ func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) onDone() (tea.Model, tea.Cmd) {
+	// Drop any zombie "running" entries that never got a ToolResult —
+	// otherwise the final snapshot shows a stale ⟳ next to the real results.
+	a.tools.SweepRunning()
 	if len(a.tools.entries) > 0 {
 		tree := a.tools.Render(a.theme, a.width-6)
 		a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
@@ -242,17 +246,19 @@ func extractToolOutput(ev event.Event) (string, string) {
 }
 
 // recordToolSuccess dispatches the tool result to the tree with output.
+// Tool names are normalized to lower case so this matches the actual
+// registry names (read, edit, bash, …) as well as the CC-style capitals.
 func (a *App) recordToolSuccess(ev event.Event, title string, elapsed time.Duration, output string) {
 	toolName := ""
 	if ev.ToolCall != nil {
 		toolName = ev.ToolCall.Name
 	}
-	switch toolName {
-	case "Edit", "Bash", "Write":
+	switch strings.ToLower(toolName) {
+	case "edit", "bash", "write", "apply_patch":
 		a.tools.DoneWithOutput(title, elapsed, output)
-	case "Read":
+	case "read":
 		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 3))
-	case "Grep":
+	case "grep":
 		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 4))
 	default:
 		a.tools.Done(title, elapsed)
@@ -271,19 +277,22 @@ func (a *App) recordToolMeta(ev event.Event, title string) {
 	if toolName != "" {
 		a.toolCounts[toolName]++
 		a.turnToolCount++
-		switch toolName {
-		case "Write", "Edit":
+		switch strings.ToLower(toolName) {
+		case "write", "edit", "apply_patch":
 			a.turnWrites++
-		case "Read":
+		case "read":
 			a.turnReads++
-		case "Bash":
+		case "bash":
 			a.turnBashes++
 		}
 	}
 	if ev.ToolCall != nil {
 		a.trackTaskFromTool(ev.ToolCall)
 	}
-	if (toolName == "Edit" || toolName == "Write") && title != "" {
-		a.sidebar.AddFile(title, 1, 0)
+	switch strings.ToLower(toolName) {
+	case "edit", "write", "apply_patch":
+		if title != "" {
+			a.sidebar.AddFile(title, 1, 0)
+		}
 	}
 }

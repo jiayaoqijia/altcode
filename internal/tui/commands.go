@@ -3,6 +3,7 @@ package tui
 import (
 	"fmt"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -424,10 +425,15 @@ func (a *App) builtinToolsText() string {
 	if len(tools) == 0 {
 		return "No tools registered."
 	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Registered tools (%d):\n", len(tools)))
+	names := make([]string, 0, len(tools))
 	for _, t := range tools {
-		sb.WriteString(fmt.Sprintf("  - %s\n", t.Name()))
+		names = append(names, t.Name())
+	}
+	sort.Strings(names)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Registered tools (%d):\n", len(names)))
+	for _, n := range names {
+		sb.WriteString("  - " + n + "\n")
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

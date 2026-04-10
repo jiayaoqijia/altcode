@@ -36,6 +36,15 @@ func (a *App) renderMessage(msg chatMessage) string {
 	var rendered string
 	if msg.role == roleTool && looksLikeDiff(msg.content) {
 		rendered = renderInlineDiff(msg.content, a.theme, 15)
+	} else if msg.role == roleInfo {
+		// Info messages are plain-text status output — skip markdown rendering
+		// so embedded newlines stay intact. Only render markdown when the content
+		// is explicitly wrapped in a code fence (which glamour preserves).
+		if a.mdRenderer != nil && strings.Contains(msg.content, "```") {
+			rendered = a.mdRenderer.Render(msg.content)
+		} else {
+			rendered = msg.content
+		}
 	} else if a.mdRenderer != nil && msg.role != roleTool {
 		rendered = a.mdRenderer.Render(msg.content)
 	} else {

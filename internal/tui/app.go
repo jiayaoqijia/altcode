@@ -280,7 +280,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.updateFilePopup()
 	}
 	return a, cmd
-	return a, nil
 }
 
 

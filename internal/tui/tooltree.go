@@ -153,6 +153,19 @@ func (t *toolTree) Clear() {
 	t.active = -1
 }
 
+// SweepRunning drops any still-running entries. Called at the end of a
+// turn when we've rendered the final snapshot — anything left in "running"
+// state is a zombie from a tool call whose ToolResult event never arrived.
+func (t *toolTree) SweepRunning() {
+	out := t.entries[:0]
+	for _, e := range t.entries {
+		if e.status != "running" {
+			out = append(out, e)
+		}
+	}
+	t.entries = out
+}
+
 // collapsedGroup represents a run of consecutive completed same-name tools.
 type collapsedGroup struct {
 	name    string
@@ -292,7 +305,15 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 
 			nameText := e.name
 			if e.detail != "" {
-				det := smartTruncate(e.detail, width-len(prefix)-len(e.name)-14)
+				// Tool titles sometimes repeat the tool name (e.g. "read /path").
+				// Strip the duplicate prefix so we don't render "read(read /path)".
+				detail := e.detail
+				if strings.HasPrefix(detail, e.name+" ") {
+					detail = detail[len(e.name)+1:]
+				} else if strings.HasPrefix(detail, e.name+":") {
+					detail = strings.TrimSpace(detail[len(e.name)+1:])
+				}
+				det := smartTruncate(detail, width-len(prefix)-len(e.name)-14)
 				nameText = e.name + "(" + det + ")"
 			}
 			nameRendered := lipgloss.NewStyle().Foreground(nameColor).Bold(e.status == "running").Render(nameText)
