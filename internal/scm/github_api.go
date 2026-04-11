@@ -322,11 +322,17 @@ func (g *GitHubAPISCM) GetPRReviews(
 		reviews = append(reviews, r.toWorkspaceReview())
 	}
 
-	// Fetch review comments (inline).
+	// Fetch review comments (inline). If this fails we still return
+	// the top-level reviews so callers aren't completely blind, but
+	// we surface the error via the returned error value so callers
+	// know the comment attachment is incomplete. Previously the
+	// error was silently discarded with '_ = g.doJSON(...)'.
 	var comments []apiReviewComment
-	_ = g.doJSON(ctx, http.MethodGet,
+	if err := g.doJSON(ctx, http.MethodGet,
 		g.repoPath("pulls/%d/comments", prID),
-		nil, &comments)
+		nil, &comments); err != nil {
+		return reviews, fmt.Errorf("fetch review comments (reviews still returned): %w", err)
+	}
 	attachAPIComments(reviews, comments)
 
 	return reviews, nil

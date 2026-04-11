@@ -6,11 +6,24 @@ import (
 	"encoding/json"
 	"fmt"
 	"os/exec"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/workspace"
 )
+
+// shaPattern matches a valid git SHA: 7-40 lowercase hex characters.
+// Used to validate commit SHAs before embedding them in gh CLI API
+// endpoint paths, preventing injection of gh flags or path traversal.
+var shaPattern = regexp.MustCompile(`^[0-9a-f]{7,40}$`)
+
+func validateSHA(sha string) error {
+	if !shaPattern.MatchString(sha) {
+		return fmt.Errorf("invalid commit SHA %q (must be 7-40 hex chars)", sha)
+	}
+	return nil
+}
 
 // GitHubCLISCM implements workspace.SCM using the gh CLI.
 type GitHubCLISCM struct {
@@ -171,6 +184,9 @@ func (g *GitHubCLISCM) MergePR(
 func (g *GitHubCLISCM) CIStatus(
 	ctx context.Context, sha string,
 ) (workspace.CICheckStatus, error) {
+	if err := validateSHA(sha); err != nil {
+		return workspace.CIUnknown, err
+	}
 	endpoint := fmt.Sprintf(
 		"repos/%s/%s/commits/%s/check-runs",
 		g.owner, g.repo, sha,

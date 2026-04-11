@@ -164,7 +164,14 @@ func drainJSON(ch <-chan event.Event, w io.Writer) error {
 	enc.SetEscapeHTML(false)
 	var lastErr string
 	for ev := range ch {
-		enc.Encode(ev)
+		if err := enc.Encode(ev); err != nil {
+			// Encode failures on broken pipe / disk full used to be
+			// silently dropped, so a shell command like
+			// 'altcode --json ... | head' would terminate the pipe
+			// and leave the engine writing into the void with
+			// 'drainJSON returned nil'. Surface the error.
+			return fmt.Errorf("drain json encode: %w", err)
+		}
 		if ev.Type == event.ErrorEvent {
 			lastErr = ev.Error
 		}
