@@ -3,12 +3,21 @@ package tui
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/altcode-ai/altcode/internal/orchestra"
 	"github.com/charmbracelet/lipgloss"
 )
 
+// workflowHeader renders the [phase ✓] → [phase ⟳] → [phase ·]
+// breadcrumb at the top of the workflow view.
+//
+// Concurrency: phases and width are mutated from the orchestra event
+// handler goroutine while Render is called from the Bubbletea View
+// goroutine. The mutex prevents 'concurrent map iteration / slice
+// growth race' detected by -race under heavy phase transitions.
 type workflowHeader struct {
+	mu     sync.RWMutex
 	phases []phaseDisplay
 	width  int
 }
@@ -19,7 +28,16 @@ type phaseDisplay struct {
 	Active  bool
 }
 
+// SetWidth updates the render width under the lock.
+func (wh *workflowHeader) SetWidth(w int) {
+	wh.mu.Lock()
+	defer wh.mu.Unlock()
+	wh.width = w
+}
+
 func (wh *workflowHeader) SetPhases(names []string) {
+	wh.mu.Lock()
+	defer wh.mu.Unlock()
 	wh.phases = make([]phaseDisplay, len(names))
 	for i, n := range names {
 		wh.phases[i] = phaseDisplay{Name: n}
@@ -27,12 +45,16 @@ func (wh *workflowHeader) SetPhases(names []string) {
 }
 
 func (wh *workflowHeader) MarkActive(name string) {
+	wh.mu.Lock()
+	defer wh.mu.Unlock()
 	for i := range wh.phases {
 		wh.phases[i].Active = wh.phases[i].Name == name
 	}
 }
 
 func (wh *workflowHeader) MarkDone(name string, verdict orchestra.Verdict) {
+	wh.mu.Lock()
+	defer wh.mu.Unlock()
 	for i := range wh.phases {
 		if wh.phases[i].Name == name {
 			wh.phases[i].Verdict = verdict
@@ -42,6 +64,8 @@ func (wh *workflowHeader) MarkDone(name string, verdict orchestra.Verdict) {
 }
 
 func (wh *workflowHeader) Render(theme Theme) string {
+	wh.mu.RLock()
+	defer wh.mu.RUnlock()
 	if len(wh.phases) == 0 {
 		return ""
 	}

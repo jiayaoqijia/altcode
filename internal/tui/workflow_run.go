@@ -83,7 +83,7 @@ func (a *App) startWorkflowRun(def *wfdef.WorkflowDef, task string) tea.Cmd {
 		return nil
 	}
 	a.wfHeader.SetPhases(order)
-	a.wfHeader.width = a.width
+	a.wfHeader.SetWidth(a.width)
 
 	// Initialize team view with first phase's agents
 	if first := def.PhaseByName(order[0]); first != nil {

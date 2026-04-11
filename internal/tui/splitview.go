@@ -34,6 +34,11 @@ func (s *sidebar) SetSize(w, h int) {
 }
 
 func (s *sidebar) AddFile(path string, adds, dels int) {
+	// Reject empty paths so we don't accumulate blank sidebar entries
+	// when a tool result missing a Title slips through.
+	if path == "" {
+		return
+	}
 	// Update existing or append
 	for i, f := range s.files {
 		if f.path == path {
@@ -86,14 +91,17 @@ func (s *sidebar) View() string {
 				sb.WriteString("\n")
 				break
 			}
-			// Truncate path
+			// Truncate path — rune-safe so multi-byte characters
+			// (CJK / accented / emoji in file paths) don't get split
+			// mid-byte and produce replacement glyphs.
 			name := f.path
 			maxPath := w - 12
 			if maxPath < 10 {
 				maxPath = 10
 			}
-			if len(name) > maxPath {
-				name = "…" + name[len(name)-maxPath+1:]
+			runes := []rune(name)
+			if len(runes) > maxPath {
+				name = "…" + string(runes[len(runes)-maxPath+1:])
 			}
 
 			nameStyle := lipgloss.NewStyle().Foreground(t.Foreground)

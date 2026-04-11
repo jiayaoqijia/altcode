@@ -235,7 +235,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.wsView.SetSize(msg.Width, max(1, msg.Height-6))
 		}
 		if a.wfHeader != nil {
-			a.wfHeader.width = msg.Width
+			a.wfHeader.SetWidth(msg.Width)
 		}
 		a.input.SetWidth(msg.Width - 2)
 		a.setupInput.Width = msg.Width - 2
