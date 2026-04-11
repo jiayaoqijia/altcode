@@ -50,9 +50,15 @@ func (s *Store) SaveSession(sess *WorkspaceSession) error {
 }
 
 // LoadSession reads {root}/{id}/session.json and returns the session.
-// Validates that the ID does not contain path separators to prevent traversal.
+// Validates that the ID does not contain path separators to prevent
+// traversal. Previous validation used ContainsAny("/\\..") which is
+// a CHARACTER set check, so any single dot rejected the id — that
+// would silently break any future ID scheme that includes a dot
+// (timestamp-prefixed, semver-suffixed, etc.). Now checks for the
+// real path separators and the literal ".." substring.
 func (s *Store) LoadSession(id string) (*WorkspaceSession, error) {
-	if strings.ContainsAny(id, "/\\..") || id != filepath.Base(id) {
+	if id == "" || id != filepath.Base(id) ||
+		strings.ContainsAny(id, `/\`) || strings.Contains(id, "..") {
 		return nil, fmt.Errorf("invalid session ID: %q", id)
 	}
 	p := filepath.Join(s.root, id, "session.json")

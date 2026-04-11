@@ -101,17 +101,21 @@ func readLastJSONLEntry(path string) (*jsonlEntry, error) {
 // checkActionableState returns an ActivityDetection if the JSONL entry
 // represents a waiting_input or blocked state, nil otherwise.
 func checkActionableState(entry *jsonlEntry) *workspace.ActivityDetection {
+	ts, ok := parseTime(entry.Timestamp)
+	if !ok {
+		ts = time.Now() // best-effort fallback for actionable states
+	}
 	switch entry.State {
 	case "waiting_input":
 		return &workspace.ActivityDetection{
 			State:     workspace.ActivityWaitInput,
-			Timestamp: parseTime(entry.Timestamp),
+			Timestamp: ts,
 			Source:    "jsonl_actionable",
 		}
 	case "blocked":
 		return &workspace.ActivityDetection{
 			State:     workspace.ActivityBlocked,
-			Timestamp: parseTime(entry.Timestamp),
+			Timestamp: ts,
 			Source:    "jsonl_actionable",
 		}
 	}
@@ -134,7 +138,18 @@ func jsonlFallbackState(
 			Source:    "jsonl_missing",
 		}, nil
 	}
-	ts := parseTime(entry.Timestamp)
+	ts, ok := parseTime(entry.Timestamp)
+	if !ok {
+		// Bad timestamp — treat as idle, not freshly active. This is
+		// the exact failure the previous "return time.Now() on parse
+		// error" version masked: a corrupt JSONL line would make a
+		// stuck agent look healthy forever.
+		return &workspace.ActivityDetection{
+			State:     workspace.ActivityIdle,
+			Timestamp: time.Now(),
+			Source:    "jsonl_bad_timestamp",
+		}, nil
+	}
 	age := time.Since(ts).Milliseconds()
 
 	var state workspace.ActivityState
@@ -294,11 +309,17 @@ func parseClaudeSessionInfo(path string) (*workspace.AgentSessionInfo, error) {
 	}, nil
 }
 
-// parseTime parses an RFC3339 timestamp, returning time.Now() on failure.
-func parseTime(s string) time.Time {
+// parseTime parses an RFC3339 timestamp.
+//
+// Returns the parsed time AND ok=true on success. On failure returns
+// the zero time and ok=false. The previous version returned time.Now()
+// on failure, which made jsonlFallbackState compute age=0 and tag the
+// agent as freshly active forever — masking exactly the stuck-agent
+// failure mode the activity cascade exists to detect.
+func parseTime(s string) (time.Time, bool) {
 	t, err := time.Parse(time.RFC3339, s)
 	if err != nil {
-		return time.Now()
+		return time.Time{}, false
 	}
-	return t
+	return t, true
 }

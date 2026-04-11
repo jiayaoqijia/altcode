@@ -153,9 +153,13 @@ func runPhase(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, priorOutp
 	var lastSessionID string
 	allPassed := true
 
-	// Run agents — parallel or sequential based on phase config
+	// Run agents — parallel or sequential based on phase config.
+	// Pass the resolved timeout (with default applied) so the parallel
+	// path doesn't read phase.Timeout again and lose the default,
+	// which would let phases without an explicit timeout spawn agents
+	// with Timeout: 0 (effectively unbounded).
 	if phase.Parallel && len(phase.Agents) > 1 {
-		return runPhaseParallel(phaseCtx, p, phase, priorOutputs)
+		return runPhaseParallel(phaseCtx, p, phase, priorOutputs, timeout)
 	}
 
 	for _, ag := range phase.Agents {
@@ -198,7 +202,7 @@ func runPhase(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, priorOutp
 	return &PhaseResult{PhaseID: phase.Name, Verdict: verdict, Outputs: outputs, SessionID: lastSessionID}
 }
 
-func runPhaseParallel(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, priorOutputs map[string]string) *PhaseResult {
+func runPhaseParallel(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, priorOutputs map[string]string, timeout time.Duration) *PhaseResult {
 	type agentResult struct {
 		role      string
 		output    string
@@ -223,7 +227,7 @@ func runPhaseParallel(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, p
 				Backend: agent.CLIBackend(ag.Backend),
 				Role:    ag.Role,
 				Model:   ag.Model,
-				Timeout: phase.Timeout,
+				Timeout: timeout,
 				WorkDir: p.WorkDir,
 			}
 
@@ -291,7 +295,21 @@ func mapEventType(t agent.AgentEventType) PhaseEventKind {
 	}
 }
 
+// trySendEvent forwards a phase event to the consumer channel.
+//
+// PhaseDone events are NEVER dropped — phase transition state in the
+// TUI depends on seeing them. We block until the channel can accept
+// the event, falling out only when ctx is cancelled. Lossy non-blocking
+// sends silently desynced the workflow header (a phase would never
+// "complete" because the TUI missed the KindPhaseDone).
+//
+// Other event types still use a non-blocking send so a slow consumer
+// can drop chatty per-tool events without blocking the workflow.
 func trySendEvent(ch chan<- PhaseEvent, ev PhaseEvent) {
+	if ev.Type == KindPhaseDone {
+		ch <- ev
+		return
+	}
 	select {
 	case ch <- ev:
 	default:

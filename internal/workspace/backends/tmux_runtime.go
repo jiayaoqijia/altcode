@@ -132,6 +132,17 @@ func (t *TmuxRuntime) Attach(
 			case <-ctx.Done():
 				return
 			case <-ticker.C:
+				// Re-validate that the handle still maps to OUR pane
+				// id. Without this, after Kill removes the entry tmux
+				// could reuse the pane id for another agent and we'd
+				// stream the wrong output into the wrong attach
+				// channel.
+				t.mu.Lock()
+				cur, ok := t.panes[h.ID]
+				t.mu.Unlock()
+				if !ok || cur != paneID {
+					return
+				}
 				out, err := t.run(
 					"capture-pane", "-t", paneID,
 					"-p", "-S", "-",
