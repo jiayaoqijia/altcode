@@ -332,7 +332,10 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		a.input.Focus()
 		return a, nil, true
 	case "esc":
-		// Stay in vim mode — don't quit. Use Ctrl+D or /quit to exit.
+		// Stay in vim mode — don't quit. Use Ctrl+C to quit or
+		// `i`/`a` to return to insert mode. Ctrl+D is the standard
+		// vim half-page-down binding (handled below) so it does NOT
+		// quit, despite what the previous comment claimed.
 		return a, nil, true
 	case "ctrl+c":
 		return a, tea.Quit, true

@@ -256,6 +256,15 @@ func (wv *WorkspaceView) SetPaused(p bool) {
 	wv.paused = p
 }
 
+// IsPaused reports whether the workspace is currently paused. Used by
+// the keybinding layer to decide whether Ctrl+R resumes the workspace
+// or falls through to the global retry-prompt action.
+func (wv *WorkspaceView) IsPaused() bool {
+	wv.mu.Lock()
+	defer wv.mu.Unlock()
+	return wv.paused
+}
+
 // AppendAgentOutput adds output text to the named agent's pane.
 func (wv *WorkspaceView) AppendAgentOutput(role, text string) {
 	wv.mu.Lock()

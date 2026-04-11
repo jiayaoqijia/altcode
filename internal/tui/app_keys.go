@@ -66,9 +66,17 @@ func (a *App) handleWorkspaceKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		a.appendInfo("[workspace] Aborted.")
 		return a, nil, true
 	case "ctrl+r":
-		a.wsView.SetPaused(false)
-		a.appendInfo("[workspace] Resumed.")
-		return a, nil, true
+		// Only consume Ctrl+R when the workspace is actually paused.
+		// Otherwise it spams "[workspace] Resumed." every time the
+		// user wants to retry their last prompt and locks them out
+		// of the global retry shortcut entirely.
+		if a.wsView.IsPaused() {
+			a.wsView.SetPaused(false)
+			a.appendInfo("[workspace] Resumed.")
+			return a, nil, true
+		}
+		// Fall through to the global Ctrl+R retry path.
+		return a, nil, false
 	case "tab":
 		if strings.HasPrefix(a.input.Value(), "/") {
 			if a.trySlashComplete() {

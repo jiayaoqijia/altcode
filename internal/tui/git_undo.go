@@ -60,7 +60,20 @@ func (a *App) builtinUndoText() string {
 		if len(line) < 4 {
 			continue
 		}
+		// Renamed files appear as "R  old -> new" — without the
+		// rename split, the matcher saw a path like "old -> new" and
+		// never matched the agent-touched basename, leaving
+		// rename-only changes un-undoable. Split on " -> " and add
+		// BOTH paths so the stash call covers either name.
 		p := strings.TrimSpace(line[3:])
+		if idx := strings.Index(p, " -> "); idx >= 0 {
+			oldPath := strings.TrimSpace(p[:idx])
+			newPath := strings.TrimSpace(p[idx+4:])
+			if agentFiles[oldPath] || agentFiles[newPath] {
+				stashArgs = append(stashArgs, oldPath, newPath)
+			}
+			continue
+		}
 		if agentFiles[p] {
 			stashArgs = append(stashArgs, p)
 		}
