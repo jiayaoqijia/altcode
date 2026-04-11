@@ -27,10 +27,17 @@ type wsAgentPane struct {
 }
 
 // AppendOutput adds a line to the pane's rolling buffer.
+//
+// When the buffer is full and truncates, reset scrollOffset to 0 so
+// the user (who may have scrolled up to read earlier output) doesn't
+// end up looking at a negative position past EOF. The old content
+// they were reading has been evicted anyway — pinning them to the
+// latest is the least-wrong behavior.
 func (p *wsAgentPane) AppendOutput(line string) {
 	p.Lines = append(p.Lines, line)
 	if len(p.Lines) > agentPaneOutputLines {
 		p.Lines = p.Lines[len(p.Lines)-agentPaneOutputLines:]
+		p.scrollOffset = 0
 	}
 }
 

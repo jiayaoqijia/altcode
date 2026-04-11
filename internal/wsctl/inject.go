@@ -79,11 +79,18 @@ func buildContent(
 }
 
 // agentTable renders a markdown table of all agents' status.
+//
+// WorkspaceSession.Agents is a map guarded by sess.mu — iterating it
+// without the lock races with writers in workspace_run.go (spawn/exit
+// goroutines). Lock for the duration of the render so 'concurrent
+// map iteration and map write' can't panic the process.
 func agentTable(sess *workspace.WorkspaceSession) string {
 	var b strings.Builder
 	b.WriteString("## Workspace Agents Status\n\n")
 	b.WriteString("| Role | Branch | PR | CI | Activity |\n")
 	b.WriteString("|------|--------|----|----|----------|\n")
+	sess.Lock()
+	defer sess.Unlock()
 	for _, rec := range sess.Agents {
 		pr := "--"
 		if rec.PRID > 0 {

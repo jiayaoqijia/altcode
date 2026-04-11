@@ -80,9 +80,15 @@ func NewSessionFromConfig(teamCfg *config.TeamConfig, parentCfg *config.Config) 
 func buildModelConfig(tm config.TeamModel, parent *config.Config) *config.Config {
 	cfg := config.Default()
 
-	// Copy all provider credentials from parent
-	for k, v := range parent.Provider {
-		cfg.Provider[k] = v
+	// Copy all provider credentials from parent. Guard against nil
+	// parent or nil Provider map so a caller passing a freshly
+	// constructed Config{} doesn't panic here. cfg.Default() always
+	// returns a non-nil Provider, so ranging over nil is the only
+	// real risk.
+	if parent != nil {
+		for k, v := range parent.Provider {
+			cfg.Provider[k] = v
+		}
 	}
 
 	// Set the model
