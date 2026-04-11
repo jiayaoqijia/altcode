@@ -121,9 +121,12 @@ func (a *App) runDoctor() string {
 	var sb strings.Builder
 	sb.WriteString("Doctor Report\n\n")
 
-	// Check providers
+	// Check providers — guard against both nil engine AND nil Config.
+	// The previous fix only checked a.engine != nil but ranged over
+	// cfg.Provider on the next line, so a partially-constructed engine
+	// (Config returns nil) would still nil-deref here.
 	sb.WriteString("Providers:\n")
-	if a.engine != nil {
+	if a.engine != nil && a.engine.Config() != nil {
 		cfg := a.engine.Config()
 		for name, pcfg := range cfg.Provider {
 			status := "✗ no key"

@@ -49,9 +49,20 @@ func RetryableStream(
 ) (<-chan StreamEvent, error) {
 	var lastErr error
 	delay := cfg.BaseDelay
+	if delay <= 0 {
+		// Zero or negative delay would either make rand.Int64N panic
+		// (n <= 0) or busy-loop the retry. Fall back to a safe default.
+		delay = 100 * time.Millisecond
+	}
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		if attempt > 0 {
-			wait := delay + time.Duration(rand.Int64N(int64(delay/2)))
+			// rand.Int64N panics on n <= 0; guard the jitter computation
+			// for tiny delays (sub-2ns) so the helper doesn't crash on
+			// pathological RetryConfig inputs.
+			wait := delay
+			if half := int64(delay / 2); half > 0 {
+				wait = delay + time.Duration(rand.Int64N(half))
+			}
 			if re, ok := lastErr.(retryableError); ok {
 				if hint := re.RetryAfter(); hint > 0 {
 					wait = hint
