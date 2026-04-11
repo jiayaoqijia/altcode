@@ -48,15 +48,16 @@ func (s *Sandbox) Check(command string) error {
 	return s.checkBlocked(command)
 }
 
-// Wrap prepends safety flags (timeout, ulimit) to a command.
+// Wrap is deprecated and no-op. The original intent was to prepend
+// `ulimit -v ...; timeout 120 bash -c '...'` for sandbox-policy
+// commands, but no caller ever wired it in (bash.go ran the raw
+// command directly), so the timeout/ulimit was dead code that
+// pretended to enforce limits. The bash tool now uses
+// exec.CommandContext for timeout enforcement and ulimit-based
+// memory caps were never load-bearing — keep this function as a
+// noop for API compatibility with older callers.
 func (s *Sandbox) Wrap(command string) string {
-	if s.policy == PolicyNone {
-		return command
-	}
-	return fmt.Sprintf(
-		"ulimit -v 4194304 2>/dev/null; timeout 120 bash -c %s",
-		shellQuote(command),
-	)
+	return command
 }
 
 // AddBlocked appends additional patterns to the block list.
@@ -180,6 +181,3 @@ func truncateCmd(cmd string) string {
 	return cmd
 }
 
-func shellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
-}

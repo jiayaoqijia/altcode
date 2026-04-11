@@ -135,22 +135,18 @@ func TestAddBlocked(t *testing.T) {
 	}
 }
 
-func TestWrapAddsLimits(t *testing.T) {
-	s := sandbox.New(sandbox.PolicySafe)
-	wrapped := s.Wrap("echo hello")
-	if !strings.Contains(wrapped, "ulimit") {
-		t.Error("wrapped command should contain ulimit")
-	}
-	if !strings.Contains(wrapped, "timeout") {
-		t.Error("wrapped command should contain timeout")
-	}
-}
-
-func TestWrapNoopForNone(t *testing.T) {
-	s := sandbox.New(sandbox.PolicyNone)
-	cmd := "echo hello"
-	if s.Wrap(cmd) != cmd {
-		t.Error("PolicyNone Wrap should return command unchanged")
+// Wrap is now a deprecated no-op (the previous "ulimit + timeout"
+// wrapping was never wired into the bash tool — bash.go ran the
+// raw command directly). Keep a single regression test asserting
+// the no-op contract so a future caller doesn't accidentally
+// reintroduce the dead code.
+func TestWrapIsNoop(t *testing.T) {
+	for _, p := range []sandbox.Policy{sandbox.PolicyNone, sandbox.PolicySafe, sandbox.PolicyReadOnly} {
+		s := sandbox.New(p)
+		cmd := "echo hello"
+		if s.Wrap(cmd) != cmd {
+			t.Errorf("policy %d: Wrap should be a no-op (got %q)", p, s.Wrap(cmd))
+		}
 	}
 }
 
