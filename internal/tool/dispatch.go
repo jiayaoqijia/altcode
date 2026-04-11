@@ -2,8 +2,40 @@ package tool
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"sync"
 )
+
+// runOne executes a single tool call defensively. It traps panics so
+// one buggy tool can't crash the engine, and turns nil-result returns
+// into a clear error instead of dereferencing nil. Used by both the
+// sequential and the concurrent dispatch branches.
+func runOne(ctx context.Context, call Call) (out Result) {
+	if call.EagerResult != nil {
+		return *call.EagerResult
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			out = Result{
+				Title: call.Tool.Name(),
+				Output: fmt.Sprintf("Error: tool panicked: %v", r),
+				Error:  fmt.Errorf("tool %q panicked: %v\n%s", call.Tool.Name(), r, debug.Stack()),
+			}
+		}
+	}()
+	r, err := call.Tool.Execute(ctx, call.Input)
+	if err != nil {
+		return Result{Error: err, Title: call.Tool.Name()}
+	}
+	if r == nil {
+		return Result{
+			Error: fmt.Errorf("tool %q returned nil result without error", call.Tool.Name()),
+			Title: call.Tool.Name(),
+		}
+	}
+	return *r
+}
 
 // PartitionByConcurrency groups calls into batches where concurrent-safe
 // calls are batched together and non-safe calls form single-item batches.
@@ -38,6 +70,8 @@ func PartitionByConcurrency(calls []Call) [][]Call {
 }
 
 // Dispatch executes tool calls respecting concurrency constraints.
+// Both branches go through runOne so panic recovery and nil-result
+// handling apply uniformly.
 func Dispatch(ctx context.Context, calls []Call) []Result {
 	batches := PartitionByConcurrency(calls)
 	var results []Result
@@ -45,43 +79,21 @@ func Dispatch(ctx context.Context, calls []Call) []Result {
 	for _, batch := range batches {
 		if len(batch) == 1 || !isConcurrencySafe(batch[0]) {
 			for _, call := range batch {
-				if call.EagerResult != nil {
-					results = append(results, *call.EagerResult)
-					continue
-				}
-				r, err := call.Tool.Execute(ctx, call.Input)
-				if err != nil {
-					results = append(results, Result{
-						Error: err, Title: call.Tool.Name(),
-					})
-				} else {
-					results = append(results, *r)
-				}
+				results = append(results, runOne(ctx, call))
 			}
-		} else {
-			batchResults := make([]Result, len(batch))
-			var wg sync.WaitGroup
-			for i, call := range batch {
-				if call.EagerResult != nil {
-					batchResults[i] = *call.EagerResult
-					continue
-				}
-				wg.Add(1)
-				go func(idx int, c Call) {
-					defer wg.Done()
-					r, err := c.Tool.Execute(ctx, c.Input)
-					if err != nil {
-						batchResults[idx] = Result{
-							Error: err, Title: c.Tool.Name(),
-						}
-					} else {
-						batchResults[idx] = *r
-					}
-				}(i, call)
-			}
-			wg.Wait()
-			results = append(results, batchResults...)
+			continue
 		}
+		batchResults := make([]Result, len(batch))
+		var wg sync.WaitGroup
+		for i, call := range batch {
+			wg.Add(1)
+			go func(idx int, c Call) {
+				defer wg.Done()
+				batchResults[idx] = runOne(ctx, c)
+			}(i, call)
+		}
+		wg.Wait()
+		results = append(results, batchResults...)
 	}
 	return results
 }

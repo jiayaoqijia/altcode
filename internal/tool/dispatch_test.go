@@ -307,3 +307,65 @@ func TestPartition_Empty(t *testing.T) {
 		t.Error("Expected nil for empty calls")
 	}
 }
+
+// panickyTool deliberately panics in Execute to simulate a buggy
+// tool. The dispatch loop must trap the panic and turn it into a
+// Result.Error so the engine doesn't crash.
+type panickyTool struct{ mockTool }
+
+func (p *panickyTool) Execute(_ context.Context, _ json.RawMessage) (*tool.Result, error) {
+	panic("intentional dispatch panic")
+}
+
+// nilResultTool returns (nil, nil) — used to test the dispatch
+// nil-result guard. Without the guard the old code did *r and panicked.
+type nilResultTool struct{ mockTool }
+
+func (n *nilResultTool) Execute(_ context.Context, _ json.RawMessage) (*tool.Result, error) {
+	return nil, nil
+}
+
+func TestDispatch_PanicRecovery(t *testing.T) {
+	calls := []tool.Call{
+		{ID: "1", Tool: &panickyTool{mockTool: mockTool{name: "panicky", concurrent: false}}},
+		{ID: "2", Tool: &mockTool{name: "ok", concurrent: false}},
+	}
+	results := tool.Dispatch(context.Background(), calls)
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	if results[0].Error == nil {
+		t.Error("expected first result to have an error from the panic")
+	}
+	if results[1].Output != "ok" {
+		t.Errorf("expected second tool to still run, got %q", results[1].Output)
+	}
+}
+
+func TestDispatch_NilResultGuard(t *testing.T) {
+	calls := []tool.Call{
+		{ID: "1", Tool: &nilResultTool{mockTool: mockTool{name: "nilly", concurrent: false}}},
+	}
+	results := tool.Dispatch(context.Background(), calls)
+	if len(results) != 1 || results[0].Error == nil {
+		t.Fatalf("expected one error result, got %+v", results)
+	}
+}
+
+func TestDispatch_PanicRecoveryConcurrent(t *testing.T) {
+	calls := []tool.Call{
+		{ID: "1", Tool: &panickyTool{mockTool: mockTool{name: "p1", concurrent: true}}},
+		{ID: "2", Tool: &panickyTool{mockTool: mockTool{name: "p2", concurrent: true}}},
+		{ID: "3", Tool: &mockTool{name: "ok", concurrent: true}},
+	}
+	results := tool.Dispatch(context.Background(), calls)
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+	if results[0].Error == nil || results[1].Error == nil {
+		t.Error("expected both panicky tools to surface errors")
+	}
+	if results[2].Output != "ok" {
+		t.Errorf("expected third (concurrent) tool to still run, got %q", results[2].Output)
+	}
+}
