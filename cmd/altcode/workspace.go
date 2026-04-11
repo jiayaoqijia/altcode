@@ -484,7 +484,7 @@ waitLoop:
 	// Merge agent worktree changes into a single branch
 	if hasCommits {
 		mergeBranch, mergeErr := workspace.MergeAgentWork(
-			ctx, gitRoot, base, sess.ID[:8], sess.Agents)
+			ctx, gitRoot, base, sess.ID[:8], sess)
 		if mergeErr != nil {
 			fmt.Printf(
 				"\nMerge failed: %v\n", mergeErr)
