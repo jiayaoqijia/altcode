@@ -69,7 +69,9 @@ func (t *Tracker) RecordTurn(model string, inputTokens, outputTokens int) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	p := t.lookupPricing(model)
+	// Use the *Locked variant — we already hold t.mu and the public
+	// lookupPricing would try to retake the same mutex and deadlock.
+	p := t.lookupPricingLocked(model)
 	cost := computeCost(p, inputTokens, outputTokens)
 
 	t.turns = append(t.turns, TurnCost{
@@ -138,9 +140,12 @@ func (t *Tracker) totalsLocked() (int, int, float64) {
 	return in, out, cost
 }
 
-// lookupPricing finds pricing for a model, using prefix matching
-// before falling back to the default.
-func (t *Tracker) lookupPricing(model string) ModelPricing {
+// lookupPricingLocked finds pricing for a model, using prefix matching
+// before falling back to the default. CALLER MUST HOLD t.mu — this
+// function reads t.pricing without taking the lock so it can be
+// called from within the existing critical section in RecordTurn
+// without re-locking. Use lookupPricing if you don't already hold mu.
+func (t *Tracker) lookupPricingLocked(model string) ModelPricing {
 	if p, ok := t.pricing[model]; ok {
 		return p
 	}
@@ -151,6 +156,14 @@ func (t *Tracker) lookupPricing(model string) ModelPricing {
 		}
 	}
 	return fallbackPricing
+}
+
+// lookupPricing is the lock-safe wrapper for callers outside the
+// critical section.
+func (t *Tracker) lookupPricing(model string) ModelPricing {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.lookupPricingLocked(model)
 }
 
 func computeCost(p ModelPricing, inTok, outTok int) float64 {
