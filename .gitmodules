@@ -40,3 +40,6 @@
 [submodule "vendor/goose"]
 	path = vendor/goose
 	url = https://github.com/aaif-goose/goose.git
+[submodule "vendor/hermes-agent"]
+	path = vendor/hermes-agent
+	url = https://github.com/nousresearch/hermes-agent.git
