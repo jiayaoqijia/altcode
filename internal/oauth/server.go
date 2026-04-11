@@ -3,6 +3,7 @@ package oauth
 import (
 	"context"
 	"fmt"
+	"html"
 	"net"
 	"net/http"
 	"time"
@@ -41,10 +42,23 @@ func WaitForCallback(ctx context.Context, lis net.Listener, expectedState string
 	resultCh := make(chan *CallbackResult, 1)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
+		// Restrict to GET — OAuth callbacks are always GET, and
+		// tightening the method reduces callback-CSRF surface area.
+		if r.Method != http.MethodGet {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		q := r.URL.Query()
 		if errParam := q.Get("error"); errParam != "" {
 			desc := q.Get("error_description")
-			fmt.Fprintf(w, "<html><body><h1>Login failed</h1><p>%s: %s</p></body></html>", errParam, desc)
+			// SECURITY: use html.EscapeString on anything from the
+			// query string. Previously the raw error + description
+			// were fmt.Fprintf'd into HTML, which is reflected XSS
+			// on the local callback endpoint. An attacker who can
+			// open localhost URLs could execute script in the
+			// browser tab with a crafted query string.
+			fmt.Fprintf(w, "<html><body><h1>Login failed</h1><p>%s: %s</p></body></html>",
+				html.EscapeString(errParam), html.EscapeString(desc))
 			resultCh <- &CallbackResult{Err: fmt.Errorf("%s: %s", errParam, desc)}
 			return
 		}
