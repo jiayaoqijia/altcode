@@ -140,8 +140,13 @@ func LoadFile(path string) (*Config, error) {
 // would fail with a confusing parse error far from the offending
 // variable. The substitution happens on raw JSON source, so the
 // inserted string must be safe for the surrounding `"..."` context.
+//
+// Matches BOTH uppercase and lowercase env var names. Posix
+// convention uses uppercase, but plenty of users have lowercase
+// vars for one-off keys (e.g. `$openai_key`) and the previous
+// uppercase-only regex silently dropped them with no warning.
 func ExpandEnv(s string) string {
-	re := regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
+	re := regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
 	warned := map[string]bool{}
 	return re.ReplaceAllStringFunc(s, func(match string) string {
 		name := match[1:] // strip leading '$'
@@ -183,12 +188,27 @@ func stripJSONComments(s string) string {
 
 // indexLineComment returns the byte index of the first // comment that is
 // not inside a double-quoted string, or -1 if none is found.
+//
+// Counts CONSECUTIVE preceding backslashes to detect escaped quotes
+// correctly. The previous "look at line[i-1]" check failed for any
+// double-escaped backslash followed by a quote, so a Windows path
+// like `"path": "C:\\Users\\me"  // comment` made the parser think
+// the closing quote was still inside a string and never stripped
+// the comment, producing a confusing JSON parse error.
 func indexLineComment(line string) int {
 	inString := false
 	for i := 0; i < len(line)-1; i++ {
 		ch := line[i]
-		if ch == '"' && (i == 0 || line[i-1] != '\\') {
-			inString = !inString
+		if ch == '"' {
+			// Count consecutive backslashes to the left. Even count
+			// (including zero) means the quote is unescaped.
+			bs := 0
+			for j := i - 1; j >= 0 && line[j] == '\\'; j-- {
+				bs++
+			}
+			if bs%2 == 0 {
+				inString = !inString
+			}
 		}
 		if !inString && ch == '/' && line[i+1] == '/' {
 			return i

@@ -645,21 +645,32 @@ func (a *App) builtinMemoryText(parts []string) string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Loaded memories (%d):\n", len(memories)))
 	for _, m := range memories {
-		sb.WriteString(fmt.Sprintf("  - %s\n", m.Title))
+		// Show ID alongside title — without it, /memory rm <id> is
+		// useless because users can't see what id to pass. The
+		// /memory rm error message even says "Use /memory to list
+		// ids" but the listing only showed titles.
+		sb.WriteString(fmt.Sprintf("  %-22s  %s\n", m.ID, m.Title))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
 
 // firstLineOf returns the first non-empty line of text, trimmed to
-// maxLen runes. Used to derive a short title from memory content.
+// maxLen RUNES (not bytes). The previous version used len() and
+// byte-slicing, which corrupted any CJK / accented memory title
+// longer than maxLen by cutting mid-rune and producing invalid
+// UTF-8 (verified with utf8.ValidString).
 func firstLineOf(s string, maxLen int) string {
 	for _, line := range strings.Split(s, "\n") {
 		line = strings.TrimSpace(line)
 		if line == "" {
 			continue
 		}
-		if len(line) > maxLen {
-			return line[:maxLen-1] + "…"
+		runes := []rune(line)
+		if len(runes) > maxLen {
+			if maxLen <= 1 {
+				return "…"
+			}
+			return string(runes[:maxLen-1]) + "…"
 		}
 		return line
 	}
