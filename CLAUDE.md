@@ -243,6 +243,23 @@ Common CI failures and how to avoid them:
 This is a hard rule — not optional. Two AI systems catch more bugs, produce better
 designs, and prevent blind spots from single-model reasoning.
 
+#### Review depth (HARD RULE)
+
+When asking ANY AI (Claude Code, Codex, GPT, subagents) to review code, ALWAYS
+require them to cover all three:
+
+1. **Happy path** — does the normal-case input produce the right output?
+2. **Unhappy path** — what happens on error, timeout, cancel, network failure,
+   permission denied, partial response, broken pipe? Does the failure surface
+   to the user, or get silently swallowed?
+3. **Edge cases / corner cases** — empty input, nil pointer, max-length input,
+   concurrent access, unicode/CJK/emoji, off-by-one boundaries, retry storms,
+   resource exhaustion, malformed data, race windows.
+
+A review that only covers the happy path is incomplete and must be re-run.
+Surface this requirement explicitly in the review prompt: "Review happy path,
+unhappy path, AND edge cases. Report any class of input the code mishandles."
+
 #### When to use Codex
 
 Use `codex --dangerously-bypass-approvals-and-sandbox` for:
