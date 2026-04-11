@@ -34,6 +34,7 @@ type FileDiff struct {
 	Hunks   []Hunk
 	Adds    int
 	Deletes int
+	Binary  bool // true for "Binary files ... differ" entries
 }
 
 // --- styles (package-level, reusable) ---
@@ -61,20 +62,39 @@ func Parse(unified string) ([]FileDiff, error) {
 	var oldLine, newLine int
 
 	for _, raw := range lines {
-		// File headers.
-		if strings.HasPrefix(raw, "--- a/") {
+		// File headers. Accepts both 'git diff' style ('--- a/path')
+		// and 'git diff --no-prefix' / format-patch style ('--- path').
+		// The previous parser only matched the 'a/' prefix and silently
+		// dropped any --no-prefix diff (no FileDiff created at all).
+		if strings.HasPrefix(raw, "--- ") {
 			if cur != nil {
 				flushHunk(cur, curHunk)
 				diffs = append(diffs, *cur)
 			}
-			cur = &FileDiff{
-				OldPath: strings.TrimPrefix(raw, "--- a/"),
-			}
+			path := strings.TrimPrefix(raw, "--- ")
+			path = strings.TrimPrefix(path, "a/")
+			cur = &FileDiff{OldPath: path}
 			curHunk = nil
 			continue
 		}
-		if strings.HasPrefix(raw, "+++ b/") && cur != nil {
-			cur.NewPath = strings.TrimPrefix(raw, "+++ b/")
+		if strings.HasPrefix(raw, "+++ ") {
+			if cur == nil {
+				cur = &FileDiff{}
+			}
+			path := strings.TrimPrefix(raw, "+++ ")
+			path = strings.TrimPrefix(path, "b/")
+			cur.NewPath = path
+			continue
+		}
+		// Binary files differ — record an empty FileDiff so the stat
+		// line shows the change instead of silently dropping it.
+		if strings.HasPrefix(raw, "Binary files ") {
+			if cur != nil {
+				flushHunk(cur, curHunk)
+				diffs = append(diffs, *cur)
+			}
+			cur = &FileDiff{Binary: true}
+			curHunk = nil
 			continue
 		}
 

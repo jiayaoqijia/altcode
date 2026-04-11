@@ -155,15 +155,30 @@ func unifiedDiff(path, before, after string) string {
 	return buf.String()
 }
 
+// splitLines breaks s into lines without the phantom trailing empty
+// line that strings.Split("foo\n", "\n") would produce. Without the
+// trim, every file ending in '\n' (i.e. every well-formed file) gained
+// a phantom blank in the diff and downstream parsers got confused.
 func splitLines(s string) []string {
+	if s == "" {
+		return nil
+	}
+	s = strings.TrimSuffix(s, "\n")
 	if s == "" {
 		return nil
 	}
 	return strings.Split(s, "\n")
 }
 
-// writeHunks writes diff hunks comparing old and new lines.
+// writeHunks writes a unified diff hunk header followed by line-by-line
+// content. Without the @@ header, internal/diff.Parse skipped every
+// content line (curHunk == nil branch) so callers consuming
+// Journal.diff() through the parser got zero hunks.
 func writeHunks(buf *strings.Builder, old, new []string) {
+	if len(old) == 0 && len(new) == 0 {
+		return
+	}
+	fmt.Fprintf(buf, "@@ -1,%d +1,%d @@\n", len(old), len(new))
 	maxLen := len(old)
 	if len(new) > maxLen {
 		maxLen = len(new)
@@ -171,7 +186,7 @@ func writeHunks(buf *strings.Builder, old, new []string) {
 	for i := 0; i < maxLen; i++ {
 		oldLine := lineAt(old, i)
 		newLine := lineAt(new, i)
-		if oldLine == newLine {
+		if i < len(old) && i < len(new) && oldLine == newLine {
 			buf.WriteString(" " + oldLine + "\n")
 			continue
 		}
