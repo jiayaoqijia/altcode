@@ -431,18 +431,23 @@ func checkpointOnTurnEnd(
 	rec.HeadSHA = hash
 
 	// Write checkpoint JSON metadata (spec gap 1: was never persisted)
+	// Surface write errors instead of silently dropping them — multi-
+	// turn recovery depends on these checkpoints being on disk, and
+	// silently losing them means the session can't be resumed.
 	cpDir := filepath.Join(
 		sess.GitRoot, ".altcode", "workspace",
 		sess.ID, "checkpoints",
 	)
-	_ = checkpoint.WriteCheckpoint(cpDir, checkpoint.TurnCheckpoint{
+	if err := checkpoint.WriteCheckpoint(cpDir, checkpoint.TurnCheckpoint{
 		Turn:         rec.TurnCount,
 		CommitHash:   hash,
 		Role:         rec.Role,
 		Branch:       rec.Branch,
 		WorktreePath: rec.WorktreePath,
 		CreatedAt:    time.Now(),
-	})
+	}); err != nil {
+		return fmt.Errorf("write checkpoint for %s turn %d: %w", rec.Role, rec.TurnCount, err)
+	}
 	return nil
 }
 

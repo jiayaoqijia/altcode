@@ -74,8 +74,17 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 			Error:  fmt.Errorf("url is required"),
 		}, nil
 	}
+	// Cap max_length to a sane upper bound. Without this an agent
+	// could ask for max_length:1_000_000_000 and the resulting
+	// allocation would OOM the process even with our 1MB body read
+	// limit (the cap is applied after stripHTML, which can grow text
+	// for some inputs).
+	const webFetchMaxLengthCap = 1_000_000
 	if params.MaxLength <= 0 {
 		params.MaxLength = 50000
+	}
+	if params.MaxLength > webFetchMaxLengthCap {
+		params.MaxLength = webFetchMaxLengthCap
 	}
 
 	// SSRF guard: refuse loopback / private / link-local / cloud

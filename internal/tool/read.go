@@ -47,6 +47,24 @@ func (t *readTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
+	// Reject negative offset/limit explicitly. Without this guard a
+	// caller could pass offset:-1, which would silently underflow the
+	// slice arithmetic later or skip validation paths.
+	if params.Offset < 0 {
+		return &Result{
+			Output: fmt.Sprintf("Error: offset must be >= 0 (got %d)", params.Offset),
+			Title:  params.FilePath,
+			Error:  fmt.Errorf("negative offset"),
+		}, nil
+	}
+	if params.Limit < 0 {
+		return &Result{
+			Output: fmt.Sprintf("Error: limit must be >= 0 (got %d)", params.Limit),
+			Title:  params.FilePath,
+			Error:  fmt.Errorf("negative limit"),
+		}, nil
+	}
+
 	// Safety cap: refuse to load files larger than 2MB without explicit limit.
 	// At 4 chars per token, a 2MB file eats ~500k tokens and blows the request
 	// budget long before it reaches the API's 20MB payload ceiling.

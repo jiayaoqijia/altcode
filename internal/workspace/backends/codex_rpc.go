@@ -243,14 +243,23 @@ func (c *CodexRPCClient) handleResponse(raw map[string]json.RawMessage) {
 }
 
 // handleServerRequest responds to approval requests from Codex.
+//
+// Drops requests where id or method can't be parsed instead of
+// silently auto-approving with a synthetic id=0 / method="". The
+// previous version would call respond(0, ...) on a malformed
+// request, sending an approval to whatever real pending caller
+// happened to have id=0 — a real correctness hazard.
 func (c *CodexRPCClient) handleServerRequest(
 	raw map[string]json.RawMessage,
 ) {
 	var id int
-	_ = json.Unmarshal(raw["id"], &id)
-
+	if err := json.Unmarshal(raw["id"], &id); err != nil {
+		return
+	}
 	var method string
-	_ = json.Unmarshal(raw["method"], &method)
+	if err := json.Unmarshal(raw["method"], &method); err != nil {
+		return
+	}
 
 	switch method {
 	case "item/commandExecution/requestApproval",
