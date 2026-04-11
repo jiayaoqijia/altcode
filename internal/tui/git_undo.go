@@ -49,8 +49,9 @@ func (a *App) builtinUndoText() string {
 	if err != nil {
 		return fmt.Sprintf("[undo] git status failed: %v", err)
 	}
-	stashArgs := []string{"stash", "push", "-u", "-m", label, "--"}
-	anyAgentFileDirty := false
+	stashPrefix := []string{"stash", "push", "-u", "-m", label, "--"}
+	stashArgs := append([]string{}, stashPrefix...)
+	prefixLen := len(stashPrefix)
 	for _, line := range strings.Split(strings.TrimSpace(status), "\n") {
 		if line == "" {
 			continue
@@ -62,17 +63,21 @@ func (a *App) builtinUndoText() string {
 		p := strings.TrimSpace(line[3:])
 		if agentFiles[p] {
 			stashArgs = append(stashArgs, p)
-			anyAgentFileDirty = true
 		}
 	}
-	if !anyAgentFileDirty {
+	stashed := len(stashArgs) - prefixLen
+	if stashed == 0 {
 		return "[undo] nothing to undo (altcode's files have no uncommitted changes; the file may already be committed or live outside the git repo)."
 	}
 
 	if _, err := gitRun(root, stashArgs...); err != nil {
 		return fmt.Sprintf("[undo] git stash failed: %v", err)
 	}
-	return fmt.Sprintf("[undo] stashed %d agent-modified file(s) as %q. Use /redo to restore.", len(stashArgs)-5, label)
+	// Compute the count from prefixLen, not the magic number 5 — the
+	// previous "len(stashArgs)-5" was off by one because the prefix
+	// has 6 elements (push -u -m LABEL --), so a 1-file undo
+	// reported "stashed 2 agent-modified file(s)".
+	return fmt.Sprintf("[undo] stashed %d agent-modified file(s) as %q. Use /redo to restore.", stashed, label)
 }
 
 // builtinRedoText pops the latest altcode undo stash.

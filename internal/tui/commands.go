@@ -696,6 +696,14 @@ func (a *App) builtinCompactText() string {
 	a.engine.Compact()
 	afterMsgs := a.engineMessageCount()
 	afterTokens := compact.EstimateTokens(a.engine.Messages())
+	// Don't pretend success when compaction was a no-op. Users hitting
+	// /compact early in a session got "Compaction complete: 0 → 0 (-0)"
+	// and assumed the feature was broken.
+	if beforeMsgs == afterMsgs && beforeTokens == afterTokens {
+		return fmt.Sprintf(
+			"Nothing to compact yet — context is under budget (%s tokens, %d messages).\nRun /compact again once the conversation grows.",
+			formatTokens(beforeTokens), beforeMsgs)
+	}
 	return fmt.Sprintf(
 		"Compaction complete:\n  Messages: %d → %d (-%d)\n  Tokens:   %s → %s (-%s)",
 		beforeMsgs, afterMsgs, beforeMsgs-afterMsgs,
@@ -1181,10 +1189,13 @@ func (a *App) builtinSearchText(query string) string {
 	if len(matches) == 0 {
 		return fmt.Sprintf("No matches for %q", query)
 	}
-	header := fmt.Sprintf("Found %d match(es) for %q:\n", len(matches), query)
-	if len(matches) > 20 {
-		matches = matches[len(matches)-20:]
-		header = fmt.Sprintf("Found %d match(es) for %q (showing last 20):\n", len(matches), query)
+	// Capture total BEFORE truncating so the header reports the real
+	// count instead of always saying '20 match(es)'.
+	total := len(matches)
+	header := fmt.Sprintf("Found %d match(es) for %q:\n", total, query)
+	if total > 20 {
+		matches = matches[total-20:]
+		header = fmt.Sprintf("Found %d match(es) for %q (showing last 20):\n", total, query)
 	}
 	return header + strings.Join(matches, "\n")
 }
@@ -1376,9 +1387,21 @@ func (a *App) builtinRollbackText(parts []string) string {
 }
 
 // builtinSendText handles /send <role> <message>.
+//
+// Honest about its limitation: external agents (claude/codex spawned
+// as subprocesses) have no inbound stdin protocol, so /send only adds
+// an operator note to the pane and explicitly says so. The previous
+// version returned "Annotated %s pane" which sounded like a successful
+// delivery — users typed messages, got "success", and assumed the
+// agent had received them.
 func (a *App) builtinSendText(parts []string) string {
 	if len(parts) < 3 {
-		return "Usage: /send <role> <message>\n  Sends a message to the named agent."
+		return "Usage: /send <role> <message>\n" +
+			"  Adds an operator note to the agent's pane.\n" +
+			"  NOTE: external agents (claude/codex) cannot receive\n" +
+			"  inbound text after spawn. The note is for human eyes\n" +
+			"  only. To actually deliver a new instruction, restart\n" +
+			"  the workspace with the new prompt."
 	}
 
 	role := parts[1]
@@ -1391,12 +1414,12 @@ func (a *App) builtinSendText(parts []string) string {
 	if !a.wsView.HasRole(role) {
 		return fmt.Sprintf("Unknown agent role %q. Check /agents for available roles.", role)
 	}
-	// External agents (claude/codex subprocess) don't expose an inbound
-	// message channel after spawn — there's no stdin protocol for
-	// arbitrary user input. /send currently annotates the pane so
-	// operators can leave a visible note for themselves; the agent
-	// itself does NOT receive the text. Tell the user that explicitly
-	// instead of pretending it landed in a mailbox.
 	a.wsView.AppendAgentOutput(role, fmt.Sprintf("[operator note] %s", message))
-	return fmt.Sprintf("Annotated %s pane (note: external agents have no inbound channel; restart the workspace with the new prompt to actually deliver it).", role)
+	return fmt.Sprintf(
+		"Operator note added to %s pane.\n"+
+			"  Note: this is a visible annotation only. External agents\n"+
+			"  have no inbound channel; restart the workspace with the\n"+
+			"  new instruction to actually deliver it.",
+		role,
+	)
 }
