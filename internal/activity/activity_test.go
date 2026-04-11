@@ -201,3 +201,49 @@ func TestActivityState_ConcurrentReadWrite(t *testing.T) {
 		t.Fatal("expected entry after writes, got nil")
 	}
 }
+
+// TestReadLastActivityEntry_LargeFile exercises the multi-chunk
+// backwards read path. The previous full-file scan was O(n) per poll;
+// the new tail-read uses 8KB chunks and walks backward. A test
+// fixture larger than 8KB ensures the chunk-stitching code is
+// exercised, not just the single-chunk fast path.
+func TestReadLastActivityEntry_LargeFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "big.jsonl")
+	f, err := os.Create(p)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	// Write enough entries to span at least three 8KB chunks.
+	for i := 0; i < 500; i++ {
+		e := Entry{
+			Timestamp: time.Now().Add(time.Duration(i) * time.Second),
+			State:     "active",
+			Source:    "agent_active",
+		}
+		data, _ := json.Marshal(e)
+		f.Write(data)
+		f.WriteString("\n")
+	}
+	// Final entry has a unique marker so we can prove tail-read
+	// returned the LAST line, not an arbitrary middle one.
+	final := Entry{
+		Timestamp: time.Now().Add(1000 * time.Second),
+		State:     "waiting_input",
+		Source:    "FINAL_MARKER",
+	}
+	data, _ := json.Marshal(final)
+	f.Write(data)
+	f.WriteString("\n")
+	f.Close()
+
+	got, err := ReadLastActivityEntry(p)
+	if err != nil {
+		t.Fatalf("ReadLastActivityEntry: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected entry, got nil")
+	}
+	if got.Source != "FINAL_MARKER" {
+		t.Errorf("source = %q, want FINAL_MARKER (tail-read returned wrong line)", got.Source)
+	}
+}
