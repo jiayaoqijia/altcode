@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 
 	"github.com/altcode-ai/altcode/internal/config"
@@ -74,13 +75,31 @@ func NewManager(ctx context.Context, servers map[string]config.MCPServerConfig) 
 }
 
 // RegisterAll discovers and registers tools from all connected servers.
+//
+// Iterates server names in sorted order so the registration sequence
+// is deterministic across runs. Without sorting, map iteration order
+// could change which server "wins" a name collision between restarts,
+// producing surprising tool routing differences for the same config.
 func (m *Manager) RegisterAll(ctx context.Context, registry *tool.Registry) {
-	for name, client := range m.stdioClients {
+	stdioNames := make([]string, 0, len(m.stdioClients))
+	for n := range m.stdioClients {
+		stdioNames = append(stdioNames, n)
+	}
+	sort.Strings(stdioNames)
+	for _, name := range stdioNames {
+		client := m.stdioClients[name]
 		if err := RegisterMCPTools(ctx, registry, client, name); err != nil {
 			m.Errors = append(m.Errors, fmt.Sprintf("mcp: tool discovery failed for %s: %v", name, err))
 		}
 	}
-	for name, client := range m.sseClients {
+
+	sseNames := make([]string, 0, len(m.sseClients))
+	for n := range m.sseClients {
+		sseNames = append(sseNames, n)
+	}
+	sort.Strings(sseNames)
+	for _, name := range sseNames {
+		client := m.sseClients[name]
 		if err := RegisterSSETools(ctx, registry, client, name); err != nil {
 			m.Errors = append(m.Errors, fmt.Sprintf("mcp: SSE tool discovery failed for %s: %v", name, err))
 		}

@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // callResult carries either a successful result or an RPC error.
@@ -50,11 +51,20 @@ type jsonRPCError struct {
 }
 
 // Connect spawns an MCP server process and establishes communication.
+// Performs the JSON-RPC initialize handshake and sends the
+// notifications/initialized message before returning, so callers can
+// immediately invoke tools/list. MCP servers that enforce the
+// initialization sequence (most modelcontextprotocol/server-* impls)
+// previously refused tools/list with -32002 "Server not initialized"
+// because we never spoke the handshake.
 func Connect(ctx context.Context, command string, args []string, env []string) (*Client, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
 	if len(env) > 0 {
 		cmd.Env = env
 	}
+	// Configure a process group so Close can SIGKILL the entire tree
+	// (servers that fork helpers leave them orphaned otherwise).
+	configureMCPProcessGroup(cmd)
 
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
@@ -84,7 +94,71 @@ func Connect(ctx context.Context, command string, args []string, env []string) (
 	}
 
 	go c.readLoop()
+
+	// Run the MCP initialize handshake. Bound by a short timeout so a
+	// hung server doesn't block startup forever.
+	initCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	if err := c.initialize(initCtx); err != nil {
+		_ = c.Close()
+		return nil, fmt.Errorf("mcp: initialize handshake: %w", err)
+	}
 	return c, nil
+}
+
+// initialize performs the MCP initialize/initialized handshake.
+// Many real MCP servers refuse tools/list and other requests until
+// the client has completed this sequence. Servers that don't
+// implement initialize at all (older / minimal / mock servers) get
+// a -32601 "method not found" — we treat that as a non-fatal signal
+// to skip the handshake and proceed to discovery.
+func (c *Client) initialize(ctx context.Context) error {
+	params := map[string]any{
+		"protocolVersion": "2024-11-05",
+		"capabilities":    map[string]any{},
+		"clientInfo": map[string]any{
+			"name":    "altcode",
+			"version": "0.1",
+		},
+	}
+	if _, err := c.Call(ctx, "initialize", params); err != nil {
+		// Server doesn't implement initialize — skip the notification
+		// and let downstream calls proceed. Real spec-compliant servers
+		// always accept initialize.
+		if isMethodNotFound(err) {
+			return nil
+		}
+		return err
+	}
+	// notifications/initialized is a notification, not a request — no
+	// id, no expected response. Send it as a raw line through stdin.
+	notif := []byte(`{"jsonrpc":"2.0","method":"notifications/initialized"}` + "\n")
+	c.stdinMu.Lock()
+	_, err := c.stdin.Write(notif)
+	c.stdinMu.Unlock()
+	if err != nil {
+		return fmt.Errorf("send initialized notification: %w", err)
+	}
+	return nil
+}
+
+// isMethodNotFound reports whether err carries a JSON-RPC -32601 code.
+func isMethodNotFound(err error) bool {
+	if err == nil {
+		return false
+	}
+	return contains(err.Error(), "rpc error -32601") ||
+		contains(err.Error(), "method not found") ||
+		contains(err.Error(), "unknown method")
+}
+
+func contains(s, sub string) bool {
+	for i := 0; i+len(sub) <= len(s); i++ {
+		if s[i:i+len(sub)] == sub {
+			return true
+		}
+	}
+	return false
 }
 
 func (c *Client) readLoop() {
@@ -173,8 +247,26 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	}
 }
 
-// Close terminates the MCP server process.
+// Close terminates the MCP server process. Closes stdin first to give
+// the server a chance to shut down cleanly, then waits with a timeout
+// before SIGKILLing the process group. Without the timeout + kill,
+// servers that ignore EOF would hang Close forever.
 func (c *Client) Close() error {
-	c.stdin.Close()
-	return c.cmd.Wait()
+	if c.stdin != nil {
+		c.stdin.Close()
+	}
+	if c.cmd == nil || c.cmd.Process == nil {
+		return nil
+	}
+	done := make(chan error, 1)
+	go func() { done <- c.cmd.Wait() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(5 * time.Second):
+		// Server didn't exit cleanly — kill the whole group.
+		_ = killMCPProcessGroup(c.cmd)
+		<-done
+		return fmt.Errorf("mcp: server did not exit cleanly, killed")
+	}
 }

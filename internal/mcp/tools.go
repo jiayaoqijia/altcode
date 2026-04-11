@@ -65,6 +65,10 @@ type mcpTool struct {
 }
 
 // RegisterMCPTools discovers tools from a client and registers them.
+// Skips registration if the tool name is already taken (e.g. another
+// MCP server already claimed it, or the same server returned the
+// duplicate). Without this check, the second registration silently
+// overwrote the first and the routing was non-deterministic.
 func RegisterMCPTools(ctx context.Context, registry *tool.Registry, client *Client, serverName string) error {
 	tools, err := client.DiscoverTools(ctx)
 	if err != nil {
@@ -75,6 +79,9 @@ func RegisterMCPTools(ctx context.Context, registry *tool.Registry, client *Clie
 			info:   t,
 			client: client,
 			prefix: "mcp__" + serverName + "__",
+		}
+		if _, exists := registry.Get(mt.Name()); exists {
+			continue
 		}
 		registry.Register(mt)
 	}
@@ -91,6 +98,7 @@ func (t *mcpTool) PermissionPattern(_ json.RawMessage) string {
 }
 
 // RegisterSSETools discovers tools from an SSE client and registers them.
+// Skips registration on name collision (see RegisterMCPTools).
 func RegisterSSETools(ctx context.Context, registry *tool.Registry, client *SSEClient, serverName string) error {
 	tools, err := client.DiscoverTools(ctx)
 	if err != nil {
@@ -101,6 +109,9 @@ func RegisterSSETools(ctx context.Context, registry *tool.Registry, client *SSEC
 			info:   ti,
 			client: client,
 			prefix: "mcp__" + serverName + "__",
+		}
+		if _, exists := registry.Get(st.Name()); exists {
+			continue
 		}
 		registry.Register(st)
 	}

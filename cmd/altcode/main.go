@@ -279,9 +279,11 @@ func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
 
 	// Only start MCP servers if prompt likely needs them.
 	// MCP startup adds 1-5s of blocking latency per server.
+	// Use the signal-cancellable ctx so SIGTERM tears down servers
+	// instead of leaking them with context.Background().
 	var mcpCleanup func()
 	if needsMCP(prompt) {
-		mcpCleanup = connectMCP(params.Config, eng)
+		mcpCleanup = connectMCPWithCtx(ctx, params.Config, eng)
 	}
 	if mcpCleanup != nil {
 		defer mcpCleanup()
@@ -352,14 +354,12 @@ func connectMCPWithCtx(ctx context.Context, cfg *config.Config, eng *engine.Engi
 	return mgr.Close
 }
 
+// connectMCP is kept as a thin shim for any remaining call sites that
+// have no signal context to thread. Prefer connectMCPWithCtx — the
+// background-context version cannot tear down MCP subprocesses on
+// Ctrl+C / SIGTERM and leaks them past altcode shutdown.
 func connectMCP(cfg *config.Config, eng *engine.Engine) func() {
-	if len(cfg.MCP) == 0 {
-		return func() {}
-	}
-	ctx := context.Background()
-	mgr := mcp.NewManager(ctx, cfg.MCP)
-	mgr.RegisterAll(ctx, eng.Registry())
-	return mgr.Close
+	return connectMCPWithCtx(context.Background(), cfg, eng)
 }
 
 func discoverAgents() []*agent.Agent {
