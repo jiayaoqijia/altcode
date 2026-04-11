@@ -80,6 +80,10 @@ type cliFlags struct {
 	printSkills    bool // --print-skills: discovered skills
 	printMCP       bool // --print-mcp: configured MCP servers
 	doctor         bool // --doctor: health check
+
+	// Phase 8: budgets
+	maxTurns int     // --max-turns (>0) agent loop cap
+	maxCost  float64 // --max-cost (>0) post-turn USD cap
 }
 
 func main() {
@@ -166,6 +170,14 @@ func main() {
 		"Deny a tool [name] or [name:pattern] for this session (repeatable)")
 	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
 		"Alias for --permission-mode plan (read-only, no writes)")
+
+	// --- Phase 8: budgets ---
+	root.Flags().IntVar(&flags.maxTurns, "max-turns", 0,
+		"Hard cap on agent loop iterations (default 50). "+
+			"Emits budget_exceeded event when reached.")
+	root.Flags().Float64Var(&flags.maxCost, "max-cost", 0,
+		"Post-turn USD budget cap. Engine stops between turns when "+
+			"accumulated cost exceeds this limit. 0 = unlimited.")
 
 	// --- Phase 10: inspection (print-and-exit) ---
 	root.Flags().BoolVar(&flags.printConfig, "print-config", false,
@@ -553,9 +565,18 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			PromptFile:     flags.promptFile,
 			System:         flags.system,
 			SystemFile:     flags.systemFile,
+			MaxTurns:       flags.maxTurns,
+			MaxCost:        flags.maxCost,
 		}
 		if err := ep.Validate(); err != nil {
 			return err
+		}
+		// Phase 8: thread --max-turns and --max-cost onto EngineParams
+		// BEFORE PrepareInputs / runExec. CostBudget is constructed
+		// here so subagents inherit it via spawn.go.
+		ep.EngineParams.MaxTurns = flags.maxTurns
+		if flags.maxCost > 0 {
+			ep.EngineParams.CostBudget = engine.NewCostBudget(flags.maxCost)
 		}
 		// Phase 5: read --prompt-file / --file / --system / --image
 		// before the engine is built. PrepareInputs mutates ep.Prompt,

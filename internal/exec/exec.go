@@ -111,6 +111,19 @@ type Params struct {
 	// diverge if users ask for it.
 	DryRun bool
 
+	// --- Phase 8: budgets ---
+	// MaxTurns overrides the engine's default agent-loop iteration
+	// cap (maxIterations = 50). 0 = use default. Wired to
+	// EngineParams.MaxTurns in main.go's runExec.
+	MaxTurns int
+
+	// MaxCost is a post-turn USD budget. When the accumulated
+	// session cost exceeds this value, the engine emits
+	// BudgetExceeded and returns before the next provider call.
+	// 0 = unlimited. Propagated to subagents via
+	// engine.CostBudget.
+	MaxCost float64
+
 	// --- Phase 5: input flags ---
 	// Images is a list of filesystem paths (or "-" for stdin) to
 	// attach as image content blocks on the first user message.
@@ -202,6 +215,15 @@ func (p *Params) Validate() error {
 		return NewUsageError(
 			"--permission-mode bypass cannot be combined with --deny-tool " +
 				"(bypass allows everything)")
+	}
+	// Phase 8: budget value checks. 0 means "use engine default"
+	// so only reject strictly-negative values. Codex Phase 8
+	// review caught the docstring mismatch.
+	if p.MaxTurns < 0 {
+		return NewUsageError("--max-turns must be >= 0 (got %d; 0 = engine default)", p.MaxTurns)
+	}
+	if p.MaxCost < 0 {
+		return NewUsageError("--max-cost must be >= 0 (got %.4f; 0 = unlimited)", p.MaxCost)
 	}
 	// --allow-tool / --deny-tool format check: each entry must be
 	// "name" or "name:pattern". Empty name is an error.
@@ -1040,6 +1062,16 @@ func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 					"%saltcode: permission request for %s auto-denied "+
 						"(Phase 3 will add --permission-prompt-tool)%s\n",
 					dim, ev.Permission.ToolName, reset)
+			}
+		case event.BudgetExceeded:
+			// Phase 8: print the budget-exceeded reason to stderr so
+			// headless users can tell "ran out of turns" or "hit the
+			// cost cap" apart from a normal completion. The engine
+			// sends BudgetExceeded synchronously before Done via its
+			// top-level defer, so ordering is preserved; drain exits
+			// when it receives Done and the channel closes.
+			if ev.Info != "" && !p.Quiet {
+				fmt.Fprintf(os.Stderr, "%saltcode: %s%s\n", dim, ev.Info, reset)
 			}
 		case event.ErrorEvent:
 			lastErr = ev.Error

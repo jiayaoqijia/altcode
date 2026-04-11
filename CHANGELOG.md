@@ -12,6 +12,31 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 8: budgets)
+
+- `--max-turns <n>` overrides the default agent-loop iteration cap
+  (was hardcoded `maxIterations = 50`). When the cap is reached the
+  engine emits a new `event.BudgetExceeded` with a human-readable
+  reason ("max-turns 10 reached without completion").
+- `--max-cost <usd>` enforces a post-turn USD budget. After each
+  turn the engine feeds the tracker's latest `TurnCost.CostUSD`
+  into a new `engine.CostBudget`; if the accumulated total
+  exceeds the limit, the engine emits `BudgetExceeded` ("cost
+  budget $X.XXXX exceeded ($Y.YYYY used)") and stops before
+  the next provider call. Mid-turn abort is not supported yet
+  — it needs provider-side usage checkpoints.
+- `engine.CostBudget` is a sibling of `TokenBudget`: atomic
+  int64 storage in 1/100000 USD units (no float drift), nil-safe
+  methods, and race-safe `Consume`/`Exceeded` under contention.
+- `agent/spawn.go` now propagates `CostBudget` from parent to
+  child engines so subagent turns count toward the same budget.
+  Each engine reads its OWN `cost.Tracker.Turns()[last].CostUSD`
+  and pushes its own delta into the shared budget, so there's
+  no double-count between parent and child.
+- Drain wrappers (`drainText` + Phase 1's other drains) print
+  the `BudgetExceeded` reason to stderr so scripts can
+  distinguish "ran out of turns/cost" from normal completion.
+
 ### Added (Phase 10: inspection flags)
 
 - `--print-config` dumps the cascaded config as JSON with **all

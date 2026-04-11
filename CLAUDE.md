@@ -93,6 +93,13 @@ was reviewed across 7 rounds between CC and Codex before starting.
   MCPServerConfig.Env, TeamModel.APIKey, and Provider/TeamModel BaseURLs
   that embed `user:pass@host` (both CC + Codex caught secret-leak
   BLOCKERs here).
+- **Phase 8**: `--max-turns`, `--max-cost`. New `engine.CostBudget`
+  (atomic int64 micro-cents, nil-safe, race-safe under parallel
+  subagents). New `event.BudgetExceeded` type. Propagated through
+  `agent/spawn.go` so subagent cost counts toward the parent
+  budget. Each engine pushes its own per-turn USD delta so
+  parent+child don't double-count. Mid-turn cost abort deferred
+  (needs provider-side usage checkpoints).
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

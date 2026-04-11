@@ -51,6 +51,12 @@ type EngineParams struct {
 	TaskQueue    *task.Queue           // nil = auto-created
 	Skills       []Skill               // discovered slash commands/skills
 	TokenBudget  *TokenBudget          // nil = unlimited (session-wide cap)
+	CostBudget   *CostBudget           // nil = unlimited USD cap
+
+	// MaxTurns overrides the default per-run agent-loop cap
+	// (internal `maxIterations = 50`). 0 means "use default".
+	// Phase 8 wires --max-turns through here.
+	MaxTurns int
 
 	// PendingInputParts are content blocks to prepend to the user
 	// message on the FIRST Run() call (and only the first). Used by
@@ -70,6 +76,67 @@ type TokenBudget struct {
 // NewTokenBudget returns a budget with the given limit. limit <= 0 means unlimited.
 func NewTokenBudget(limit int) *TokenBudget {
 	return &TokenBudget{limit: int64(limit)}
+}
+
+// CostBudget is a session-wide USD cap shared across parent engine +
+// subagents. Sibling of TokenBudget. Phase 8 post-turn enforcement
+// only — mid-turn abort needs provider-side usage checkpoints which
+// aren't yet wired.
+//
+// Storage is in 1/100000th-of-a-dollar units (micro-cents) to avoid
+// floating-point drift when many small turns add up. Tracked as
+// int64 atomics for lock-free parallel consumption from subagents.
+type CostBudget struct {
+	usedMicro  int64 // atomic — accumulated cost in 100000ths of a dollar
+	limitMicro int64 // 0 = unlimited
+}
+
+// NewCostBudget returns a budget with the given limit in USD.
+// A limit <= 0 means unlimited.
+func NewCostBudget(limitUSD float64) *CostBudget {
+	if limitUSD <= 0 {
+		return &CostBudget{}
+	}
+	return &CostBudget{limitMicro: int64(limitUSD * 100000)}
+}
+
+// Consume adds costUSD to the budget. Returns true if still within
+// limit. A negative or zero costUSD is a no-op.
+func (b *CostBudget) Consume(costUSD float64) bool {
+	if b == nil || b.limitMicro <= 0 {
+		return true
+	}
+	if costUSD <= 0 {
+		return b.Used() < b.Limit()
+	}
+	delta := int64(costUSD * 100000)
+	newUsed := atomic.AddInt64(&b.usedMicro, delta)
+	return newUsed < b.limitMicro
+}
+
+// Used returns accumulated cost in USD.
+func (b *CostBudget) Used() float64 {
+	if b == nil {
+		return 0
+	}
+	return float64(atomic.LoadInt64(&b.usedMicro)) / 100000
+}
+
+// Limit returns the cap in USD. 0 = unlimited.
+func (b *CostBudget) Limit() float64 {
+	if b == nil {
+		return 0
+	}
+	return float64(b.limitMicro) / 100000
+}
+
+// Exceeded reports whether the current used cost meets or exceeds
+// the limit. Always false for an unlimited budget.
+func (b *CostBudget) Exceeded() bool {
+	if b == nil || b.limitMicro <= 0 {
+		return false
+	}
+	return atomic.LoadInt64(&b.usedMicro) >= b.limitMicro
 }
 
 // Consume adds n tokens. Returns true if the budget is still within limit.
@@ -128,6 +195,12 @@ type Engine struct {
 	// the first user message. Populated by EngineParams.PendingInputParts
 	// for Phase 5 --image / --file / etc. CLI flags.
 	pendingInputParts []provider.ContentPart
+	// costBudget is a session-wide USD cap. Sibling of tokenBudget
+	// for Phase 8. Nil = unlimited.
+	costBudget *CostBudget
+	// maxTurns overrides the default agent-loop iteration cap.
+	// 0 = use the package-level maxIterations constant.
+	maxTurns          int
 	totalTokens       int // running token count
 	cost               *cost.Tracker
 	journal            *history.Journal
@@ -207,6 +280,8 @@ func New(params EngineParams) (*Engine, error) {
 		cost:              cost.NewTracker(),
 		journal:           history.NewJournal(),
 		tokenBudget:       params.TokenBudget,
+		costBudget:        params.CostBudget,
+		maxTurns:          params.MaxTurns,
 	}, nil
 }
 
@@ -498,8 +573,13 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		cost:              cost.NewTracker(),
 		journal:           history.NewJournal(),
 		tokenBudget:       params.TokenBudget,
+		costBudget:        params.CostBudget,
+		maxTurns:          params.MaxTurns,
 	}, nil
 }
+
+// CostBudget returns the engine's shared USD budget (may be nil).
+func (e *Engine) CostBudget() *CostBudget { return e.costBudget }
 
 func parseModelProvider(model string) string {
 	name, _ := parseModel(model)
@@ -602,7 +682,15 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		sendEvent(ctx, out, event.Event{Type: event.Done})
 	}()
 
-	for i := 0; i < maxIterations; i++ {
+	// Resolve the per-run iteration cap. EngineParams.MaxTurns (set
+	// by exec.Params.MaxTurns via --max-turns) overrides the
+	// package-level default so scripts can tighten or loosen the
+	// agent loop without recompiling.
+	turnCap := maxIterations
+	if e.maxTurns > 0 {
+		turnCap = e.maxTurns
+	}
+	for i := 0; i < turnCap; i++ {
 		if ctx.Err() != nil {
 			// User cancels (Ctrl+C / Esc) surface as context.Canceled.
 			// The TUI already prints '[cancelled]' when it cancels, so
@@ -635,6 +723,23 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		turn := collectTurn(ctx, stream, out)
 		e.recordTurnCost(turn)
 
+		// Phase 8: after recording the turn cost, check whether
+		// the USD budget is exhausted. Post-turn enforcement
+		// only — mid-turn abort needs provider-side usage
+		// checkpoints which aren't wired yet. Emit a
+		// BudgetExceeded event with a human-readable Info
+		// message and return early. The deferred Done event
+		// still fires via the top-of-loop defer.
+		if e.costBudget != nil && e.costBudget.Exceeded() {
+			sendEvent(ctx, out, event.Event{
+				Type: event.BudgetExceeded,
+				Info: fmt.Sprintf(
+					"cost budget $%.4f exceeded ($%.4f used)",
+					e.costBudget.Limit(), e.costBudget.Used()),
+			})
+			return
+		}
+
 		// Auto-continue truncated text responses
 		if turn.Truncated && len(turn.ToolCalls) == 0 {
 			e.appendTruncatedAndContinue(turn)
@@ -659,6 +764,15 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		e.appendToolResults(turn.ToolCalls, results)
 		e.maybeCompact(ctx)
 	}
+
+	// Phase 8: falling out of the loop means we hit the iteration
+	// cap without the model producing a tool-free final turn.
+	// Emit a BudgetExceeded event so headless users can tell a
+	// "ran out of turns" stop apart from a normal completion.
+	sendEvent(ctx, out, event.Event{
+		Type: event.BudgetExceeded,
+		Info: fmt.Sprintf("max-turns %d reached without completion", turnCap),
+	})
 }
 
 // appendTruncatedAndContinue saves the partial assistant text and appends
@@ -1247,6 +1361,21 @@ func (e *Engine) recordTurnCost(turn *turnResult) {
 			turn.InputTokens + turn.OutputTokens +
 				turn.CacheCreationTokens + turn.CacheReadTokens,
 		)
+	}
+	// Phase 8: consume the turn cost into the session-wide USD
+	// budget. Reads the just-appended TurnCost from the tracker
+	// so each Engine (parent + subagents) reports only its own
+	// delta to the shared budget — avoids the race where the
+	// "session total minus budget used" diff would compute
+	// wrong cross-engine totals under parallel turns.
+	if e.costBudget != nil {
+		turns := e.cost.Turns()
+		if len(turns) > 0 {
+			last := turns[len(turns)-1]
+			if last.CostUSD > 0 {
+				e.costBudget.Consume(last.CostUSD)
+			}
+		}
 	}
 }
 

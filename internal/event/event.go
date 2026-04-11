@@ -18,8 +18,16 @@ const (
 	PermissionRequest  EventType = "permission_request"
 	PermissionResponse EventType = "permission_response"
 	InfoEvent          EventType = "info"
-	ErrorEvent         EventType = "error"
-	Done               EventType = "done"
+	// BudgetExceeded fires when the engine stops mid-session because
+	// a cost/turn/token budget was hit. Event.Info carries a
+	// human-readable explanation (e.g. "max-turns 10 reached" or
+	// "cost budget $0.50 exceeded ($0.52 used)"). Carriers:
+	//   - exec.Params.MaxTurns (Phase 8)
+	//   - exec.Params.MaxCost  (Phase 8)
+	// Subsequent to this event the engine emits Done and returns.
+	BudgetExceeded EventType = "budget_exceeded"
+	ErrorEvent     EventType = "error"
+	Done           EventType = "done"
 )
 
 // Action represents a permission decision.

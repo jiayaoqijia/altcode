@@ -11,7 +11,7 @@
 | 5 — input flags | **shipped** | 9c67890 | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
 | 6 — hooks + ALTCODE_HOOK_DEPTH | pending | | |
 | 7 — save-* artifacts + --commit | pending | | |
-| 8 — MaxTurns + CostBudget | pending | | |
+| 8 — MaxTurns + CostBudget | **shipped** | (this commit) | `engine.CostBudget` atomic int64 micro-cents; subagent propagation; `BudgetExceeded` event |
 | 9 — batch runner | pending | | |
 | 10 — inspection flags | **shipped** | (this commit) | `--print-config` deep-redacts Provider/MCP/Team secrets; both reviewers caught leaks in round 1 |
 | **11 — SIGTERM** | **shipped** | 4fcc3d1 | Folded into Phase 1 |

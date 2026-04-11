@@ -96,6 +96,12 @@ func SpawnWithOptions(
 		Instructions: instructions,
 		Messages:     messages,
 		TokenBudget:  parent.TokenBudget(),
+		// Phase 8: share the parent's USD budget with the child
+		// engine so subagent turns count toward --max-cost. Without
+		// this, a subagent could blow through the cap in isolation
+		// while the parent's post-turn check still reports the
+		// parent-only cost.
+		CostBudget: parent.CostBudget(),
 	}
 
 	child, err := engine.NewWithRegistry(params, tools)

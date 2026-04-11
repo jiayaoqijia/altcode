@@ -273,6 +273,28 @@ func TestValidate_MalformedDenyTool(t *testing.T) {
 	}
 }
 
+func TestValidate_MaxTurnsNegative(t *testing.T) {
+	p := exec.Params{MaxTurns: -1}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected error on negative --max-turns")
+	}
+}
+
+func TestValidate_MaxCostNegative(t *testing.T) {
+	p := exec.Params{MaxCost: -0.50}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected error on negative --max-cost")
+	}
+}
+
+func TestValidate_MaxTurnsZeroOK(t *testing.T) {
+	// 0 means "use engine default" — must not error.
+	p := exec.Params{MaxTurns: 0, MaxCost: 0}
+	if err := p.Validate(); err != nil {
+		t.Errorf("zero budgets should be ok, got %v", err)
+	}
+}
+
 func TestValidate_JSONAndOutputFormatConflict(t *testing.T) {
 	// --json + --output-format json (mismatch) → error
 	p := exec.Params{JSON: true, OutputFormat: "json"}
