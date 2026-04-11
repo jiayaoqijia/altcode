@@ -95,9 +95,13 @@ func trySystemPatch(ctx context.Context, patch string) *Result {
 func applyPatchManual(patch string) (*Result, error) {
 	files, err := parsePatch(patch)
 	if err != nil {
+		// Result.Error must be set so the agent loop sees this as a
+		// failed tool call. Without it, the model thinks the patch
+		// was applied and continues to the next step.
 		return &Result{
 			Output: fmt.Sprintf("Error parsing patch: %v", err),
 			Title:  "apply_patch",
+			Error:  fmt.Errorf("parse patch: %w", err),
 		}, nil
 	}
 
@@ -107,6 +111,7 @@ func applyPatchManual(patch string) (*Result, error) {
 			return &Result{
 				Output: fmt.Sprintf("Error applying patch to %s: %v", pf.Path, err),
 				Title:  "apply_patch",
+				Error:  fmt.Errorf("apply %s: %w", pf.Path, err),
 			}, nil
 		}
 		applied = append(applied, pf.Path)

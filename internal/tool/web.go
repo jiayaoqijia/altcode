@@ -229,6 +229,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 		return &Result{
 			Output: "Error: query is required",
 			Title:  "web_search",
+			Error:  fmt.Errorf("missing query"),
 		}, nil
 	}
 
@@ -240,6 +241,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  "web_search",
+			Error:  fmt.Errorf("build request: %w", err),
 		}, nil
 	}
 	req.Header.Set("User-Agent", "altcode/1.0")
@@ -249,6 +251,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
 			Title:  "web_search",
+			Error:  fmt.Errorf("http request: %w", err),
 		}, nil
 	}
 	defer resp.Body.Close()
@@ -258,6 +261,7 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 		return &Result{
 			Output: fmt.Sprintf("Error reading response: %v", err),
 			Title:  "web_search",
+			Error:  fmt.Errorf("read body: %w", err),
 		}, nil
 	}
 

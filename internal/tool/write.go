@@ -47,9 +47,13 @@ func (t *writeTool) Execute(_ context.Context, input json.RawMessage) (*Result, 
 
 	dir := filepath.Dir(params.FilePath)
 	if err := os.MkdirAll(dir, 0o755); err != nil {
+		// Result.Error must be set so the dispatcher renders this as a
+		// failed tool call. Without it, the agent loop sees a "success"
+		// result with apologetic prose and assumes the file was written.
 		return &Result{
 			Output: fmt.Sprintf("Error creating directory: %v", err),
 			Title:  "write",
+			Error:  fmt.Errorf("mkdir %s: %w", dir, err),
 		}, nil
 	}
 
@@ -57,6 +61,7 @@ func (t *writeTool) Execute(_ context.Context, input json.RawMessage) (*Result, 
 		return &Result{
 			Output: fmt.Sprintf("Error writing file: %v", err),
 			Title:  "write",
+			Error:  fmt.Errorf("write %s: %w", params.FilePath, err),
 		}, nil
 	}
 
