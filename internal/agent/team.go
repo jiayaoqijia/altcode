@@ -20,10 +20,23 @@ type Team struct {
 	mailbox  *Mailbox // shared mailbox for all team agents
 	mu       sync.Mutex
 	nextID   int
+	depth    int // depth of this team in the agent hierarchy (root = 1)
 }
 
-// NewTeam creates a team with the given name.
+// NewTeam creates a top-level team. Equivalent to NewSubTeam(name, 1).
 func NewTeam(name string) *Team {
+	return NewSubTeam(name, 1)
+}
+
+// NewSubTeam creates a team that knows its position in the agent
+// hierarchy. The depth is propagated to the registry's depth check
+// so a child team spawned at depth N can't recursively spawn beyond
+// the registry's maxDepth — the previous code hardcoded depth=1
+// at every Register call, so the depth check was effectively dead.
+func NewSubTeam(name string, depth int) *Team {
+	if depth < 1 {
+		depth = 1
+	}
 	return &Team{
 		name:     name,
 		agents:   make(map[string]*RunningAgent),
@@ -31,6 +44,7 @@ func NewTeam(name string) *Team {
 		results:  make(map[string]string),
 		registry: NewRegistry(5),
 		mailbox:  NewMailbox(),
+		depth:    depth,
 	}
 }
 
@@ -53,8 +67,11 @@ func (t *Team) SpawnAgent(
 	id := fmt.Sprintf("%s-%d", ag.Name, t.nextID)
 	t.nextID++
 
-	// Register with the team's registry for lifecycle tracking
-	ra, ok := t.registry.Register(id, ag, 1, "/"+t.name)
+	// Register with the team's registry for lifecycle tracking. Use
+	// the team's own depth so the maxDepth check actually fires for
+	// nested teams — the previous hardcoded `1` made the registry's
+	// depth enforcement dead code.
+	ra, ok := t.registry.Register(id, ag, t.depth, "/"+t.name)
 	if !ok {
 		t.mu.Unlock()
 		return ""
