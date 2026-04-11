@@ -48,6 +48,12 @@ func ReadLastActivityEntry(path string) (*Entry, error) {
 
 	var lastLine string
 	scanner := bufio.NewScanner(f)
+	// Default buffer is 64 KB which silently truncates a single big
+	// JSONL line (long stack trace, error dump). scanner.Scan then
+	// returns false with bufio.ErrTooLong, the lifecycle skips
+	// activity detection, and the session never transitions from
+	// active→ready. 4 MB lets realistic payloads through.
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if line != "" {

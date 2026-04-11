@@ -163,18 +163,24 @@ func drainJSON(ch <-chan event.Event, w io.Writer) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	var lastErr string
+	var encodeErr error
 	for ev := range ch {
-		if err := enc.Encode(ev); err != nil {
-			// Encode failures on broken pipe / disk full used to be
-			// silently dropped, so a shell command like
-			// 'altcode --json ... | head' would terminate the pipe
-			// and leave the engine writing into the void with
-			// 'drainJSON returned nil'. Surface the error.
-			return fmt.Errorf("drain json encode: %w", err)
+		// On encode error (broken pipe, disk full, etc.) stop writing
+		// but KEEP DRAINING the channel. The engine goroutine is still
+		// sending events; if we return early, its next send blocks
+		// forever and leaks the engine + provider HTTP conn + tool
+		// subprocesses. Caller's ctx cancel can't unblock a stuck send.
+		if encodeErr == nil {
+			if err := enc.Encode(ev); err != nil {
+				encodeErr = err
+			}
 		}
 		if ev.Type == event.ErrorEvent {
 			lastErr = ev.Error
 		}
+	}
+	if encodeErr != nil {
+		return fmt.Errorf("drain json encode: %w", encodeErr)
 	}
 	if lastErr != "" {
 		return fmt.Errorf("%s", lastErr)

@@ -48,6 +48,12 @@ func (m *Manager) SetInterval(d time.Duration) {
 
 // Run polls a single session until it reaches a terminal state or
 // the context is cancelled. Blocks the caller.
+//
+// On ctx.Done() we run a best-effort cleanup with a fresh short-lived
+// context so worktrees, runtime handles, and agent subprocesses get
+// torn down on SIGINT/SIGTERM. Without this, signal cancellation left
+// the session in whatever non-terminal state it was in and accumulated
+// orphaned worktrees on disk.
 func (m *Manager) Run(
 	ctx context.Context,
 	sess *workspace.WorkspaceSession,
@@ -57,6 +63,14 @@ func (m *Manager) Run(
 	for {
 		select {
 		case <-ctx.Done():
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			if err := advanceCleanup(cleanupCtx, sess, m.plugins); err != nil {
+				m.log.Error("cleanup on cancel", "err", err, "id", sess.ID)
+			}
+			if err := m.store.SaveSession(sess); err != nil {
+				m.log.Error("save on cancel", "err", err, "id", sess.ID)
+			}
+			cancel()
 			return ctx.Err()
 		case <-ticker.C:
 			if err := m.Advance(ctx, sess); err != nil {

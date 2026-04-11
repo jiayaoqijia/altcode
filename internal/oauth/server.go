@@ -40,6 +40,17 @@ func RunCallbackServer(ctx context.Context, expectedState string, timeout time.D
 func WaitForCallback(ctx context.Context, lis net.Listener, expectedState string, timeout time.Duration) (*CallbackResult, error) {
 
 	resultCh := make(chan *CallbackResult, 1)
+	// trySend forwards a callback result without blocking on a full
+	// channel. Browsers retry, prefetch, and bots can probe the
+	// callback URL multiple times — without the non-blocking send,
+	// the second handler call would deadlock the goroutine forever
+	// and Shutdown couldn't terminate it cleanly.
+	trySend := func(r *CallbackResult) {
+		select {
+		case resultCh <- r:
+		default:
+		}
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("/auth/callback", func(w http.ResponseWriter, r *http.Request) {
 		// Restrict to GET — OAuth callbacks are always GET, and
@@ -59,26 +70,26 @@ func WaitForCallback(ctx context.Context, lis net.Listener, expectedState string
 			// browser tab with a crafted query string.
 			fmt.Fprintf(w, "<html><body><h1>Login failed</h1><p>%s: %s</p></body></html>",
 				html.EscapeString(errParam), html.EscapeString(desc))
-			resultCh <- &CallbackResult{Err: fmt.Errorf("%s: %s", errParam, desc)}
+			trySend(&CallbackResult{Err: fmt.Errorf("%s: %s", errParam, desc)})
 			return
 		}
 		code := q.Get("code")
 		state := q.Get("state")
 		if code == "" {
 			http.Error(w, "missing code", http.StatusBadRequest)
-			resultCh <- &CallbackResult{Err: fmt.Errorf("missing code in callback")}
+			trySend(&CallbackResult{Err: fmt.Errorf("missing code in callback")})
 			return
 		}
 		if state != expectedState {
 			http.Error(w, "state mismatch", http.StatusBadRequest)
-			resultCh <- &CallbackResult{Err: fmt.Errorf("state mismatch")}
+			trySend(&CallbackResult{Err: fmt.Errorf("state mismatch")})
 			return
 		}
 		fmt.Fprint(w, `<html><body style="font-family:sans-serif;text-align:center;padding:40px">
 <h1>altcode login successful</h1>
 <p>You can close this tab and return to the terminal.</p>
 </body></html>`)
-		resultCh <- &CallbackResult{Code: code, State: state}
+		trySend(&CallbackResult{Code: code, State: state})
 	})
 
 	server := &http.Server{Handler: mux}
