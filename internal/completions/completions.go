@@ -44,14 +44,27 @@ func Complete(root, query string, maxResults int) []Match {
 
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
-			return nil // skip unreadable entries
+			// Permission errors / broken mounts: skip the entry
+			// instead of failing the whole walk. We don't want one
+			// unreadable submodule to kill file completion globally.
+			if d != nil && d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		name := d.Name()
 
-		// Skip hidden dirs and known noisy dirs at entry.
-		if d.IsDir() && (skipDirs[name] || isHidden(name)) {
-			return filepath.SkipDir
+		// Skip hidden dirs and known noisy dirs at entry. Match by
+		// basename here AND also handle symlinked-to-directory
+		// entries that WalkDir reports with IsDir()==false because
+		// they're symlinks. Without this, a symlinked .git or
+		// node_modules dir would still be walked into.
+		if (d.IsDir() || d.Type()&os.ModeSymlink != 0) && (skipDirs[name] || isHidden(name)) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
 		}
 
 		// Skip the root itself.
