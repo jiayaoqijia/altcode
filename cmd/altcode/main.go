@@ -22,6 +22,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/mcp"
 	"github.com/altcode-ai/altcode/internal/memory"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/plugin"
 	"github.com/altcode-ai/altcode/internal/store"
 	"github.com/altcode-ai/altcode/internal/tui"
@@ -251,12 +252,22 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 		})
 	}
 
+	// Convert config permission rules into the engine's Rule format
+	// and build an Evaluator. Without this, params.Perm was never set
+	// and the engine fell back to ModeBypass — silently dropping
+	// every allow/deny rule the user had configured in settings.json.
+	// This was a security regression: a user thinking they had
+	// "deny bash:rm -rf *" enforced was actually running with no
+	// rules at all.
+	permEval := buildPermissionEvaluator(cfg, projectRoot)
+
 	params := engine.EngineParams{
 		Config:       cfg,
 		Instructions: instructions,
 		Memory:       memStore,
 		Hooks:        hooksRunner,
 		Skills:       skills,
+		Perm:         permEval,
 	}
 	if err := loadSession(db, &params, last, sessionID); err != nil {
 		return err
@@ -266,6 +277,40 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 		return runExec(params, prompt, jsonMode)
 	}
 	return runTUI(params)
+}
+
+// buildPermissionEvaluator translates the JSON config rules into the
+// engine's permission.Rule format and returns a configured Evaluator.
+// Returns nil only when there's nothing to configure — the engine
+// then falls back to its own ModeBypass default.
+func buildPermissionEvaluator(cfg *config.Config, projectRoot string) *permission.Evaluator {
+	if cfg == nil {
+		return nil
+	}
+	rules := make([]permission.Rule, 0, len(cfg.Permission))
+	for _, pr := range cfg.Permission {
+		var action permission.ActionType
+		switch strings.ToLower(pr.Action) {
+		case "allow":
+			action = permission.ActionAllow
+		case "deny":
+			action = permission.ActionDeny
+		case "ask":
+			action = permission.ActionAsk
+		default:
+			// Unknown action — skip silently rather than crash on
+			// startup. Users get the default eval semantics for the
+			// rule's tool/pattern.
+			continue
+		}
+		rules = append(rules, permission.Rule{
+			Tool:    pr.Tool,
+			Pattern: pr.Pattern,
+			Action:  action,
+			Source:  "config",
+		})
+	}
+	return permission.NewEvaluator(permission.ModeDefault, projectRoot, rules)
 }
 
 func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
