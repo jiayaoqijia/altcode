@@ -48,7 +48,14 @@ var nicknames = []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace
 // the name is already in use. Previously a duplicate name would
 // silently overwrite the prior entry, orphaning whatever goroutine
 // was waiting on that agent's Done channel.
-func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string) (*RunningAgent, bool) {
+//
+// The optional `task` argument is captured under r.mu so concurrent
+// LiveAgents() readers see it consistently. The previous design had
+// callers writing ra.Task = input AFTER Register returned, under the
+// caller's own mutex — that meant LiveAgents read ra.Task under r.mu
+// while a writer in team.go held t.mu, creating a two-mutex race on
+// the same field that go test -race would catch.
+func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string, task ...string) (*RunningAgent, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
@@ -73,8 +80,22 @@ func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string
 		Status:   StatusRunning,
 		Done:     make(chan struct{}),
 	}
+	if len(task) > 0 {
+		ra.Task = task[0]
+	}
 	r.agents[name] = ra
 	return ra, true
+}
+
+// SetTask updates the task description on a running agent under the
+// registry mutex. Use this instead of writing ra.Task directly so
+// reader goroutines (LiveAgents) see consistent values.
+func (r *Registry) SetTask(name, task string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if ra, ok := r.agents[name]; ok {
+		ra.Task = task
+	}
 }
 
 // Release marks an agent as completed and removes it from the registry.

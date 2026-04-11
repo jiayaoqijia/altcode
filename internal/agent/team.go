@@ -67,16 +67,16 @@ func (t *Team) SpawnAgent(
 	id := fmt.Sprintf("%s-%d", ag.Name, t.nextID)
 	t.nextID++
 
-	// Register with the team's registry for lifecycle tracking. Use
-	// the team's own depth so the maxDepth check actually fires for
-	// nested teams — the previous hardcoded `1` made the registry's
-	// depth enforcement dead code.
-	ra, ok := t.registry.Register(id, ag, t.depth, "/"+t.name)
+	// Register with the team's registry for lifecycle tracking. Pass
+	// `input` as the task so it lands in ra.Task under the registry
+	// mutex — the previous code wrote ra.Task = input AFTER Register
+	// returned, under t.mu, which races with LiveAgents() reading
+	// ra.Task under r.mu (two mutexes protecting the same field).
+	ra, ok := t.registry.Register(id, ag, t.depth, "/"+t.name, input)
 	if !ok {
 		t.mu.Unlock()
 		return ""
 	}
-	ra.Task = input
 	t.agents[id] = ra
 
 	agentCtx, cancel := context.WithCancel(ctx)

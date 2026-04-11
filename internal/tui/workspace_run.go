@@ -18,16 +18,34 @@ type agentSpec struct {
 	role    string
 }
 
+// knownWorkspaceBackends is the allow-list used by parseWorkspaceArgs
+// to decide whether a `foo:bar` token is a backend:role spec or a
+// regular task word that happens to contain a colon (URLs, times,
+// PostgreSQL connection strings, ratios). The previous parser
+// classified ANY colon-containing token as a spec and silently
+// dropped it from the task — `/workspace fix https://example.com
+// outage` mis-parsed `https://example.com` as backend=https.
+var knownWorkspaceBackends = map[string]bool{
+	"claude":   true,
+	"codex":    true,
+	"opencode": true,
+	"altcode":  true,
+}
+
 // parseWorkspaceArgs splits the workspace command into task + agent specs.
 // "add auth claude:architect codex:coder" → task="add auth", specs=[{claude,architect},{codex,coder}]
 // "add auth" → task="add auth", specs=nil (auto-detect)
+//
+// Specs are recognized only when the LHS is a known backend name.
+// This lets URLs, times, and other colon-containing words pass through
+// as part of the task without being silently misclassified.
 func parseWorkspaceArgs(parts []string) (string, []agentSpec) {
 	var taskParts []string
 	var specs []agentSpec
 	for _, p := range parts {
 		if strings.Contains(p, ":") {
 			kv := strings.SplitN(p, ":", 2)
-			if len(kv) == 2 && kv[0] != "" && kv[1] != "" {
+			if len(kv) == 2 && kv[0] != "" && kv[1] != "" && knownWorkspaceBackends[kv[0]] {
 				specs = append(specs, agentSpec{backend: kv[0], role: kv[1]})
 				continue
 			}
@@ -284,9 +302,21 @@ func (a *App) handleWorkspacePoll() tea.Cmd {
 		return nil
 	}
 
-	bellNeeded := false
-	allExited := len(sess.Agents) > 0
+	// Take a snapshot under sess.Lock so we don't iterate the live
+	// map while a /spawn or lifecycle goroutine mutates it. Without
+	// this guard the runtime threw "concurrent map iteration and
+	// map write" the moment a user spawned an extra agent during a
+	// poll tick.
+	sess.Lock()
+	snap := make([]*workspace.AgentRecord, 0, len(sess.Agents))
 	for _, rec := range sess.Agents {
+		snap = append(snap, rec)
+	}
+	sess.Unlock()
+
+	bellNeeded := false
+	allExited := len(snap) > 0
+	for _, rec := range snap {
 		a.wsView.UpdateAgent(rec)
 		if rec.Priority() == workspace.AttentionRed {
 			bellNeeded = true

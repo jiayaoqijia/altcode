@@ -42,6 +42,12 @@ func NewQueue() *Queue {
 }
 
 // Create adds a new task in pending status and returns it.
+//
+// Returns a COPY of the stored Task so callers can read its fields
+// without holding the queue mutex. Returning the live pointer caused
+// a race when concurrent Update calls mutated the same struct (the
+// task tools advertise IsConcurrencySafe=true so the dispatcher
+// runs TaskList alongside TaskUpdate in the same parallel batch).
 func (q *Queue) Create(subject, description string) *Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -58,15 +64,22 @@ func (q *Queue) Create(subject, description string) *Task {
 	}
 	q.tasks[t.ID] = t
 	q.order = append(q.order, t.ID)
-	return t
+	cp := *t
+	return &cp
 }
 
-// Get returns the task with the given ID, if it exists.
+// Get returns a COPY of the task with the given ID. Returning a copy
+// (not the live *Task) prevents callers from observing partial
+// mutations performed by concurrent Update calls.
 func (q *Queue) Get(id string) (*Task, bool) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 	t, ok := q.tasks[id]
-	return t, ok
+	if !ok {
+		return nil, false
+	}
+	cp := *t
+	return &cp, true
 }
 
 // Update sets the status and output of an existing task.
@@ -84,7 +97,8 @@ func (q *Queue) Update(id string, status Status, output string) error {
 	return nil
 }
 
-// List returns all tasks in creation order.
+// List returns COPIES of all tasks in creation order. Same rationale
+// as Get: a live *Task pointer would race with concurrent Update.
 func (q *Queue) List() []*Task {
 	q.mu.Lock()
 	defer q.mu.Unlock()
@@ -92,7 +106,8 @@ func (q *Queue) List() []*Task {
 	result := make([]*Task, 0, len(q.order))
 	for _, id := range q.order {
 		if t, ok := q.tasks[id]; ok {
-			result = append(result, t)
+			cp := *t
+			result = append(result, &cp)
 		}
 	}
 	return result

@@ -3,6 +3,7 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"sync"
 
 	"github.com/altcode-ai/altcode/internal/provider"
 )
@@ -64,6 +65,7 @@ type Result struct {
 
 // Runner manages hook configurations and executes matching hooks.
 type Runner struct {
+	mu       sync.RWMutex
 	configs  map[Event][]MatcherConfig
 	provider provider.Provider // used by prompt hooks
 	model    string            // model for prompt hooks
@@ -78,9 +80,23 @@ func NewRunner(configs map[Event][]MatcherConfig) *Runner {
 }
 
 // SetProvider configures the LLM provider for prompt-type hooks.
+// Serialized through r.mu so a Fire goroutine doesn't observe a
+// half-written provider/model pair when the engine swaps providers
+// mid-session.
 func (r *Runner) SetProvider(p provider.Provider, model string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	r.provider = p
 	r.model = model
+}
+
+// providerSnapshot returns the current provider + model under the
+// read lock. Callers should use this instead of reading r.provider
+// directly so SetProvider doesn't race with executeHookEntry.
+func (r *Runner) providerSnapshot() (provider.Provider, string) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.provider, r.model
 }
 
 // Fire executes all hooks matching the event and tool name.
@@ -124,7 +140,10 @@ func (r *Runner) executeHookEntry(
 	case "command":
 		return runCommandHook(ctx, entry, input)
 	case "prompt":
-		return runPromptHook(ctx, r.provider, r.model, entry, input)
+		// Snapshot under the read lock so a concurrent SetProvider
+		// call can't half-update the pair we're about to use.
+		p, model := r.providerSnapshot()
+		return runPromptHook(ctx, p, model, entry, input)
 	case "http":
 		return runHTTPHook(ctx, entry, input)
 	default:

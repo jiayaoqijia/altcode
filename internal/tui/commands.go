@@ -501,6 +501,16 @@ func (a *App) builtinClear() {
 	if a.engine != nil {
 		a.engine.ClearMessages()
 	}
+	// Reset HUD counters too — without this, /clear left the tool
+	// tree counts ('Read ×12'), token counts, and accumulated cost
+	// from the cleared conversation visible in the HUD. The user
+	// thinks /clear wiped everything but the HUD still shows the
+	// stats.
+	a.toolCounts = make(map[string]int)
+	a.tokensIn = 0
+	a.tokensOut = 0
+	a.costUSD = 0
+	a.tools.Clear()
 	a.messages = append(a.messages, chatMessage{role: roleInfo, content: "Conversation cleared."})
 	a.updateViewport()
 }
@@ -576,11 +586,17 @@ func (a *App) builtinMemoryText(parts []string) string {
 				return "Usage: /memory add <text>"
 			}
 			content := strings.Join(parts[2:], " ")
-			content = strings.Trim(content, "'\"")
+			// Strip ONE matching pair of surrounding quotes only —
+			// the previous strings.Trim stripped any quote on either
+			// end, so '/memory add "hi" world' became `hi" world`.
+			content = stripPairedQuotes(content)
 			if content == "" {
 				return "Usage: /memory add <text>"
 			}
-			id := fmt.Sprintf("tui-%d", time.Now().Unix())
+			// Use UnixNano so two rapid /memory add calls in the same
+			// second don't collide on the same id and overwrite each
+			// other.
+			id := fmt.Sprintf("tui-%d", time.Now().UnixNano())
 			title := firstLineOf(content, 60)
 			if err := store.Save(id, title, content); err != nil {
 				return fmt.Sprintf("Error saving memory: %v", err)
@@ -692,22 +708,55 @@ func (a *App) builtinCompactText() string {
 		return "No engine available."
 	}
 	beforeMsgs := a.engineMessageCount()
-	beforeTokens := compact.EstimateTokens(a.engine.Messages())
+	beforeMsgTokens := compact.EstimateTokens(a.engine.Messages())
+	beforeSysTokens := a.systemPromptTokens()
+	beforeTotal := beforeMsgTokens + beforeSysTokens
 	a.engine.Compact()
 	afterMsgs := a.engineMessageCount()
-	afterTokens := compact.EstimateTokens(a.engine.Messages())
+	afterMsgTokens := compact.EstimateTokens(a.engine.Messages())
+	afterTotal := afterMsgTokens + beforeSysTokens // system unchanged by Compact
 	// Don't pretend success when compaction was a no-op. Users hitting
 	// /compact early in a session got "Compaction complete: 0 → 0 (-0)"
-	// and assumed the feature was broken.
-	if beforeMsgs == afterMsgs && beforeTokens == afterTokens {
+	// and assumed the feature was broken. Also include system prompt
+	// tokens in the no-op count so the message agrees with /context.
+	if beforeMsgs == afterMsgs && beforeMsgTokens == afterMsgTokens {
 		return fmt.Sprintf(
 			"Nothing to compact yet — context is under budget (%s tokens, %d messages).\nRun /compact again once the conversation grows.",
-			formatTokens(beforeTokens), beforeMsgs)
+			formatTokens(beforeTotal), beforeMsgs)
 	}
 	return fmt.Sprintf(
 		"Compaction complete:\n  Messages: %d → %d (-%d)\n  Tokens:   %s → %s (-%s)",
 		beforeMsgs, afterMsgs, beforeMsgs-afterMsgs,
-		formatTokens(beforeTokens), formatTokens(afterTokens), formatTokens(beforeTokens-afterTokens))
+		formatTokens(beforeTotal), formatTokens(afterTotal), formatTokens(beforeTotal-afterTotal))
+}
+
+// stripPairedQuotes removes a single matched pair of surrounding
+// quotes (single OR double) from s. Asymmetric quotes are preserved
+// so '/memory add "hi" world' doesn't get mangled into `hi" world`.
+func stripPairedQuotes(s string) string {
+	if len(s) < 2 {
+		return s
+	}
+	first, last := s[0], s[len(s)-1]
+	if (first == '"' && last == '"') || (first == '\'' && last == '\'') {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
+// systemPromptTokens returns the byte/4 estimate of the engine's
+// current system prompt sections (persona + tools + skills + memory).
+// Without this, /compact reported "0 tokens" even when /context
+// showed 20K+ in the System row, leaving users confused.
+func (a *App) systemPromptTokens() int {
+	if a.engine == nil {
+		return 0
+	}
+	total := 0
+	for _, s := range a.engine.SystemPromptSections() {
+		total += len(s.Content) / 4
+	}
+	return total
 }
 
 func (a *App) builtinDiffText() string {
@@ -938,16 +987,37 @@ func (a *App) builtinWorkspaceStatusText() string {
 	if sess == nil {
 		return "[workspace] active but session data unavailable."
 	}
-	var sb strings.Builder
-	sb.WriteString(fmt.Sprintf("Workspace: %s\n", sess.ID))
-	sb.WriteString(fmt.Sprintf("  Task:     %s\n", sess.Task))
-	sb.WriteString(fmt.Sprintf("  Status:   %s\n", sess.Status))
-	sb.WriteString(fmt.Sprintf("  Agents:   %d\n", len(sess.Agents)))
+	// Snapshot under sess.Lock to avoid concurrent map iteration with
+	// /spawn or lifecycle goroutines mutating sess.Agents.
+	sess.Lock()
+	id := sess.ID
+	task := sess.Task
+	status := sess.Status
+	type agentSnap struct {
+		role     string
+		backend  string
+		activity workspace.ActivityState
+	}
+	snap := make([]agentSnap, 0, len(sess.Agents))
 	for role, rec := range sess.Agents {
 		if rec == nil {
 			continue
 		}
-		sb.WriteString(fmt.Sprintf("    %s  (%s)  %s\n", role, rec.Backend, rec.ActivityState))
+		snap = append(snap, agentSnap{
+			role:     role,
+			backend:  rec.Backend,
+			activity: rec.ActivityState,
+		})
+	}
+	sess.Unlock()
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Workspace: %s\n", id))
+	sb.WriteString(fmt.Sprintf("  Task:     %s\n", task))
+	sb.WriteString(fmt.Sprintf("  Status:   %s\n", status))
+	sb.WriteString(fmt.Sprintf("  Agents:   %d\n", len(snap)))
+	for _, a := range snap {
+		sb.WriteString(fmt.Sprintf("    %s  (%s)  %s\n", a.role, a.backend, a.activity))
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }
