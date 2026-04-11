@@ -49,6 +49,19 @@ func (t *editTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
+	// Reject empty old_string up front. strings.Contains(content, "")
+	// returns true for every file and strings.Count returns len(content)+1,
+	// so an empty old_string would otherwise hit the 'ambiguous match'
+	// path with a confusing 'found N occurrences' message instead of
+	// the actual problem.
+	if params.OldString == "" {
+		return &Result{
+			Output: "Error: old_string is empty. Provide the exact text to replace.",
+			Title:  "edit " + params.FilePath,
+			Error:  fmt.Errorf("old_string is empty"),
+		}, nil
+	}
+
 	data, err := os.ReadFile(params.FilePath)
 	if err != nil {
 		return &Result{
@@ -84,9 +97,13 @@ func (t *editTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 	}
 
 	if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
+		// Previously this set Output but not Error, so a permission
+		// failure rendered with a green ✓ in the tool tree. Same
+		// class of bug we fixed for read/ls/glob — make Error explicit.
 		return &Result{
 			Output: fmt.Sprintf("Error writing file: %v", err),
-			Title:  "edit",
+			Title:  "edit " + params.FilePath,
+			Error:  err,
 		}, nil
 	}
 
