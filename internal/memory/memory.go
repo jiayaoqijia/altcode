@@ -44,8 +44,33 @@ func ClaudeCodeDir(projectRoot string) string {
 	return filepath.Join(projectRoot, ".claude", "memory")
 }
 
+// validateMemoryID rejects IDs that contain path separators or other
+// characters that could escape the memory directory via filepath.Join.
+// Previously an id like "../../etc/passwd" would let a caller read or
+// write arbitrary files outside the memory store.
+func validateMemoryID(id string) error {
+	if id == "" {
+		return fmt.Errorf("memory id is empty")
+	}
+	if strings.ContainsAny(id, `/\`+string(filepath.Separator)) {
+		return fmt.Errorf("memory id %q contains path separator", id)
+	}
+	if id == "." || id == ".." || strings.HasPrefix(id, ".") {
+		return fmt.Errorf("memory id %q is not allowed", id)
+	}
+	for _, r := range id {
+		if r == ':' || r == 0 || r == '\n' {
+			return fmt.Errorf("memory id %q contains invalid character", id)
+		}
+	}
+	return nil
+}
+
 // Save writes a memory to disk and updates the index.
 func (s *Store) Save(id, title, content string) error {
+	if err := validateMemoryID(id); err != nil {
+		return err
+	}
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return fmt.Errorf("create memory dir: %w", err)
 	}
@@ -63,6 +88,9 @@ func (s *Store) Save(id, title, content string) error {
 
 // Load reads a single memory by ID.
 func (s *Store) Load(id string) (*Memory, error) {
+	if err := validateMemoryID(id); err != nil {
+		return nil, err
+	}
 	path := filepath.Join(s.dir, id+".md")
 	return parseMemoryFile(path)
 }
@@ -101,6 +129,9 @@ func (s *Store) List() ([]*Memory, error) {
 
 // Delete removes a memory and updates the index.
 func (s *Store) Delete(id string) error {
+	if err := validateMemoryID(id); err != nil {
+		return err
+	}
 	path := filepath.Join(s.dir, id+".md")
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("delete memory: %w", err)

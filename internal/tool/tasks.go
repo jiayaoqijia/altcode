@@ -63,11 +63,17 @@ func (t *taskUpdateTool) Description() string {
 }
 func (t *taskUpdateTool) PermissionPattern(json.RawMessage) string { return "TaskUpdate" }
 func (t *taskUpdateTool) Parameters() json.RawMessage {
+	// Schema enum must match the actual task.Status constants. The
+	// previous schema said 'in_progress' but the Go const is 'running',
+	// so clients following the schema produced invalid status values
+	// that silently cast to Status("in_progress") and broke the state
+	// machine. Accept 'in_progress' as an alias for 'running' in the
+	// Execute path for backward compatibility with older clients.
 	return json.RawMessage(`{
 		"type": "object",
 		"properties": {
 			"taskId": {"type": "string", "description": "The task ID to update"},
-			"status": {"type": "string", "enum": ["pending", "in_progress", "completed", "failed"]},
+			"status": {"type": "string", "enum": ["pending", "running", "completed", "failed"]},
 			"subject": {"type": "string", "description": "Update the task title"},
 			"activeForm": {"type": "string", "description": "Update the spinner text"}
 		},
@@ -84,12 +90,42 @@ func (t *taskUpdateTool) Execute(_ context.Context, input json.RawMessage) (*Res
 		return nil, err
 	}
 
-	status := task.Status(p.Status)
+	if p.TaskID == "" {
+		return &Result{
+			Output: "Error: taskId is required",
+			Title:  "TaskUpdate",
+			Error:  fmt.Errorf("taskId is required"),
+		}, nil
+	}
+
+	// Accept 'in_progress' as an alias for 'running' — older clients
+	// and the previous (wrong) schema used that spelling.
+	rawStatus := p.Status
+	if rawStatus == "in_progress" {
+		rawStatus = "running"
+	}
+	status := task.Status(rawStatus)
 	if status == "" {
 		status = task.StatusRunning
 	}
+	// Validate status is one of the known enum values so a typo
+	// doesn't silently store an invalid state.
+	switch status {
+	case task.StatusPending, task.StatusRunning, task.StatusCompleted, task.StatusFailed:
+		// ok
+	default:
+		return &Result{
+			Output: fmt.Sprintf("Error: invalid status %q (want pending/running/completed/failed)", p.Status),
+			Title:  "TaskUpdate",
+			Error:  fmt.Errorf("invalid status %q", p.Status),
+		}, nil
+	}
 	if err := t.q.Update(p.TaskID, status, ""); err != nil {
-		return &Result{Error: err}, nil
+		return &Result{
+			Output: fmt.Sprintf("Error: %v", err),
+			Title:  "TaskUpdate",
+			Error:  err,
+		}, nil
 	}
 	return &Result{
 		Output: fmt.Sprintf("Task %s → %s", p.TaskID, status),
