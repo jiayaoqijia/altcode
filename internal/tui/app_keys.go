@@ -157,7 +157,11 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 	case "enter":
 		return a.handleEnterKey()
-	case "ctrl+j":
+	case "ctrl+j", "shift+enter", "alt+enter":
+		// Multi-line newline insert: Ctrl+J is the canonical altcode
+		// shortcut, but CC also accepts Shift+Enter and Alt/Meta+Enter
+		// because most users try those first. Recognize all three so
+		// new users don't bounce off a missing keybind.
 		if !a.busy {
 			a.input.InsertString("\n")
 		}
@@ -238,6 +242,15 @@ func (a *App) handleEscKey() (tea.Model, tea.Cmd, bool) {
 		}
 		a.busy = false
 		a.streaming = ""
+		// CC parity: when the user interrupts a turn before any
+		// assistant text has streamed (i.e. they realised they typo'd
+		// or want to add more context), restore the just-submitted
+		// prompt into the input box so they can edit and resubmit
+		// without retyping. lastUserMessage() returns the last user
+		// turn from a.messages, which is exactly what was submitted.
+		if last := a.lastUserMessage(); last != "" && a.input.Value() == "" {
+			a.input.SetValue(last)
+		}
 		a.appendInfo("[cancelled]")
 		return a, nil, true
 	}
