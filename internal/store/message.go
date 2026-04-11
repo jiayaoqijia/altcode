@@ -45,13 +45,15 @@ func (db *DB) AddMessage(sessionID, role string, content []byte, model string, t
 }
 
 // ListMessages returns all messages for a session ordered by created_at ascending.
-// Tie-break on id ASC so messages persisted within the same millisecond
-// (rapid streaming, race between two providers) come back in a stable
-// deterministic order instead of whatever the SQLite engine fancies.
+// Tie-break on SQLite's implicit rowid so messages persisted within the
+// same millisecond (rapid streaming, race between two providers) come
+// back in monotonic insertion order. ULID app-level IDs are NOT a safe
+// tie-break because newID() spawns a new monotonic entropy source each
+// call, so two same-ms IDs can sort in either direction.
 func (db *DB) ListMessages(sessionID string) ([]*Message, error) {
 	rows, err := db.sql.Query(
 		`SELECT id, session_id, role, content, model, tokens_in, tokens_out, created_at
-		 FROM message WHERE session_id = ? ORDER BY created_at ASC, id ASC`, sessionID,
+		 FROM message WHERE session_id = ? ORDER BY created_at ASC, rowid ASC`, sessionID,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("store: list messages: %w", err)
