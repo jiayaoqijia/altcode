@@ -81,7 +81,14 @@ type ToolCallEvent struct {
 }
 
 // UsageInfo records token consumption for a request.
+//
+// CacheCreationInputTokens / CacheReadInputTokens are Anthropic-only
+// fields that describe prompt caching cost. Without them the cost
+// tracker undercounts cached prompts substantially because it sees
+// only the (small) uncached `input_tokens` field on message_delta.
 type UsageInfo struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
+	InputTokens              int `json:"input_tokens"`
+	OutputTokens             int `json:"output_tokens"`
+	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
 }

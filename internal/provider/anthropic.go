@@ -182,6 +182,8 @@ func dispatchSSEEvent(
 	blocks map[int]*blockState,
 ) (string, error) {
 	switch evtType {
+	case "message_start":
+		return "", handleMessageStart(data, ch)
 	case "content_block_start":
 		return "", handleContentBlockStart(data, ch, blocks)
 	case "content_block_delta":
@@ -297,6 +299,27 @@ func handleContentBlockDelta(
 				ID: bs.toolID, Name: bs.name, Delta: p.Delta.PartialJSON,
 			}}
 		}
+	}
+	return nil
+}
+
+// handleMessageStart parses the initial message_start event for usage
+// info. Anthropic emits the input_tokens / cache_creation_input_tokens
+// / cache_read_input_tokens fields ONLY here — message_delta later
+// emits incremental output_tokens. Without parsing message_start the
+// cost tracker saw zero input tokens for every Anthropic call and
+// massively undercounted cached prompts.
+func handleMessageStart(data string, ch chan<- StreamEvent) error {
+	var p struct {
+		Message struct {
+			Usage *UsageInfo `json:"usage"`
+		} `json:"message"`
+	}
+	if err := json.Unmarshal([]byte(data), &p); err != nil {
+		return fmt.Errorf("parse message_start: %w", err)
+	}
+	if p.Message.Usage != nil {
+		ch <- StreamEvent{Type: StreamUsage, Usage: p.Message.Usage}
 	}
 	return nil
 }

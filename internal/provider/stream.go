@@ -12,19 +12,34 @@ type SSEDecoder struct {
 }
 
 // NewSSEDecoder creates a new SSEDecoder reading from r.
+//
+// The default bufio.Scanner buffer is 64 KiB, which silently aborted
+// any stream containing a single SSE line larger than that — common
+// for Anthropic input_json_delta blobs (large tool inputs, base64
+// images, verbose error bodies). Bumped to 16 MiB so realistic
+// payloads don't kill the stream mid-turn with bufio.ErrTooLong.
 func NewSSEDecoder(r io.Reader) *SSEDecoder {
-	return &SSEDecoder{scanner: bufio.NewScanner(r)}
+	s := bufio.NewScanner(r)
+	s.Buffer(make([]byte, 64*1024), 16*1024*1024)
+	return &SSEDecoder{scanner: s}
 }
 
 // Next returns the next SSE event type and data payload.
 // Returns io.EOF when the stream is exhausted.
+//
+// Per the SSE spec, multiple "data:" lines in a single event are
+// concatenated with newlines. The previous implementation overwrote
+// evtData on each "data:" line, so multi-line payloads (some provider
+// error bodies, multi-line tool result text) lost everything but the
+// last line.
 func (d *SSEDecoder) Next() (eventType string, data string, err error) {
-	var evtType, evtData string
+	var evtType string
+	var evtData strings.Builder
 	for d.scanner.Scan() {
 		line := d.scanner.Text()
 		if line == "" {
-			if evtType != "" || evtData != "" {
-				return evtType, evtData, nil
+			if evtType != "" || evtData.Len() > 0 {
+				return evtType, strings.TrimRight(evtData.String(), "\n"), nil
 			}
 			continue
 		}
@@ -34,15 +49,16 @@ func (d *SSEDecoder) Next() (eventType string, data string, err error) {
 			continue
 		}
 		if after, ok := strings.CutPrefix(line, "data:"); ok {
-			evtData = strings.TrimLeft(after, " ")
+			evtData.WriteString(strings.TrimLeft(after, " "))
+			evtData.WriteByte('\n')
 			continue
 		}
 	}
 	if scanErr := d.scanner.Err(); scanErr != nil {
 		return "", "", scanErr
 	}
-	if evtType != "" || evtData != "" {
-		return evtType, evtData, nil
+	if evtType != "" || evtData.Len() > 0 {
+		return evtType, strings.TrimRight(evtData.String(), "\n"), nil
 	}
 	return "", "", io.EOF
 }

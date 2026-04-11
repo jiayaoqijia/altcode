@@ -148,6 +148,13 @@ func processOpenAINonStream(body io.ReadCloser, ch chan<- StreamEvent) {
 		stopReason = "tool_use"
 	} else if choice.FinishReason == "length" {
 		stopReason = "max_tokens"
+	} else if len(choice.Message.ToolCalls) > 0 {
+		// Some OpenAI-compatible providers (altllm, certain Chinese
+		// providers) return tool_calls in the response but leave
+		// finish_reason blank or set it to "stop". Without this, the
+		// engine treats the turn as finished and silently drops every
+		// tool call.
+		stopReason = "tool_use"
 	}
 	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
@@ -365,7 +372,13 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 			if tc.ID != "" {
 				state.id = tc.ID
 			}
-			if tc.Function.Name != "" {
+			// Fire StreamToolCallStart EXACTLY ONCE per tool call.
+			// Some OpenAI-compatible providers re-send the function
+			// name on subsequent delta chunks for the same index;
+			// without the `state.name == ""` guard the engine would
+			// see two tool_use blocks with the same id and break
+			// downstream accumulation.
+			if tc.Function.Name != "" && state.name == "" {
 				state.name = tc.Function.Name
 				ch <- StreamEvent{Type: StreamToolCallStart, ToolUse: &ToolCallEvent{
 					ID: state.id, Name: state.name,
