@@ -205,6 +205,14 @@ func (a *App) slashCommandNames() []string {
 
 // trySlashComplete attempts tab completion on a slash command prefix.
 // Returns true if completion was performed.
+//
+// Behavior matches Claude Code more closely than the previous version:
+//   - Exact match wins (typing /help + Tab → /help, not /help-foo).
+//   - Single prefix match → fills in the command and a trailing space.
+//   - Multiple prefix matches → complete to longest common prefix; if
+//     no progress can be made, list each match WITH its description
+//     pulled from the palette so users can pick by purpose, not name.
+//   - Sorted output for stable display across runs.
 func (a *App) trySlashComplete() bool {
 	val := a.input.Value()
 	if !strings.HasPrefix(val, "/") || strings.Contains(val, " ") {
@@ -214,9 +222,18 @@ func (a *App) trySlashComplete() bool {
 	prefix := strings.ToLower(val)
 	cmds := a.slashCommandNames()
 
+	// Exact match wins so '/help' + Tab doesn't get hijacked by
+	// '/help-something-else' that happens to share the prefix.
+	for _, c := range cmds {
+		if strings.ToLower(c) == prefix {
+			a.input.SetValue(c + " ")
+			return true
+		}
+	}
+
 	var matches []string
 	for _, c := range cmds {
-		if strings.HasPrefix(c, prefix) {
+		if strings.HasPrefix(strings.ToLower(c), prefix) {
 			matches = append(matches, c)
 		}
 	}
@@ -224,12 +241,14 @@ func (a *App) trySlashComplete() bool {
 	if len(matches) == 0 {
 		return false
 	}
+	sort.Strings(matches)
+
 	if len(matches) == 1 {
 		a.input.SetValue(matches[0] + " ")
 		return true
 	}
 
-	// Multiple matches: complete to longest common prefix
+	// Multiple matches: complete to longest common prefix first.
 	lcp := matches[0]
 	for _, m := range matches[1:] {
 		lcp = longestCommonPrefix(lcp, m)
@@ -239,8 +258,31 @@ func (a *App) trySlashComplete() bool {
 		return true
 	}
 
-	// Show available completions as info
-	a.appendInfo("Completions: " + strings.Join(matches, "  "))
+	// Build a description map from the palette so users see what each
+	// command actually does instead of a wall of names.
+	descByName := map[string]string{}
+	for _, p := range buildPaletteCommands(a.commands) {
+		descByName[p.Name] = p.Description
+	}
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Completions for %q:\n", val))
+	for _, m := range matches {
+		desc := descByName[m]
+		// Truncate to one line + 60 chars so a chatty plugin
+		// description doesn't blow out the column layout.
+		if i := strings.IndexByte(desc, '\n'); i >= 0 {
+			desc = desc[:i]
+		}
+		if len(desc) > 60 {
+			desc = desc[:59] + "…"
+		}
+		if desc != "" {
+			sb.WriteString(fmt.Sprintf("  %-18s  %s\n", m, desc))
+		} else {
+			sb.WriteString(fmt.Sprintf("  %s\n", m))
+		}
+	}
+	a.appendInfo(strings.TrimRight(sb.String(), "\n"))
 	return true
 }
 
