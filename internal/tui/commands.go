@@ -301,6 +301,7 @@ func builtinHelpText() string {
 		{"Tab", "complete /command (or cycle focus)"},
 		{"Ctrl+K", "command palette"},
 		{"Ctrl+A", "switch sessions"},
+		{"Ctrl+G", "edit prompt in $EDITOR"},
 		{"@file", "file completion"},
 		{"Up/Down", "browse prompt history"},
 		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},

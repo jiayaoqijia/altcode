@@ -198,6 +198,18 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	case "ctrl+d":
 		// Ctrl+D = quit
 		return a, tea.Quit, true
+	case "ctrl+g":
+		// Ctrl+G = open current input in $EDITOR (CC parity).
+		// Useful for composing long prompts with proper editing.
+		if !a.busy {
+			if text, err := openInExternalEditor(a.input.Value()); err != nil {
+				a.appendInfo(fmt.Sprintf("[editor] %v", err))
+			} else {
+				a.input.Reset()
+				a.input.SetValue(text)
+			}
+		}
+		return a, nil, true
 	case "ctrl+c":
 		return a.handleCtrlCKey()
 	case "a", "1":
