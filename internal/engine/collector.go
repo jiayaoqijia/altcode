@@ -19,11 +19,13 @@ type collectedToolCall struct {
 
 // turnResult holds the complete output from a single provider stream.
 type turnResult struct {
-	Text         string
-	ToolCalls    []collectedToolCall
-	InputTokens  int
-	OutputTokens int
-	Truncated    bool // true when finish_reason indicates max_tokens/length
+	Text                string
+	ToolCalls           []collectedToolCall
+	InputTokens         int
+	OutputTokens        int
+	CacheCreationTokens int // Anthropic prompt-cache write count
+	CacheReadTokens     int // Anthropic prompt-cache hit count
+	Truncated           bool // true when finish_reason indicates max_tokens/length
 }
 
 // collectTurn reads a provider stream, emits events to out in real-time,
@@ -104,8 +106,23 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 
 		case provider.StreamUsage:
 			if sev.Usage != nil {
-				result.InputTokens = sev.Usage.InputTokens
-				result.OutputTokens = sev.Usage.OutputTokens
+				// Anthropic emits InputTokens on message_start and
+				// OutputTokens on message_delta in two separate events.
+				// Accumulate so the final result has the latest of each
+				// non-zero value rather than overwriting with a zero
+				// from the partial event.
+				if sev.Usage.InputTokens > 0 {
+					result.InputTokens = sev.Usage.InputTokens
+				}
+				if sev.Usage.OutputTokens > 0 {
+					result.OutputTokens = sev.Usage.OutputTokens
+				}
+				if sev.Usage.CacheCreationInputTokens > 0 {
+					result.CacheCreationTokens = sev.Usage.CacheCreationInputTokens
+				}
+				if sev.Usage.CacheReadInputTokens > 0 {
+					result.CacheReadTokens = sev.Usage.CacheReadInputTokens
+				}
 				out <- event.Event{Type: event.UsageEvent, Usage: &event.UsageInfo{
 					InputTokens:  sev.Usage.InputTokens,
 					OutputTokens: sev.Usage.OutputTokens,

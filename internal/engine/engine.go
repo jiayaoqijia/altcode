@@ -1103,11 +1103,23 @@ func (e *Engine) fireStopHooks(ctx context.Context) string {
 }
 
 func (e *Engine) recordTurnCost(turn *turnResult) {
-	if turn.InputTokens > 0 || turn.OutputTokens > 0 {
-		e.cost.RecordTurn(e.model, turn.InputTokens, turn.OutputTokens)
-		if e.tokenBudget != nil {
-			e.tokenBudget.Consume(turn.InputTokens + turn.OutputTokens)
-		}
+	if turn.InputTokens == 0 && turn.OutputTokens == 0 &&
+		turn.CacheCreationTokens == 0 && turn.CacheReadTokens == 0 {
+		return
+	}
+	// Pass cache tokens through so Anthropic prompt-caching is billed
+	// correctly. Without this the tracker silently undercounted by
+	// roughly 10x for cache-heavy turns.
+	e.cost.RecordTurnWithCache(
+		e.model,
+		turn.InputTokens, turn.OutputTokens,
+		turn.CacheCreationTokens, turn.CacheReadTokens,
+	)
+	if e.tokenBudget != nil {
+		e.tokenBudget.Consume(
+			turn.InputTokens + turn.OutputTokens +
+				turn.CacheCreationTokens + turn.CacheReadTokens,
+		)
 	}
 }
 
@@ -1124,15 +1136,36 @@ func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result) {
 	if name != "write" && name != "edit" {
 		return
 	}
+	// Skip failed tool calls — recording them as if they succeeded
+	// corrupts the audit trail. The dispatcher uses Result.Error to
+	// signal failure; some tools also leak "Error: ..." through Output.
+	if r.Error != nil {
+		return
+	}
+	if strings.HasPrefix(strings.TrimSpace(r.Output), "Error:") {
+		return
+	}
 	path := extractPath(tc.Input)
 	if path == "" {
 		return
 	}
+	// Read the post-edit content so the journal stores the real file
+	// state instead of the tool's stdout ("wrote 42 bytes to foo.go").
+	// Pre-image is left empty here for backward compatibility — a
+	// proper before/after capture would have to read the file BEFORE
+	// dispatch and thread it through.
+	after := ""
+	if data, err := os.ReadFile(path); err == nil {
+		after = string(data)
+	}
+	// Action is based on whether the file existed before the tool ran.
+	// We can no longer detect that here (post-tool), so use the tool
+	// name as the best signal: write usually creates, edit modifies.
 	action := "modify"
 	if name == "write" {
 		action = "create"
 	}
-	e.journal.Record(name, path, action, "", r.Output)
+	e.journal.Record(name, path, action, "", after)
 }
 
 func extractPath(input json.RawMessage) string {
