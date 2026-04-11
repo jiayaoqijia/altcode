@@ -99,8 +99,14 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		}, nil
 	}
 
+	// Use a guarded transport so the SSRF check happens against the
+	// IP we ACTUALLY connect to, not the result of a separate
+	// LookupIP earlier. Without this, a short-TTL DNS rebinding
+	// attacker could return a public IP on the first lookup and
+	// 169.254.169.254 / 10.0.0.1 on the http.Client's second resolve.
 	client := &http.Client{
-		Timeout: 30 * time.Second,
+		Timeout:   30 * time.Second,
+		Transport: ssrfGuardedTransport(),
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= 5 {
 				return fmt.Errorf("too many redirects")
@@ -302,6 +308,67 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 //   - RFC1918 private space (10/8, 172.16/12, 192.168/16)
 //   - unique local IPv6 (fc00::/7)
 //   - 0.0.0.0
+// ssrfGuardedTransport returns an http.Transport whose DialContext
+// re-validates the destination IP after DNS resolution. The previous
+// approach (LookupIP in guardSSRF then hand the URL to http.Client) was
+// vulnerable to DNS rebinding: the second resolution inside the
+// transport could return a different IP than the one we approved.
+//
+// We resolve the host ourselves, reject any blocked IP, then hand the
+// pinned IP to net.Dialer so the connection definitely lands on the
+// IP we checked.
+func ssrfGuardedTransport() *http.Transport {
+	dialer := &net.Dialer{
+		Timeout:   10 * time.Second,
+		KeepAlive: 30 * time.Second,
+	}
+	tr := http.DefaultTransport.(*http.Transport).Clone()
+	tr.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+		host, port, err := net.SplitHostPort(addr)
+		if err != nil {
+			return nil, err
+		}
+		// If the host is already a literal IP, fast-path the check.
+		if ip := net.ParseIP(host); ip != nil {
+			if blocked, reason := ssrfBlockReason(ip, host); blocked {
+				return nil, fmt.Errorf("blocked by SSRF guard: %s", reason)
+			}
+			return dialer.DialContext(ctx, network, addr)
+		}
+		ips, err := net.DefaultResolver.LookupIP(ctx, "ip", host)
+		if err != nil {
+			return nil, err
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("no IP for %s", host)
+		}
+		for _, ip := range ips {
+			if blocked, reason := ssrfBlockReason(ip, host); blocked {
+				return nil, fmt.Errorf("blocked by SSRF guard: %s", reason)
+			}
+		}
+		// Pin to the first resolved IP. The dialer will not re-resolve.
+		return dialer.DialContext(ctx, network, net.JoinHostPort(ips[0].String(), port))
+	}
+	return tr
+}
+
+// ssrfBlockReason checks an IP against the SSRF deny list and returns
+// (true, reason) if it should be blocked. Loopback is intentionally
+// allowed — see guardSSRF for the threat-model rationale.
+func ssrfBlockReason(ip net.IP, host string) (bool, string) {
+	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return true, fmt.Sprintf("%s resolves to link-local address %s (likely cloud metadata)", host, ip)
+	}
+	if ip.IsPrivate() {
+		return true, fmt.Sprintf("%s resolves to private address %s", host, ip)
+	}
+	if ip.IsUnspecified() {
+		return true, fmt.Sprintf("%s resolves to unspecified address %s", host, ip)
+	}
+	return false, ""
+}
+
 func guardSSRF(rawURL string) error {
 	u, err := url.Parse(rawURL)
 	if err != nil {
