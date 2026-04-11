@@ -134,11 +134,18 @@ func (a *App) runDoctor() string {
 		}
 	}
 
-	// Check tools
-	sb.WriteString(fmt.Sprintf("\nTools:       %d registered\n", len(a.engine.Registry().All())))
+	// Check tools — guarded with the same engine != nil check the rest
+	// of the function uses. Without it the TUI panicked when /doctor
+	// ran before the engine had been constructed (e.g. failed provider
+	// init left a.engine nil but the welcome screen still accepted /).
+	if a.engine != nil && a.engine.Registry() != nil {
+		sb.WriteString(fmt.Sprintf("\nTools:       %d registered\n", len(a.engine.Registry().All())))
+	} else {
+		sb.WriteString("\nTools:       (engine not initialized)\n")
+	}
 
 	// Check MCP
-	if a.engine != nil {
+	if a.engine != nil && a.engine.Config() != nil {
 		sb.WriteString(fmt.Sprintf("MCP servers: %d\n", len(a.engine.Config().MCP)))
 	}
 

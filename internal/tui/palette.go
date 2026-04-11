@@ -203,6 +203,17 @@ func (p *Palette) View() string {
 		contentWidth = 16
 	}
 
+	// Empty state — without this, filtering for a non-matching query
+	// showed an empty box with no feedback. Users typed gibberish and
+	// thought the palette was broken.
+	if len(p.filtered) == 0 {
+		emptyStyle := lipgloss.NewStyle().Foreground(p.theme.Muted).Italic(true)
+		sb.WriteString(emptyStyle.Render("  no matches"))
+		sb.WriteByte('\n')
+		box := border.Render(sb.String())
+		return lipgloss.PlaceHorizontal(p.width, lipgloss.Center, box)
+	}
+
 	// Render the visible window starting at p.offset. Cursor scrolls
 	// with the arrow keys (UpdateKey adjusts offset to keep the
 	// selection in view). Without this, items past index 9 used to

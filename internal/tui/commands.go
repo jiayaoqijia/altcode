@@ -321,7 +321,7 @@ func builtinHelpText() string {
 		{"/tools", "list tools"},
 		{"/skills", "list discovered skills"},
 		{"/mcp", "list MCP servers"},
-		{"/plugins", "list plugins + warnings"},
+		{"/plugins", "show plugin warnings + search paths"},
 		{"/cost", "cost breakdown"},
 		{"/history", "file changes this session"},
 		{"/diff", "diff of changed files"},

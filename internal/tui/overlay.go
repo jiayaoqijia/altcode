@@ -209,7 +209,7 @@ func buildPaletteCommands(
 		{Name: "/tools", Description: "list available tools"},
 		{Name: "/skills", Description: "list discovered skills"},
 		{Name: "/mcp", Description: "list MCP servers + tools"},
-		{Name: "/plugins", Description: "list plugins + warnings"},
+		{Name: "/plugins", Description: "show plugin warnings + search paths"},
 		{Name: "/sessions", Description: "list recent sessions"},
 		{Name: "/memory", Description: "show loaded memories"},
 		{Name: "/version", Description: "show altcode version"},
