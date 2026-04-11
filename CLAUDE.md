@@ -70,6 +70,11 @@ was reviewed across 7 rounds between CC and Codex before starting.
   `--save-transcript/cost/diff` placeholders. `runExec` now takes
   `exec.Params` and translates typed `*exec.UsageError` to exit 64
   after deferred MCP cleanup runs (never `os.Exit` inside `runExec`).
+- **Phase 2**: `--permission-mode`, `--allow-tool`, `--deny-tool`,
+  `--dry-run`. Applied via `exec.ApplyPermissionOverrides` to the
+  permission evaluator before the exec/TUI branch so both paths
+  honor the flags. Config deny still shadows CLI allow — documented,
+  not changed.
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

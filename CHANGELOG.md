@@ -12,6 +12,31 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 2: permission / mode)
+
+- `--permission-mode plan|auto|default|bypass` picks the permission
+  evaluator mode. Named `--permission-mode` (not `--mode`) to avoid
+  collision with the existing `workflow --mode` subcommand flag.
+- `--allow-tool name[:pattern]` adds session-scoped allow rules
+  (repeatable). Patterns split on the FIRST colon only, so
+  `bash:echo hi:bye` yields name=bash, pattern=`echo hi:bye`.
+- `--deny-tool name[:pattern]` adds session-scoped deny rules.
+  Deny beats allow within the same tier.
+- `--dry-run` aliases to `--permission-mode plan` (read tools still
+  run so the agent can reason; writes are denied).
+- Both headless and TUI paths honor the new flags — `altcode
+  --dry-run` without a prompt starts the interactive session with
+  plan mode enabled.
+- `--permission-mode bypass + --deny-tool` is rejected at flag
+  parse (bypass allows everything, deny would be silently dropped).
+
+Known limitation: config-level deny rules shadow CLI
+`--allow-tool` because `permission.Check` iterates all denies
+before any allows. Plan/auto built-in denies also shadow session
+allows (plan mode short-circuits writes before rule iteration).
+Documented in `exec.ApplyPermissionOverrides` with regression
+tests pinning the current behavior.
+
 ### Added (Phase 1: output format + observability)
 
 - `--output-format text|json|stream-json|diff` picks the stdout shape.

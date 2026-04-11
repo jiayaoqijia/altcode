@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/permission"
 )
 
 // --- Unit tests for unexported helpers in exec.go --------------------
@@ -306,6 +307,228 @@ func TestDrainJSONFinal_RecordsPermissionAutoDenies(t *testing.T) {
 	}
 	if result.Permissions[0].Action != "auto-deny" {
 		t.Errorf("expected action=auto-deny, got %q", result.Permissions[0].Action)
+	}
+}
+
+// --- Phase 2: permission overrides ----------------------------------
+
+func TestParseToolRuleSpec(t *testing.T) {
+	cases := []struct {
+		spec        string
+		wantName    string
+		wantPattern string
+		wantErr     bool
+	}{
+		{"bash", "bash", "*", false},
+		{"bash:echo hi", "bash", "echo hi", false},
+		{"bash:", "bash", "*", false}, // empty pattern → wildcard
+		{"  edit  :  foo  ", "edit", "foo", false},
+		{"", "", "", true},
+		{":pattern-only", "", "", true}, // empty name → error
+		{"   ", "", "", true},           // whitespace only → error
+	}
+	for _, tc := range cases {
+		t.Run(tc.spec, func(t *testing.T) {
+			n, p, err := parseToolRuleSpec(tc.spec)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error for %q", tc.spec)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if n != tc.wantName || p != tc.wantPattern {
+				t.Errorf("got (%q, %q), want (%q, %q)",
+					n, p, tc.wantName, tc.wantPattern)
+			}
+		})
+	}
+}
+
+func TestParsePermissionMode(t *testing.T) {
+	cases := []struct {
+		in      string
+		wantSet bool
+		wantErr bool
+	}{
+		{"", false, false},
+		{"plan", true, false},
+		{"auto", true, false},
+		{"default", true, false},
+		{"bypass", true, false},
+		{"yolo", false, true},
+		{"PLAN", false, true}, // case-sensitive
+	}
+	for _, tc := range cases {
+		t.Run(tc.in, func(t *testing.T) {
+			_, set, err := parsePermissionMode(tc.in)
+			if tc.wantErr {
+				if err == nil {
+					t.Errorf("expected error for %q", tc.in)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if set != tc.wantSet {
+				t.Errorf("set=%v, want %v", set, tc.wantSet)
+			}
+		})
+	}
+}
+
+func TestApplyPermissionOverrides_SetsMode(t *testing.T) {
+	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
+	p := &Params{PermissionMode: "plan"}
+	got, err := ApplyPermissionOverrides(eval, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got != eval {
+		t.Fatal("expected same evaluator back")
+	}
+	// Check that write tool is now denied (plan mode = read-only)
+	action := got.CheckWithReadOnly("write", "file_path:foo.go", false)
+	if action != permission.ActionDeny {
+		t.Errorf("plan mode should deny write, got %v", action)
+	}
+	// Read tools still allowed
+	action = got.CheckWithReadOnly("read", "file_path:foo.go", true)
+	if action != permission.ActionAllow {
+		t.Errorf("plan mode should allow read, got %v", action)
+	}
+}
+
+func TestApplyPermissionOverrides_DryRunAliasesPlan(t *testing.T) {
+	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
+	p := &Params{DryRun: true}
+	got, err := ApplyPermissionOverrides(eval, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	action := got.CheckWithReadOnly("write", "foo", false)
+	if action != permission.ActionDeny {
+		t.Errorf("--dry-run should alias to plan (deny writes), got %v", action)
+	}
+}
+
+func TestApplyPermissionOverrides_ExplicitModeWinsOverDryRun(t *testing.T) {
+	// --permission-mode bypass + --dry-run → bypass wins (explicit mode)
+	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
+	p := &Params{PermissionMode: "bypass", DryRun: true}
+	got, err := ApplyPermissionOverrides(eval, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	action := got.CheckWithReadOnly("write", "foo", false)
+	if action != permission.ActionAllow {
+		t.Errorf("bypass should win over dry-run, got %v", action)
+	}
+}
+
+func TestApplyPermissionOverrides_AllowDenySessionRules(t *testing.T) {
+	eval := permission.NewEvaluator(permission.ModeAuto, "", nil)
+	p := &Params{
+		AllowTools: []string{"bash:git *", "write"},
+		DenyTools:  []string{"bash:rm -rf *"},
+	}
+	got, err := ApplyPermissionOverrides(eval, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	// Session allow
+	if action := got.CheckWithReadOnly("bash", "git status", false); action != permission.ActionAllow {
+		t.Errorf("bash git * should be allowed, got %v", action)
+	}
+	// Session deny (deny beats allow)
+	if action := got.CheckWithReadOnly("bash", "rm -rf /", false); action != permission.ActionDeny {
+		t.Errorf("bash rm should be denied, got %v", action)
+	}
+	// Unmatched in auto mode → deny
+	if action := got.CheckWithReadOnly("bash", "curl http://x", false); action != permission.ActionDeny {
+		t.Errorf("unmatched in auto mode should be denied, got %v", action)
+	}
+}
+
+func TestApplyPermissionOverrides_NilEvalBuildsOneWhenNeeded(t *testing.T) {
+	// No config → nil evaluator. Allow rule should still work.
+	p := &Params{AllowTools: []string{"bash:echo *"}}
+	got, err := ApplyPermissionOverrides(nil, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got == nil {
+		t.Fatal("expected evaluator to be built")
+	}
+	if action := got.CheckWithReadOnly("bash", "echo hi", false); action != permission.ActionAllow {
+		t.Errorf("session rule should take effect, got %v", action)
+	}
+}
+
+func TestApplyPermissionOverrides_NilEvalNoOp(t *testing.T) {
+	// No config, no overrides → nil out
+	p := &Params{}
+	got, err := ApplyPermissionOverrides(nil, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if got != nil {
+		t.Errorf("expected nil evaluator, got %v", got)
+	}
+}
+
+// TestApplyPermissionOverrides_ConfigDenyShadowsSessionAllow
+// documents the current behavior: a config-level deny rule wins
+// over a CLI --allow-tool. See the LIMITATION comment on
+// ApplyPermissionOverrides. If this test fails because someone
+// changed permission.Check's rule-iteration order to let session
+// allows beat global denies, update the doc comment too.
+func TestApplyPermissionOverrides_ConfigDenyShadowsSessionAllow(t *testing.T) {
+	globalDeny := []permission.Rule{
+		{Tool: "bash", Pattern: "*", Action: permission.ActionDeny, Source: "config"},
+	}
+	eval := permission.NewEvaluator(permission.ModeDefault, "", globalDeny)
+	p := &Params{AllowTools: []string{"bash:git status"}}
+	got, err := ApplyPermissionOverrides(eval, p, "")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	// Config deny wins — this is the current semantics.
+	action := got.CheckWithReadOnly("bash", "git status", false)
+	if action != permission.ActionDeny {
+		t.Errorf("expected Deny (config wins), got %v — permission "+
+			"evaluator rule order changed? update doc comment on "+
+			"ApplyPermissionOverrides", action)
+	}
+}
+
+// TestApplyPermissionOverrides_MultiColonPattern verifies that
+// parseToolRuleSpec splits on the FIRST colon only, preserving
+// multi-colon patterns in the tail. Referenced by the doc comment
+// on ApplyPermissionOverrides so future readers don't trip.
+func TestApplyPermissionOverrides_MultiColonPattern(t *testing.T) {
+	name, pattern, err := parseToolRuleSpec("bash:echo hi:bye")
+	if err != nil {
+		t.Fatalf("unexpected: %v", err)
+	}
+	if name != "bash" || pattern != "echo hi:bye" {
+		t.Errorf("got (%q, %q), want (bash, echo hi:bye)", name, pattern)
+	}
+}
+
+func TestApplyPermissionOverrides_BadRuleReturnsUsageError(t *testing.T) {
+	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
+	p := &Params{AllowTools: []string{":no-name"}}
+	_, err := ApplyPermissionOverrides(eval, p, "")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var uerr *UsageError
+	if !errors.As(err, &uerr) {
+		t.Errorf("expected UsageError, got %T", err)
 	}
 }
 

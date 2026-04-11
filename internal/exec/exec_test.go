@@ -227,6 +227,52 @@ func TestValidate_DiffVerboseMutex(t *testing.T) {
 	}
 }
 
+func TestValidate_InvalidPermissionMode(t *testing.T) {
+	p := exec.Params{PermissionMode: "yolo"}
+	err := p.Validate()
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "invalid --permission-mode") {
+		t.Errorf("expected permission-mode error, got: %v", err)
+	}
+}
+
+func TestValidate_ValidPermissionModes(t *testing.T) {
+	for _, m := range []string{"", "plan", "auto", "default", "bypass"} {
+		p := exec.Params{PermissionMode: m}
+		if err := p.Validate(); err != nil {
+			t.Errorf("mode %q: unexpected err %v", m, err)
+		}
+	}
+}
+
+func TestValidate_BypassDenyToolMutex(t *testing.T) {
+	p := exec.Params{PermissionMode: "bypass", DenyTools: []string{"bash"}}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected mutex error")
+	}
+	// bypass + allow-tool is fine (allow is no-op under bypass)
+	p = exec.Params{PermissionMode: "bypass", AllowTools: []string{"bash"}}
+	if err := p.Validate(); err != nil {
+		t.Errorf("bypass + allow-tool should be ok, got %v", err)
+	}
+}
+
+func TestValidate_MalformedAllowTool(t *testing.T) {
+	p := exec.Params{AllowTools: []string{":bad"}}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected error on malformed allow-tool")
+	}
+}
+
+func TestValidate_MalformedDenyTool(t *testing.T) {
+	p := exec.Params{DenyTools: []string{""}}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected error on empty deny-tool")
+	}
+}
+
 func TestValidate_JSONAndOutputFormatConflict(t *testing.T) {
 	// --json + --output-format json (mismatch) → error
 	p := exec.Params{JSON: true, OutputFormat: "json"}

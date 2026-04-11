@@ -13,6 +13,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/permission"
 )
 
 // Output format constants. Empty string = text (default).
@@ -81,6 +82,50 @@ type Params struct {
 	SaveTranscript string // full JSONL transcript of the run
 	SaveCost       string // JSON cost report
 	SaveDiff       string // final unified diff of edited files
+
+	// --- Phase 2: permission / mode ---
+	// PermissionMode picks the evaluator mode. Empty = leave at
+	// the evaluator's existing mode (default). Valid values:
+	// "plan" | "auto" | "default" | "bypass". Named
+	// --permission-mode (not --mode) to avoid collision with the
+	// existing `workflow --mode` subcommand flag.
+	PermissionMode string
+
+	// AllowTools is a list of "name[:pattern]" session-allow rules
+	// added on top of the config rules. A pattern-less entry
+	// matches any pattern (pattern "*"). Repeatable CLI flag.
+	AllowTools []string
+
+	// DenyTools mirrors AllowTools but adds deny rules. Deny
+	// takes precedence over allow (see permission.Check at
+	// permission.go:84-92).
+	DenyTools []string
+
+	// DryRun is Phase 2's simplest implementation: alias for
+	// PermissionMode="plan". Spec v7 gave dry-run its own UX
+	// (agent keeps running, writes logged as [DRY-RUN]), but
+	// that needs engine-level tool-execution interception.
+	// Phase 2 takes the plan-mode shortcut; a future phase can
+	// diverge if users ask for it.
+	DryRun bool
+}
+
+// Permission mode constants. Match the permission.Mode enum at
+// internal/permission/permission.go:8-13 but kept as strings for
+// CLI parsing. Empty string = leave at evaluator default.
+const (
+	ModePlan    = "plan"
+	ModeAuto    = "auto"
+	ModeDefault = "default"
+	ModeBypass  = "bypass"
+)
+
+// validPermissionModes is the set of accepted --permission-mode values.
+var validPermissionModes = map[string]bool{
+	ModePlan:    true,
+	ModeAuto:    true,
+	ModeDefault: true,
+	ModeBypass:  true,
 }
 
 // Validate enforces mutual-exclusion rules that Cobra can't express
@@ -115,7 +160,166 @@ func (p *Params) Validate() error {
 		return NewUsageError(
 			"--json conflicts with --output-format %s (use one)", p.OutputFormat)
 	}
+	// --permission-mode value check (value-dependent, can't use Cobra).
+	if p.PermissionMode != "" && !validPermissionModes[p.PermissionMode] {
+		return NewUsageError(
+			"invalid --permission-mode %q (want plan|auto|default|bypass)",
+			p.PermissionMode,
+		)
+	}
+	// --permission-mode bypass + explicit denies is contradictory —
+	// bypass allows everything. Allow entries are still fine (no-op).
+	if p.PermissionMode == ModeBypass && len(p.DenyTools) > 0 {
+		return NewUsageError(
+			"--permission-mode bypass cannot be combined with --deny-tool " +
+				"(bypass allows everything)")
+	}
+	// --allow-tool / --deny-tool format check: each entry must be
+	// "name" or "name:pattern". Empty name is an error.
+	for _, s := range p.AllowTools {
+		if _, _, err := parseToolRuleSpec(s); err != nil {
+			return NewUsageError("invalid --allow-tool %q: %v", s, err)
+		}
+	}
+	for _, s := range p.DenyTools {
+		if _, _, err := parseToolRuleSpec(s); err != nil {
+			return NewUsageError("invalid --deny-tool %q: %v", s, err)
+		}
+	}
 	return nil
+}
+
+// parseToolRuleSpec splits "name" or "name:pattern" into (name, pattern).
+// A pattern-less entry yields pattern "*" to match any input.
+// Empty names return an error.
+func parseToolRuleSpec(spec string) (name, pattern string, err error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return "", "", errors.New("empty tool rule")
+	}
+	if i := strings.IndexByte(spec, ':'); i >= 0 {
+		name = strings.TrimSpace(spec[:i])
+		pattern = strings.TrimSpace(spec[i+1:])
+		if pattern == "" {
+			pattern = "*"
+		}
+	} else {
+		name = spec
+		pattern = "*"
+	}
+	if name == "" {
+		return "", "", errors.New("empty tool name")
+	}
+	return name, pattern, nil
+}
+
+// parsePermissionMode maps a CLI mode string to a permission.Mode enum.
+// Returns an error for unknown values; empty string returns
+// (ModeDefault, false, nil) so the caller knows to skip SetMode().
+func parsePermissionMode(s string) (mode permission.Mode, set bool, err error) {
+	switch s {
+	case "":
+		return permission.ModeDefault, false, nil
+	case ModePlan:
+		return permission.ModePlan, true, nil
+	case ModeAuto:
+		return permission.ModeAuto, true, nil
+	case ModeDefault:
+		return permission.ModeDefault, true, nil
+	case ModeBypass:
+		return permission.ModeBypass, true, nil
+	default:
+		return 0, false, fmt.Errorf("invalid permission mode %q", s)
+	}
+}
+
+// ApplyPermissionOverrides mutates eval in place using the Phase 2
+// CLI flags on p: --permission-mode, --allow-tool, --deny-tool,
+// --dry-run. Returns a UsageError on bad input.
+//
+// Order:
+//  1. --dry-run aliases to --permission-mode plan (only if mode is
+//     empty, so an explicit --permission-mode wins).
+//  2. --permission-mode overrides eval.mode.
+//  3. --allow-tool entries become session allow rules.
+//  4. --deny-tool entries become session deny rules.
+//
+// If eval is nil (no config, no permission rules) but the user has
+// any session overrides, we construct a bare evaluator so the
+// overrides still take effect. The caller is responsible for
+// installing the returned evaluator back onto engine params.
+//
+// LIMITATION (noted by CC Phase 2 review):
+// permission.Check iterates all DENY rules (session + global) before
+// any ALLOW rules (see permission.go:83-104). That means a
+// config-level `deny bash:*` cannot be overridden by `--allow-tool
+// bash:git *` on the command line — the config deny wins first.
+// The same shadowing applies to built-in mode denies:
+//   - `--permission-mode plan --allow-tool write` still denies
+//     write because plan mode short-circuits write at line 74
+//     before rule iteration.
+//   - `--permission-mode auto --allow-tool <x>` DOES work because
+//     auto-mode only denies at the end if no allow rule matched.
+//
+// Phase 2 documents these rather than restructuring the evaluator's
+// iteration order, which would affect every existing user. If this
+// becomes a real UX friction point, a future phase can add a
+// third rule tier (e.g. "session-override") that beats global deny.
+// Until then, users who need to override config denies must edit
+// their config file, and users who need to override plan mode
+// should use a different mode.
+//
+// Colon parsing note: parseToolRuleSpec splits on the FIRST colon,
+// so `--allow-tool bash:echo hi:bye` yields name="bash",
+// pattern="echo hi:bye". Multi-colon patterns are preserved,
+// but the first colon is always the name/pattern separator.
+func ApplyPermissionOverrides(eval *permission.Evaluator, p *Params, projectRoot string) (*permission.Evaluator, error) {
+	mode := p.PermissionMode
+	if mode == "" && p.DryRun {
+		// Dry-run alias. Spec v7 §2 Permission/mode:
+		// "--dry-run implies --permission-mode plan for write tools"
+		mode = ModePlan
+	}
+	m, set, err := parsePermissionMode(mode)
+	if err != nil {
+		return eval, NewUsageError("%v", err)
+	}
+
+	// Build an evaluator if the config didn't give us one but we
+	// have any overrides to apply. Without this, --allow-tool /
+	// --deny-tool on a config-less project would silently drop.
+	needEval := set || len(p.AllowTools) > 0 || len(p.DenyTools) > 0
+	if eval == nil && needEval {
+		eval = permission.NewEvaluator(permission.ModeDefault, projectRoot, nil)
+	}
+	if eval == nil {
+		return nil, nil
+	}
+
+	if set {
+		eval.SetMode(m)
+	}
+	for _, s := range p.AllowTools {
+		name, pattern, perr := parseToolRuleSpec(s)
+		if perr != nil {
+			return eval, NewUsageError("invalid --allow-tool %q: %v", s, perr)
+		}
+		eval.AddSessionRule(permission.Rule{
+			Tool: name, Pattern: pattern,
+			Action: permission.ActionAllow, Source: "cli",
+		})
+	}
+	for _, s := range p.DenyTools {
+		name, pattern, perr := parseToolRuleSpec(s)
+		if perr != nil {
+			return eval, NewUsageError("invalid --deny-tool %q: %v", s, perr)
+		}
+		eval.AddSessionRule(permission.Rule{
+			Tool: name, Pattern: pattern,
+			Action: permission.ActionDeny, Source: "cli",
+		})
+	}
+	return eval, nil
 }
 
 // effectiveFormat returns the canonical format string after normalizing

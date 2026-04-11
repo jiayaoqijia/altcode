@@ -54,6 +54,12 @@ type cliFlags struct {
 	saveTranscript string
 	saveCost       string
 	saveDiff       string
+
+	// Phase 2: permission / mode
+	permissionMode string
+	allowTools     []string
+	denyTools      []string
+	dryRun         bool
 }
 
 func main() {
@@ -131,8 +137,26 @@ func main() {
 	root.Flags().StringVar(&flags.saveDiff, "save-diff", "",
 		"Write final unified diff to file (Phase 7)")
 
+	// --- Phase 2: permission / mode ---
+	root.Flags().StringVar(&flags.permissionMode, "permission-mode", "",
+		"Permission mode: plan | auto | default | bypass")
+	root.Flags().StringArrayVar(&flags.allowTools, "allow-tool", nil,
+		"Allow a tool [name] or [name:pattern] for this session (repeatable)")
+	root.Flags().StringArrayVar(&flags.denyTools, "deny-tool", nil,
+		"Deny a tool [name] or [name:pattern] for this session (repeatable)")
+	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
+		"Alias for --permission-mode plan (read-only, no writes)")
+
 	// Cobra-enforced mutual exclusion (flag presence only — value-dependent
 	// rules like --prompt-file - vs --image - live in exec.Params.Validate).
+	//
+	// Intentionally NOT adding `permission-mode + dry-run` here:
+	// ApplyPermissionOverrides is already doing "explicit mode wins"
+	// with dry-run as a fallback alias, and that logic is reached both
+	// from the CLI and from config-file PermissionMode. Adding a Cobra
+	// mutex here would make the helper's precedence branch unreachable
+	// from the CLI (dead code) while leaving the config-file case open.
+	// Let the helper be the single source of truth.
 	root.MarkFlagsMutuallyExclusive("quiet", "verbose")
 	root.MarkFlagsMutuallyExclusive("quiet", "show-system")
 
@@ -328,6 +352,30 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 	// rules at all.
 	permEval := buildPermissionEvaluator(cfg, projectRoot)
 
+	// Phase 2: translate CLI permission flags into evaluator mutations
+	// BEFORE branching into exec vs TUI so both paths honor the flags.
+	// (Codex Phase 2 review caught that the earlier placement, inside
+	// the headless branch, meant `altcode --dry-run` without a prompt
+	// started a normal interactive session.)
+	//
+	// Build an ep shell just for Validate + ApplyPermissionOverrides —
+	// the full exec.Params is constructed inside the headless branch
+	// below with all the Phase 1 output fields.
+	permShell := exec.Params{
+		PermissionMode: flags.permissionMode,
+		AllowTools:     flags.allowTools,
+		DenyTools:      flags.denyTools,
+		DryRun:         flags.dryRun,
+	}
+	if err := permShell.Validate(); err != nil {
+		return err
+	}
+	newPermEval, err := exec.ApplyPermissionOverrides(permEval, &permShell, projectRoot)
+	if err != nil {
+		return err
+	}
+	permEval = newPermEval
+
 	params := engine.EngineParams{
 		Config:       cfg,
 		Instructions: instructions,
@@ -342,10 +390,15 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 
 	if prompt != "" {
 		// Build exec.Params from the engine params + CLI flags.
-		// Phase 1 adds output-format + observability fields; later
-		// phases extend this struct with permission/input/artifact
-		// flags. Keeping construction in one place makes each phase
-		// a localized additive edit.
+		// Phase 1 adds output-format + observability fields; Phase 2
+		// adds permission / mode fields. Later phases extend this
+		// struct with input/artifact flags. Keeping construction in
+		// one place makes each phase a localized additive edit.
+		//
+		// Validate runs here (in addition to exec.Run) so Phase 1
+		// rules like --quiet+--verbose surface before the engine is
+		// built. Phase 2 rules were already validated via permShell
+		// above, but re-running is harmless and consistent.
 		ep := exec.Params{
 			EngineParams:   params,
 			Prompt:         prompt,
@@ -362,6 +415,13 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			SaveTranscript: flags.saveTranscript,
 			SaveCost:       flags.saveCost,
 			SaveDiff:       flags.saveDiff,
+			PermissionMode: flags.permissionMode,
+			AllowTools:     flags.allowTools,
+			DenyTools:      flags.denyTools,
+			DryRun:         flags.dryRun,
+		}
+		if err := ep.Validate(); err != nil {
+			return err
 		}
 		return runExec(ep)
 	}
