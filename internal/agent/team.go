@@ -182,6 +182,12 @@ func (t *Team) PendingMessages(id string) []string {
 // WaitAll blocks until all agents finish or timeout, returning results.
 // On timeout, the per-agent cancel func is invoked so the child engine
 // stops processing instead of running to completion in the background.
+//
+// Uses a single ctx-with-deadline shared across iterations. The
+// previous version used time.After() outside the loop, which fires
+// exactly once — after the first stuck agent consumed the channel,
+// every subsequent <-deadline blocked forever and the whole goroutine
+// deadlocked when more than one agent was stuck.
 func (t *Team) WaitAll(timeout time.Duration) map[string]string {
 	t.mu.Lock()
 	agents := make(map[string]*RunningAgent, len(t.agents))
@@ -190,11 +196,13 @@ func (t *Team) WaitAll(timeout time.Duration) map[string]string {
 	}
 	t.mu.Unlock()
 
-	deadline := time.After(timeout)
+	deadlineCtx, deadlineCancel := context.WithTimeout(context.Background(), timeout)
+	defer deadlineCancel()
+
 	for id, ra := range agents {
 		select {
 		case <-ra.Done:
-		case <-deadline:
+		case <-deadlineCtx.Done():
 			// Cancel the spawned agent so its engine loop exits
 			// promptly. Then wait briefly for the goroutine to finish
 			// flushing its result; if it never does, record "timeout".

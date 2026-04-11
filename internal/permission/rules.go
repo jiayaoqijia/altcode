@@ -37,15 +37,31 @@ func matchRule(rule Rule, toolName, pattern string) bool {
 	return globMatch(rule.Pattern, arg)
 }
 
-// hasShellSeparator reports whether s contains a shell command separator
-// or substitution marker that would let an attacker chain extra commands
-// past a permission check.
+// hasShellSeparator reports whether s contains a shell command
+// separator or substitution marker OUTSIDE of single or double quotes.
+// Quoted separators are part of an argument to a single command (e.g.
+// `grep 'a|b' file.txt` or `awk '/foo|bar/ {print}'`) and don't bypass
+// the permission check.
 func hasShellSeparator(s string) bool {
-	// Skip when the only "|" is inside a glob (e.g. {a,b|c}) — but in
-	// practice glob extensions don't use |, and `find . -name "*.go"` is
-	// fine because it doesn't use any separator.
+	var inSingle, inDouble bool
 	for i := 0; i < len(s); i++ {
-		switch s[i] {
+		c := s[i]
+		// Toggle quote state. We don't try to handle escape sequences
+		// inside double quotes — the goal here is conservative: if
+		// the entire command is a normal POSIX command line, we just
+		// want to know whether a top-level separator exists.
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		switch c {
 		case ';':
 			return true
 		case '|':
@@ -66,13 +82,13 @@ func hasShellSeparator(s string) bool {
 	return false
 }
 
-// splitShellSegments splits s on shell separators into individual
-// command segments. The split is naive — it doesn't honor quoting —
-// but the goal is conservative: if ANY split looks like a separate
-// command, every segment must be allowlisted.
+// splitShellSegments splits s on TOP-LEVEL shell separators into
+// individual command segments. Honors single and double quotes so
+// `grep 'a|b' file` produces a single segment, not two.
 func splitShellSegments(s string) []string {
 	var segments []string
 	var current strings.Builder
+	var inSingle, inDouble bool
 	flush := func() {
 		seg := current.String()
 		current.Reset()
@@ -82,23 +98,34 @@ func splitShellSegments(s string) []string {
 	}
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		switch c {
-		case ';', '\n':
-			flush()
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			current.WriteByte(c)
 			continue
-		case '|':
-			// "||" or "|" both terminate a segment.
-			flush()
-			if i+1 < len(s) && s[i+1] == '|' {
-				i++
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			current.WriteByte(c)
+			continue
+		}
+		if !inSingle && !inDouble {
+			switch c {
+			case ';', '\n':
+				flush()
+				continue
+			case '|':
+				flush()
+				if i+1 < len(s) && s[i+1] == '|' {
+					i++
+				}
+				continue
+			case '&':
+				flush()
+				if i+1 < len(s) && s[i+1] == '&' {
+					i++
+				}
+				continue
 			}
-			continue
-		case '&':
-			flush()
-			if i+1 < len(s) && s[i+1] == '&' {
-				i++
-			}
-			continue
 		}
 		current.WriteByte(c)
 	}

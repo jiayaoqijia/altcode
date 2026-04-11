@@ -42,7 +42,7 @@ func Run(ctx context.Context, p RunParams) error {
 			case OpAbort:
 				return fmt.Errorf("workflow aborted by user")
 			case OpSkip:
-				trySendEvent(p.Events, PhaseEvent{Phase: phaseName, Type: KindPhaseDone, Text: "skipped"})
+				trySendEventCtx(ctx, p.Events, PhaseEvent{Phase: phaseName, Type: KindPhaseDone, Text: "skipped"})
 				results[phaseName] = &PhaseResult{PhaseID: phaseName, Verdict: VerdictSkipped}
 				continue
 			case OpPause:
@@ -66,7 +66,7 @@ func Run(ctx context.Context, p RunParams) error {
 		skip := false
 		for _, dep := range phase.DependsOn {
 			if r, ok := results[dep]; ok && r.Verdict == VerdictFail {
-				trySendEvent(p.Events, PhaseEvent{Phase: phaseName, Type: KindPhaseDone, Text: "skipped (dependency failed)"})
+				trySendEventCtx(ctx, p.Events, PhaseEvent{Phase: phaseName, Type: KindPhaseDone, Text: "skipped (dependency failed)"})
 				results[phaseName] = &PhaseResult{PhaseID: phaseName, Verdict: VerdictSkipped}
 				skip = true
 				break
@@ -93,7 +93,7 @@ func Run(ctx context.Context, p RunParams) error {
 		result := runPhase(ctx, p, phase, priorOutputs)
 		results[phaseName] = result
 
-		trySendEvent(p.Events, PhaseEvent{
+		trySendEventCtx(ctx, p.Events, PhaseEvent{
 			Phase: phaseName,
 			Type:  KindPhaseDone,
 			Text:  result.Verdict.String(),
@@ -305,9 +305,23 @@ func mapEventType(t agent.AgentEventType) PhaseEventKind {
 //
 // Other event types still use a non-blocking send so a slow consumer
 // can drop chatty per-tool events without blocking the workflow.
+//
+// Pass a real ctx through tsCtx so a closed/dead consumer can't hang
+// the orchestra goroutine forever — the previous unconditional send
+// on PhaseDone would block forever if the TUI was already gone.
 func trySendEvent(ch chan<- PhaseEvent, ev PhaseEvent) {
+	trySendEventCtx(context.Background(), ch, ev)
+}
+
+// trySendEventCtx is the ctx-aware variant. Most call sites have a
+// real workflow context — they should use this directly instead of
+// the legacy trySendEvent shim.
+func trySendEventCtx(ctx context.Context, ch chan<- PhaseEvent, ev PhaseEvent) {
 	if ev.Type == KindPhaseDone {
-		ch <- ev
+		select {
+		case ch <- ev:
+		case <-ctx.Done():
+		}
 		return
 	}
 	select {

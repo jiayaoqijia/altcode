@@ -138,6 +138,20 @@ func matchPattern(cmd, pattern string) bool {
 
 // cmdTokenMatches reports whether a command-line token matches a
 // pattern token under the rules described in matchPattern.
+//
+// Prefix matching is RESTRICTED so command-name patterns don't
+// false-positive on longer command names. The rules:
+//
+//   - exact equality always matches
+//   - basename equality matches ('rm' catches '/bin/rm')
+//   - argument-style prefix ('if=', '/dev/sd') matches when patTok
+//     contains '=' or '/' so 'if=' catches 'if=/dev/zero' and
+//     '/dev/sd' catches '/dev/sda'
+//   - versioned-binary prefix matches when the cmdTok char right
+//     after patTok is '.' or '-' so 'mkfs' catches 'mkfs.ext4' and
+//     'gpg' catches 'gpg-agent', but 'mv' does NOT catch 'mvn',
+//     'cp' does NOT catch 'cpack', and 'sudo' does NOT catch
+//     'sudoedit'
 func cmdTokenMatches(cmdTok, patTok string) bool {
 	if cmdTok == patTok {
 		return true
@@ -147,8 +161,14 @@ func cmdTokenMatches(cmdTok, patTok string) bool {
 			return true
 		}
 	}
-	if strings.HasPrefix(cmdTok, patTok) {
+	if strings.ContainsAny(patTok, "=/") && strings.HasPrefix(cmdTok, patTok) {
 		return true
+	}
+	if strings.HasPrefix(cmdTok, patTok) && len(cmdTok) > len(patTok) {
+		next := cmdTok[len(patTok)]
+		if next == '.' || next == '-' {
+			return true
+		}
 	}
 	return false
 }
