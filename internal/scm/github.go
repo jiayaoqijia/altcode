@@ -202,6 +202,12 @@ func (g *GitHubCLISCM) CIStatus(
 func (g *GitHubCLISCM) CILogs(
 	ctx context.Context, sha string,
 ) (string, error) {
+	// Mirror the validation that CIStatus already does — without it
+	// an attacker-supplied sha could redirect the gh api request to
+	// an arbitrary endpoint.
+	if err := validateSHA(sha); err != nil {
+		return "", err
+	}
 	endpoint := fmt.Sprintf(
 		"repos/%s/%s/commits/%s/check-runs",
 		g.owner, g.repo, sha,

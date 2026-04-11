@@ -126,8 +126,10 @@ func TestCIStatus_API(t *testing.T) {
 		baseURL: srv.URL,
 	}
 
+	// Use a valid 7+ char hex SHA — validateSHA rejects shorter values
+	// to defend against injection through the URL path.
 	status, err := g.CIStatus(
-		context.Background(), "abc123")
+		context.Background(), "abc1234")
 	assertErrNil(t, "CIStatus", err)
 	assertEqual(t, "status", status, workspace.CIPass)
 }
@@ -142,11 +144,14 @@ func TestGetPR_API(t *testing.T) {
 					Title:   "fix: bug",
 					HTMLURL: "https://github.com/acme/widgets/pull/42",
 					State:   "open",
-					Head:    apiRef{Ref: "fix-bug", SHA: "sha1"},
-					Base:    apiRef{Ref: "main", SHA: "sha2"},
+					// Realistic 7+ char hex SHAs so validateSHA accepts
+					// them — the previous "sha1" placeholder was 4
+					// characters and tripped the new validation guard.
+					Head: apiRef{Ref: "fix-bug", SHA: "abc1234"},
+					Base: apiRef{Ref: "main", SHA: "def5678"},
 				}
 				json.NewEncoder(w).Encode(resp)
-			case "/repos/acme/widgets/commits/sha1/check-runs":
+			case "/repos/acme/widgets/commits/abc1234/check-runs":
 				resp := ghCheckRunsResp{
 					CheckRuns: []ghCheckRun{
 						{

@@ -364,6 +364,12 @@ func (g *GitHubAPISCM) MergePR(
 func (g *GitHubAPISCM) CIStatus(
 	ctx context.Context, sha string,
 ) (workspace.CICheckStatus, error) {
+	// Without validation, an attacker-supplied sha like "../issues/1"
+	// would URL-path-clean to a different GitHub API endpoint and
+	// leak information from the wrong resource.
+	if err := validateSHA(sha); err != nil {
+		return workspace.CIUnknown, err
+	}
 	var resp ghCheckRunsResp
 	err := g.doJSON(ctx, http.MethodGet,
 		g.repoPath("commits/%s/check-runs", sha), nil, &resp)
@@ -388,6 +394,10 @@ func (g *GitHubAPISCM) CIStatus(
 func (g *GitHubAPISCM) CILogs(
 	ctx context.Context, sha string,
 ) (string, error) {
+	// Same path-injection guard as CIStatus.
+	if err := validateSHA(sha); err != nil {
+		return "", err
+	}
 	var resp ghCheckRunsResp
 	err := g.doJSON(ctx, http.MethodGet,
 		g.repoPath("commits/%s/check-runs", sha), nil, &resp)
