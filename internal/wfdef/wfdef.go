@@ -63,10 +63,37 @@ func Parse(data []byte) (*WorkflowDef, error) {
 	if def.Name == "" {
 		return nil, fmt.Errorf("workflow name is required")
 	}
+	// Validate phases up front: empty names, duplicates, and bad
+	// depends_on references must fail at parse time, not deferred
+	// to TopoSort during execution. A workflow with a typo in
+	// 'depends_on' should be rejected when the user tries to load
+	// it, not silently accepted and then explode mid-run.
+	seen := map[string]bool{}
 	for i := range def.Phases {
 		if def.Phases[i].OnFailure == "" {
 			def.Phases[i].OnFailure = FailureAbort
 		}
+		name := def.Phases[i].Name
+		if name == "" {
+			return nil, fmt.Errorf("phase %d has no name", i)
+		}
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate phase name %q", name)
+		}
+		seen[name] = true
+	}
+	for i := range def.Phases {
+		for _, dep := range def.Phases[i].DependsOn {
+			if !seen[dep] {
+				return nil, fmt.Errorf("phase %q depends on unknown phase %q", def.Phases[i].Name, dep)
+			}
+		}
+	}
+	// Cycle check: if TopoSort returns an error, the dependency
+	// graph is invalid. Run it once at parse time so the user finds
+	// out immediately instead of after agents have started.
+	if _, err := def.TopoSort(); err != nil {
+		return nil, fmt.Errorf("invalid workflow dependency graph: %w", err)
 	}
 	return &def, nil
 }
@@ -85,8 +112,16 @@ func ParseFile(path string) (*WorkflowDef, error) {
 	return def, nil
 }
 
-// Discover finds all workflow files in the given directories.
+// DiscoverWarnings collects per-file parse failures from the most
+// recent Discover call so the TUI can surface why a workflow file
+// failed to load instead of silently dropping it.
+var DiscoverWarnings []string
+
+// Discover finds all workflow files in the given directories. Parse
+// failures are recorded in DiscoverWarnings rather than returned as
+// errors so a single broken workflow doesn't hide all the others.
 func Discover(dirs ...string) ([]*WorkflowDef, error) {
+	DiscoverWarnings = DiscoverWarnings[:0]
 	var defs []*WorkflowDef
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
@@ -100,8 +135,11 @@ func Discover(dirs ...string) ([]*WorkflowDef, error) {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
 				continue
 			}
-			def, err := ParseFile(filepath.Join(dir, e.Name()))
+			path := filepath.Join(dir, e.Name())
+			def, err := ParseFile(path)
 			if err != nil {
+				DiscoverWarnings = append(DiscoverWarnings,
+					fmt.Sprintf("workflow %s: %v", path, err))
 				continue
 			}
 			defs = append(defs, def)
