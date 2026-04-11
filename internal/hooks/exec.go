@@ -43,7 +43,19 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 		}, nil
 	}
 
-	// Other errors = hook failed, allow by default
+	// Timeout = fail CLOSED (deny). For a security control, an
+	// unresponsive hook should never silently allow the action.
+	// Previously this turned into 'allow', which let dangerous
+	// commands slip through if a slow hook validator stalled.
+	if ctx.Err() == context.DeadlineExceeded {
+		return &Result{
+			Decision: "deny",
+			Message:  fmt.Sprintf("hook timed out after %ds; failing closed", timeout),
+		}, nil
+	}
+
+	// Other errors = hook itself failed (process spawn, etc).
+	// Surface the error to the caller so it can decide policy.
 	if err != nil {
 		return nil, fmt.Errorf("hook command failed: %w: %s", err, stderr.String())
 	}

@@ -698,7 +698,10 @@ func (e *Engine) dispatchTools(
 		e.perm.RecordCall(tc.Name, t.PermissionPattern(tc.Input))
 	}
 
-	// Fire PreToolUse hooks — may deny individual calls
+	// Fire PreToolUse hooks — may deny individual calls.
+	// Aggregate ALL deny messages (a chain of validators may produce
+	// several useful explanations) and mark the eager result as an
+	// error so the tool tree renders red ✗ instead of green ✓.
 	for i, tc := range toolCalls {
 		hookResults, _ := e.hooks.Fire(ctx, hooks.PreToolUse, hooks.Input{
 			Event:     hooks.PreToolUse,
@@ -708,11 +711,12 @@ func (e *Engine) dispatchTools(
 		if hooks.HasDeny(hookResults) {
 			msg := "Blocked by hook"
 			if msgs := hooks.Messages(hookResults); len(msgs) > 0 {
-				msg = msgs[0]
+				msg = strings.Join(msgs, "; ")
 			}
 			calls[i].EagerResult = &tool.Result{
 				Output: msg,
 				Title:  tc.Name,
+				Error:  fmt.Errorf("hook deny: %s", msg),
 			}
 		}
 	}
