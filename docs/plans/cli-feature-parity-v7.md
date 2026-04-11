@@ -1,5 +1,52 @@
 # altcode CLI Feature Parity Spec (v7)
 
+## Implementation status (living section)
+
+| Phase | Status | Commit | Notes |
+|-------|--------|--------|-------|
+| 1 — output format + observability | **shipped** | 4fcc3d1 | 15 unit tests; both CC+Codex PASS on round 2 |
+| 2 — permission mode + allow/deny tools | **shipped** | 2aadd77 | 9 unit tests; documented config-deny-shadowing limitation |
+| 3 — permission-prompt-tool | pending | | Unblocked by Phase 2 |
+| 4 — continue + fork-session + session-db + list-sessions | **shipped** | (this commit) | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
+| 5 — input flags | pending | | |
+| 6 — hooks + ALTCODE_HOOK_DEPTH | pending | | |
+| 7 — save-* artifacts + --commit | pending | | |
+| 8 — MaxTurns + CostBudget | pending | | |
+| 9 — batch runner | pending | | |
+| 10 — inspection flags | pending | | |
+| **11 — SIGTERM** | **shipped** | 4fcc3d1 | Folded into Phase 1 |
+| 12 — --print-tree ASCII renderer | pending | | |
+| 13 — integration tests | pending | | Partially grown per-phase alongside each implementation |
+
+### Deviations from the design doc (tracked here to keep git history clean)
+
+**Phase 4:**
+- `--session-dir` renamed to `--session-db` because `store.Open` takes
+  a file path, not a directory. CC Phase 4 review caught the semantic
+  mismatch as a BLOCKER before the commit.
+- Added `store.DB.ForkSession` helper that does the message copy
+  inside a single transaction. Original spec called for looping
+  `AddMessage` calls, which would have caused a 10k-message perf
+  cliff (each insert fsync'd individually).
+- Added `store.ErrSessionNotFound` sentinel error so `errors.Is`
+  replaces brittle `strings.Contains(err.Error(), "not found")`
+  matching in the `forkSession` wrapper.
+- Forked messages preserve their original `CreatedAt` timestamps
+  (not `time.Now()`) so audit/ordering semantics survive the fork.
+
+**Phase 11 (folded into Phase 1):**
+- `SIGTERM` trap added alongside `SIGINT` during the `runExec`
+  signature rewrite. Too trivial to ship as its own phase.
+
+**Phase 2:**
+- Known limitation: config-level `deny bash:*` rules shadow CLI
+  `--allow-tool bash:git *` because `permission.Check` iterates
+  all denies before any allows. Documented on
+  `exec.ApplyPermissionOverrides` with a pinning regression test;
+  future work could add a "session-override" rule tier.
+
+---
+
 ## Goal
 Make `altcode` CLI cover ~90% of altcode/CC/Codex TUI features so a user
 who lives in vim/tmux/scripts gets the full agentic coding experience

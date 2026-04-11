@@ -75,6 +75,11 @@ was reviewed across 7 rounds between CC and Codex before starting.
   permission evaluator before the exec/TUI branch so both paths
   honor the flags. Config deny still shadows CLI allow — documented,
   not changed.
+- **Phase 4**: `--continue` (alias), `--fork-session`, `--session-db`,
+  `--list-sessions`. Fork copy runs in a single SQLite transaction
+  via new `store.DB.ForkSession`. Named `--session-db` not
+  `--session-dir` because `store.Open` takes a file path, not a
+  directory (CC Phase 4 review caught this).
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

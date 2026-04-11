@@ -12,6 +12,27 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 4: session / history)
+
+- `--continue` resumes the most recent session (CC-compat alias
+  for `--last`).
+- `--fork-session <id>` branches an existing session into a new
+  one without mutating the source. Useful for experimenting from
+  a checkpoint. Runs in a single SQLite transaction so a crash or
+  cancel can't leave half-forked state.
+- `--session-db <path>` overrides the SQLite file used for
+  session storage (default: XDG/platform data dir). Named
+  `--session-db` (not `--session-dir`) because `store.Open` takes
+  a file path, not a directory.
+- `--list-sessions` root-flag shortcut prints sessions and exits
+  (same as the existing `altcode sessions` subcommand, but
+  accessible from any invocation).
+- New `store.DB.ForkSession` helper does the message copy inside
+  a `BEGIN/COMMIT` — 10k-message forks go from seconds to tens
+  of ms because we no longer fsync per row.
+- `altcode sessions` subcommand now honors `--session-db` so the
+  subcommand and root-flag shortcut read from the same database.
+
 ### Added (Phase 2: permission / mode)
 
 - `--permission-mode plan|auto|default|bypass` picks the permission

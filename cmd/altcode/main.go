@@ -60,6 +60,12 @@ type cliFlags struct {
 	allowTools     []string
 	denyTools      []string
 	dryRun         bool
+
+	// Phase 4: session / history
+	continueSession bool   // --continue, CC-compat alias for --last
+	forkSession     string // --fork-session <id>, branch off past session
+	sessionDB       string // --session-db, override ~/.altcode/sessions.db path
+	listSessions    bool   // --list-sessions, print + exit
 }
 
 func main() {
@@ -147,6 +153,30 @@ func main() {
 	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
 		"Alias for --permission-mode plan (read-only, no writes)")
 
+	// --- Phase 4: session / history ---
+	root.Flags().BoolVar(&flags.continueSession, "continue", false,
+		"Resume most recent session (CC-compat alias for --last)")
+	root.Flags().StringVar(&flags.forkSession, "fork-session", "",
+		"Branch off a past session into a new one (by session ID)")
+	// Named --session-db (not --session-dir) because store.Open takes
+	// a FILE path, not a directory. Using --session-dir would mislead
+	// users into passing a directory that becomes a SQLite file named
+	// after the last path segment. Spec v7 called this a BLOCKER from
+	// the Phase 4 review.
+	root.PersistentFlags().StringVar(&flags.sessionDB, "session-db", "",
+		"Override sessions.db file path (default: XDG/platform data dir)")
+	root.Flags().BoolVar(&flags.listSessions, "list-sessions", false,
+		"Print sessions and exit (alias for `altcode sessions`)")
+
+	// Cobra mutex: the session-entry flags each pick a different
+	// strategy and can't combine cleanly. --continue and --last
+	// mean the same thing (continue is a CC-compat alias), but
+	// we exclude them from each other so users don't accidentally
+	// set both and then wonder why one is ignored.
+	root.MarkFlagsMutuallyExclusive("continue", "last")
+	root.MarkFlagsMutuallyExclusive("continue", "session", "fork-session")
+	root.MarkFlagsMutuallyExclusive("last", "session", "fork-session")
+
 	// Cobra-enforced mutual exclusion (flag presence only — value-dependent
 	// rules like --prompt-file - vs --image - live in exec.Params.Validate).
 	//
@@ -164,7 +194,11 @@ func main() {
 		Use:   "sessions",
 		Short: "List recent sessions",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return listSessions()
+			// Honor --session-db from root PersistentFlags so the
+			// subcommand and `--list-sessions` root-flag shortcut
+			// read from the same database. Without inheriting, the
+			// subcommand silently fell back to the default path.
+			return listSessionsFromDB(flags.sessionDB)
 		},
 	}
 	root.AddCommand(sessCmd)
@@ -307,11 +341,34 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 }
 
 func run(cfg *config.Config, prompt string, flags cliFlags) error {
-	// Skip SQLite in exec mode when no session resume needed — saves ~5-10ms
-	needsDB := flags.last || flags.sessionID != "" || prompt == ""
+	// Phase 4 shortcut: --list-sessions prints and exits before
+	// doing any setup. Honors --session-db so users can list
+	// sessions from an alternate database path.
+	if flags.listSessions {
+		return listSessionsFromDB(flags.sessionDB)
+	}
+
+	// --continue is a CC-compat alias for --last; merge them early
+	// so downstream logic only needs to check flags.last.
+	if flags.continueSession {
+		flags.last = true
+	}
+
+	// Skip SQLite in exec mode when no session resume needed — saves ~5-10ms.
+	// --fork-session also needs DB (reads source, creates destination).
+	needsDB := flags.last || flags.sessionID != "" || flags.forkSession != "" || prompt == ""
 	var db *store.DB
 	if needsDB {
-		db, _ = store.Open("")
+		var err error
+		db, err = store.Open(flags.sessionDB)
+		if err != nil {
+			// Previously errors were swallowed here; --list-sessions
+			// did surface them. Consistent error handling means a
+			// bad --session-db path fails fast on the main run path
+			// too, instead of silently falling back to no-DB and
+			// losing the user's session-resume intent.
+			return fmt.Errorf("open session store: %w", err)
+		}
 	}
 	defer func() {
 		if db != nil {
@@ -384,7 +441,20 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		Skills:       skills,
 		Perm:         permEval,
 	}
-	if err := loadSession(db, &params, flags.last, flags.sessionID); err != nil {
+	// Phase 4: --fork-session copies messages from an existing
+	// session into a new one, then runs the new session. Takes
+	// precedence over --last and --session because the cobra mutex
+	// above forbids combining them.
+	effectiveSessionID := flags.sessionID
+	if flags.forkSession != "" {
+		forkedID, err := forkSession(db, flags.forkSession, cfg.Model)
+		if err != nil {
+			return err
+		}
+		effectiveSessionID = forkedID
+	}
+
+	if err := loadSession(db, &params, flags.last, effectiveSessionID); err != nil {
 		return err
 	}
 
@@ -794,7 +864,15 @@ func truncateMain(s string, n int) string {
 }
 
 func listSessions() error {
-	db, err := store.Open("")
+	return listSessionsFromDB("")
+}
+
+// listSessionsFromDB opens the store at the given file path (empty =
+// default) and prints all sessions. Shared by the `sessions` subcommand
+// and the Phase 4 `--list-sessions` root flag. Passing a custom
+// sessionDB path lets users inspect a non-default database file.
+func listSessionsFromDB(sessionDB string) error {
+	db, err := store.Open(sessionDB)
 	if err != nil {
 		return fmt.Errorf("open store: %w", err)
 	}
@@ -819,6 +897,45 @@ func listSessions() error {
 			s.ID, title, s.Model, s.UpdatedAt.Format("2006-01-02 15:04"))
 	}
 	return nil
+}
+
+// forkSession thin-wraps store.DB.ForkSession to produce a
+// *exec.UsageError on missing-source (so the top-level wrapper
+// returns exit 64 EX_USAGE instead of opaque errors) and emits a
+// diagnostic line to stderr on success.
+//
+// The heavy lifting (transaction, message copy, prepared statement)
+// lives in the store package so the ~10k-message perf cliff from
+// per-row fsync doesn't apply.
+func forkSession(db *store.DB, sourceID, modelFallback string) (string, error) {
+	if db == nil {
+		return "", exec.NewUsageError("--fork-session requires a session store")
+	}
+	newSess, copied, err := db.ForkSession(sourceID, "", modelFallback)
+	if err != nil {
+		// Distinguish "source not found" from I/O errors so users
+		// get a crisp UsageError for the common typo case. Use
+		// errors.Is against the sentinel instead of substring
+		// matching (CC Phase 4 v2 nit).
+		if errors.Is(err, store.ErrSessionNotFound) {
+			return "", exec.NewUsageError(
+				"--fork-session: source session %q not found "+
+					"(run `altcode --list-sessions` to see available IDs)",
+				sourceID)
+		}
+		return "", err
+	}
+	fmt.Fprintf(os.Stderr, "altcode: forked %s → %s (%d messages copied)\n",
+		shortID(sourceID), shortID(newSess.ID), copied)
+	return newSess.ID, nil
+}
+
+// shortID returns the first 8 characters of a session ID, for display.
+func shortID(id string) string {
+	if len(id) < 8 {
+		return id
+	}
+	return id[:8]
 }
 
 func loadConfig(modelFlag, configFlag, themeFlag string) *config.Config {
