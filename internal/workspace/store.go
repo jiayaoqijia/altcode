@@ -109,19 +109,32 @@ func (s *Store) AppendActivity(id string, entry any) error {
 	if err != nil {
 		return fmt.Errorf("open activity: %w", err)
 	}
-	// Explicit closure ensures unlock happens before close.
-	// Without this, separate defers would close first (LIFO), then unlock a closed fd.
+	// Track lock ownership explicitly so we never call LOCK_UN on an
+	// fd we don't actually hold. Previously the deferred cleanup
+	// blindly called LOCK_UN even when Flock had failed, which is
+	// the classic 'unlock without ownership' shape.
+	locked := false
 	defer func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+		if locked {
+			syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+		}
 		f.Close()
 	}()
 
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX); err != nil {
 		return fmt.Errorf("flock: %w", err)
 	}
+	locked = true
 
 	if _, err := f.WriteString(line); err != nil {
 		return fmt.Errorf("write activity: %w", err)
+	}
+	// Durability: fsync the activity log so a crash between write
+	// and the next checkpoint doesn't lose the most recent record.
+	// Workflow recovery and audit trails depend on this being
+	// crash-consistent, not just delivered to the page cache.
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("sync activity: %w", err)
 	}
 	return nil
 }
