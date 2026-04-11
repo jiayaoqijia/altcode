@@ -39,18 +39,37 @@ func NewOpenAI(cfg OpenAIConfig) Provider {
 
 func (p *openaiProvider) Name() string { return "openai" }
 
+// hasAPIVersionSuffix returns true if the URL ends in a recognised
+// API-version path segment (/v1../v9, /api/.../vN). Used to decide
+// whether to append /chat/completions vs /v1/chat/completions so
+// providers that already include the version in their base URL
+// don't double-path.
+func hasAPIVersionSuffix(u string) bool {
+	for _, suf := range []string{"/v1", "/v2", "/v3", "/v4", "/v5", "/v6", "/v7", "/v8", "/v9"} {
+		if strings.HasSuffix(u, suf) {
+			return true
+		}
+	}
+	return false
+}
+
 func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan StreamEvent, error) {
 	body, err := buildOpenAIRequest(req)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
 
-	// Some providers include /v1 in their base URL (moonshot, zhipu).
-	// Detect and use /chat/completions instead of /v1/chat/completions to
-	// avoid the /v1/v1/... double-path bug.
+	// Some providers include the API version in their base URL
+	// (moonshot uses /v1, zhipu uses /api/paas/v4, deepseek uses
+	// /v1, etc.). When that's the case, append /chat/completions
+	// directly instead of /v1/chat/completions to avoid the
+	// /v1/v1/... double-path bug. Allow-list of versioned suffixes
+	// is more reliable than the previous HasSuffix("/v1")||"/v4"
+	// pair, which still missed /v3 (older MiniMax) and other
+	// versioned bases.
 	completePath := openAICompletePath
 	trimmed := strings.TrimRight(p.cfg.BaseURL, "/")
-	if strings.HasSuffix(trimmed, "/v1") || strings.HasSuffix(trimmed, "/v4") {
+	if hasAPIVersionSuffix(trimmed) {
 		completePath = "/chat/completions"
 	}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost,
