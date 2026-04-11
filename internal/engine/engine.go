@@ -512,10 +512,13 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		if os.Getenv("ALTCODE_DEBUG") != "" {
 			summary := e.buildTurnSummary(intent)
 			if summary != "" {
-				out <- event.Event{Type: event.InfoEvent, Info: summary}
+				sendEvent(ctx, out, event.Event{Type: event.InfoEvent, Info: summary})
 			}
 		}
-		out <- event.Event{Type: event.Done}
+		// sendEvent uses select+ctx so the deferred Done can't deadlock
+		// when the TUI has stopped draining (e.g. after onError or
+		// when the consumer channel is full).
+		sendEvent(ctx, out, event.Event{Type: event.Done})
 	}()
 
 	for i := 0; i < maxIterations; i++ {
@@ -524,7 +527,7 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 			// The TUI already prints '[cancelled]' when it cancels, so
 			// don't double up with a bogus error message.
 			if !errors.Is(ctx.Err(), context.Canceled) {
-				out <- event.Event{Type: event.ErrorEvent, Error: ctx.Err().Error()}
+				sendEvent(ctx, out, event.Event{Type: event.ErrorEvent, Error: ctx.Err().Error()})
 			}
 			return
 		}
@@ -542,13 +545,13 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 			if err != nil {
 				// Same filter: swallow cancel-induced provider errors.
 				if !errors.Is(err, context.Canceled) && !errors.Is(ctx.Err(), context.Canceled) {
-					out <- event.Event{Type: event.ErrorEvent, Error: err.Error()}
+					sendEvent(ctx, out, event.Event{Type: event.ErrorEvent, Error: err.Error()})
 				}
 				return
 			}
 		}
 
-		turn := collectTurn(stream, out)
+		turn := collectTurn(ctx, stream, out)
 		e.recordTurnCost(turn)
 
 		// Auto-continue truncated text responses
@@ -589,6 +592,17 @@ func (e *Engine) appendTruncatedAndContinue(turn *turnResult) {
 	e.persistMessage("user", contMsg)
 }
 
+// sendEvent forwards an event to the TUI channel without blocking
+// forever when the consumer has stopped draining (TUI onError, channel
+// full, etc.). Falls out on ctx.Done so the deferred Done emit can't
+// leak the engine goroutine.
+func sendEvent(ctx context.Context, out chan<- event.Event, ev event.Event) {
+	select {
+	case out <- ev:
+	case <-ctx.Done():
+	}
+}
+
 func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent, error) {
 	env := sysctl.DetectEnv()
 	system := sysctl.BuildSystemPrompt(e.cfg, e.tools, e.instructions, env)
@@ -625,6 +639,14 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 	if temp, ok := providerDefaultTemperature(e.cfg.Model); ok {
 		req.Temperature = &temp
 	}
+	// NOTE: RetryableStream from internal/provider exists and is
+	// callable, but wrapping it here changes the semantics existing
+	// engine tests rely on (they expect a 500 to surface immediately
+	// as an error event, not be retried with backoff). Wire it in
+	// once the test fixture supports a "no retry" mode and the
+	// retry budget is tuned for both real providers and the test
+	// mock. Until then, the helper is available to provider
+	// implementations that want to opt in.
 	return e.provider.Stream(ctx, req)
 }
 
@@ -761,7 +783,7 @@ func (e *Engine) dispatchTools(
 		} else if strings.HasPrefix(strings.TrimSpace(r.Output), "Error:") {
 			errStr = strings.TrimSpace(r.Output)
 		}
-		out <- event.Event{
+		sendEvent(ctx, out, event.Event{
 			Type: event.ToolResultEvent,
 			ToolResult: &event.Result{
 				Output: r.Output,
@@ -776,7 +798,7 @@ func (e *Engine) dispatchTools(
 				Name:  toolCalls[i].Name,
 				Input: toolCalls[i].Input,
 			},
-		}
+		})
 	}
 
 	// Fire PostToolUse hooks

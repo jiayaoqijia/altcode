@@ -37,7 +37,12 @@ type turnResult struct {
 // other. Start events that re-arrive for an already-active ID (some OpenAI
 // responses repeat the name chunk) are deduped so the TUI only sees one
 // ToolStart per tool call.
-func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *turnResult {
+//
+// All sends use sendEvent(ctx, ...) so the collector can't deadlock when
+// the consumer (TUI) stops draining mid-stream. Without ctx-aware sends
+// the collector goroutine blocks on a full channel forever and the
+// engine's outer loop can never reach its deferred Done.
+func collectTurn(ctx context.Context, stream <-chan provider.StreamEvent, out chan<- event.Event) *turnResult {
 	result := &turnResult{}
 	active := map[string]*toolAccumulator{}
 	// Order preserved so ToolCalls come back in the order the model emitted.
@@ -50,10 +55,10 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 		}
 		result.ToolCalls = append(result.ToolCalls, acc.finish())
 		delete(active, id)
-		out <- event.Event{
+		sendEvent(ctx, out, event.Event{
 			Type:     event.ToolDone,
 			ToolCall: &event.ToolCall{ID: acc.id, Name: acc.name},
-		}
+		})
 	}
 
 	flushAll := func() {
@@ -67,13 +72,13 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 		switch sev.Type {
 		case provider.StreamTextDelta:
 			result.Text += sev.Delta
-			out <- event.Event{Type: event.TextDelta, Text: sev.Delta}
+			sendEvent(ctx, out, event.Event{Type: event.TextDelta, Text: sev.Delta})
 
 		case provider.StreamTextDone:
-			out <- event.Event{Type: event.TextDone, Text: result.Text}
+			sendEvent(ctx, out, event.Event{Type: event.TextDone, Text: result.Text})
 
 		case provider.StreamThinkingDelta:
-			out <- event.Event{Type: event.ThinkingDelta, Thinking: sev.Delta}
+			sendEvent(ctx, out, event.Event{Type: event.ThinkingDelta, Thinking: sev.Delta})
 
 		case provider.StreamToolCallStart:
 			id := sev.ToolUse.ID
@@ -86,20 +91,20 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 				name: sev.ToolUse.Name,
 			}
 			order = append(order, id)
-			out <- event.Event{
+			sendEvent(ctx, out, event.Event{
 				Type:     event.ToolStart,
 				ToolCall: &event.ToolCall{ID: sev.ToolUse.ID, Name: sev.ToolUse.Name},
-			}
+			})
 
 		case provider.StreamToolCallDelta:
 			if acc, ok := active[sev.ToolUse.ID]; ok {
 				acc.buf.WriteString(sev.ToolUse.Delta)
 			}
-			out <- event.Event{
+			sendEvent(ctx, out, event.Event{
 				Type:     event.ToolDelta,
 				ToolCall: &event.ToolCall{ID: sev.ToolUse.ID, Name: sev.ToolUse.Name},
 				Text:     sev.ToolUse.Delta,
-			}
+			})
 
 		case provider.StreamToolCallEnd:
 			finalize(sev.ToolUse.ID)
@@ -123,10 +128,10 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 				if sev.Usage.CacheReadInputTokens > 0 {
 					result.CacheReadTokens = sev.Usage.CacheReadInputTokens
 				}
-				out <- event.Event{Type: event.UsageEvent, Usage: &event.UsageInfo{
+				sendEvent(ctx, out, event.Event{Type: event.UsageEvent, Usage: &event.UsageInfo{
 					InputTokens:  sev.Usage.InputTokens,
 					OutputTokens: sev.Usage.OutputTokens,
-				}}
+				}})
 			}
 
 		case provider.StreamError:
@@ -134,7 +139,7 @@ func collectTurn(stream <-chan provider.StreamEvent, out chan<- event.Event) *tu
 			// Don't surface a user-initiated cancel as an error. The
 			// TUI already writes '[cancelled]' when it cancels.
 			if sev.Error != nil && !errors.Is(sev.Error, context.Canceled) {
-				out <- event.Event{Type: event.ErrorEvent, Error: sev.Error.Error()}
+				sendEvent(ctx, out, event.Event{Type: event.ErrorEvent, Error: sev.Error.Error()})
 			}
 			return result
 

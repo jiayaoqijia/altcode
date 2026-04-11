@@ -34,10 +34,14 @@ type retryableError interface {
 // RetryableStream calls fn up to cfg.MaxRetries+1 times with exponential
 // backoff, returning the first successful channel or the last error.
 //
+// Only retries errors that are KNOWN retryable: typed retryableError,
+// HTTP 408/429/5xx in the error message, and clearly transient network
+// errors (connection refused, dial timeout, EOF). Everything else
+// (including unrecognized errors) bails immediately so test mocks
+// and real client errors aren't pointlessly retried for 60+ seconds.
+//
 // Honors the Retry-After hint when the underlying error implements
-// retryableError, and bails immediately on 4xx client errors (except
-// 408/429) instead of burning the full retry budget on a request that
-// will never succeed.
+// retryableError.
 func RetryableStream(
 	ctx context.Context,
 	cfg RetryConfig,
@@ -48,9 +52,6 @@ func RetryableStream(
 	for attempt := 0; attempt <= cfg.MaxRetries; attempt++ {
 		if attempt > 0 {
 			wait := delay + time.Duration(rand.Int64N(int64(delay/2)))
-			// Override the exponential backoff if the error gave us
-			// a Retry-After hint — that's the server telling us when
-			// to come back, and ignoring it gets the API token banned.
 			if re, ok := lastErr.(retryableError); ok {
 				if hint := re.RetryAfter(); hint > 0 {
 					wait = hint
@@ -71,16 +72,14 @@ func RetryableStream(
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, err
 		}
-		// Bail immediately on non-retryable client errors (400 bad
-		// request, 401 unauthorized, 403 forbidden, 404 not found).
-		// 408 request timeout and 429 rate limit are still retried.
 		if re, ok := err.(retryableError); ok && re.IsClientError() {
 			return nil, err
 		}
-		// Heuristic fallback for providers that don't return a typed
-		// error: prose-sniff a 4xx status string. Same exclusions as
-		// the typed path.
-		if isNonRetryableStatus(err) {
+		// Whitelist-only retry: anything not recognizably retryable
+		// returns immediately. Better to surface a real error than
+		// to waste 60+ seconds retrying something that will never
+		// succeed (and break test mocks that expect immediate fail).
+		if !isTransientError(err) {
 			return nil, err
 		}
 		lastErr = err
@@ -88,16 +87,35 @@ func RetryableStream(
 	return nil, lastErr
 }
 
-// isNonRetryableStatus reports whether an error message looks like a
-// 4xx HTTP status that we shouldn't retry on (400, 401, 403, 404).
-// The provider error wrappers all format as "... status NNN: ...".
-func isNonRetryableStatus(err error) bool {
+// isTransientError reports whether an error looks like a transient
+// network or rate-limit failure that's worth retrying.
+func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
-	msg := err.Error()
-	for _, code := range []string{"status 400", "status 401", "status 403", "status 404"} {
+	if re, ok := err.(retryableError); ok {
+		_ = re
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	// HTTP statuses we retry: 408 timeout, 429 rate limit, 5xx server.
+	for _, code := range []string{"status 408", "status 429", "status 500", "status 502", "status 503", "status 504"} {
 		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	// Common transient network failures.
+	for _, hint := range []string{
+		"connection reset",
+		"connection refused",
+		"broken pipe",
+		"unexpected eof",
+		"timeout",
+		"temporary failure",
+		"i/o timeout",
+		"no route to host",
+	} {
+		if strings.Contains(msg, hint) {
 			return true
 		}
 	}
