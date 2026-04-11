@@ -54,7 +54,8 @@ func (a *App) updateFilePopup() {
 	a.filePopup.cursor = 0
 }
 
-// acceptFileCompletion replaces @query with the selected path.
+// acceptFileCompletion replaces @query with the selected path,
+// preserving any trailing text after the query.
 func (a *App) acceptFileCompletion() bool {
 	if !a.filePopup.visible {
 		return false
@@ -68,8 +69,15 @@ func (a *App) acceptFileCompletion() bool {
 	if idx < 0 {
 		return false
 	}
+	// Find the end of the @query — first whitespace after @ or end of text.
+	// Without this, typing `look at @ma<TAB> for bug` would lose ` for bug`
+	// because we'd splice on idx alone instead of (idx, queryEnd).
+	end := idx + 1
+	for end < len(text) && text[end] != ' ' && text[end] != '\n' && text[end] != '\t' {
+		end++
+	}
 	replacement := selected.Path
-	newText := text[:idx] + replacement
+	newText := text[:idx] + replacement + text[end:]
 	a.input.SetValue(newText)
 	a.filePopup.visible = false
 	a.filePopup.matches = nil
