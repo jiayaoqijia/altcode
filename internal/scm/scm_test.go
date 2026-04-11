@@ -1,6 +1,7 @@
 package scm
 
 import (
+	"errors"
 	"testing"
 	"time"
 
@@ -119,21 +120,33 @@ func assertNoopReturns(t *testing.T, s workspace.SCM) {
 	t.Helper()
 	ctx := t.Context()
 
+	// CreatePR/GetPR/ListPRs/GetPRReviews now return ErrSCMNotConfigured
+	// instead of (nil, nil) so callers can't accidentally nil-deref
+	// the *PR result. Check both the nil result AND the explicit
+	// error sentinel.
 	pr, err := s.CreatePR(ctx, workspace.CreatePRRequest{})
 	assertPRNil(t, "CreatePR", pr)
-	assertErrNil(t, "CreatePR", err)
+	if !errors.Is(err, ErrSCMNotConfigured) {
+		t.Errorf("CreatePR err = %v, want ErrSCMNotConfigured", err)
+	}
 
 	pr, err = s.GetPR(ctx, 1)
 	assertPRNil(t, "GetPR", pr)
-	assertErrNil(t, "GetPR", err)
+	if !errors.Is(err, ErrSCMNotConfigured) {
+		t.Errorf("GetPR err = %v, want ErrSCMNotConfigured", err)
+	}
 
 	prs, err := s.ListPRs(ctx, "x")
 	assertSliceNil(t, "ListPRs", prs)
-	assertErrNil(t, "ListPRs", err)
+	if !errors.Is(err, ErrSCMNotConfigured) {
+		t.Errorf("ListPRs err = %v, want ErrSCMNotConfigured", err)
+	}
 
 	reviews, err := s.GetPRReviews(ctx, 1)
 	assertReviewsNil(t, "GetPRReviews", reviews)
-	assertErrNil(t, "GetPRReviews", err)
+	if !errors.Is(err, ErrSCMNotConfigured) {
+		t.Errorf("GetPRReviews err = %v, want ErrSCMNotConfigured", err)
+	}
 
 	assertErrNil(t, "RequestReview", s.RequestReview(ctx, 1, nil))
 	assertErrNil(t, "MergePR", s.MergePR(ctx, 1, workspace.MergeSquash))
