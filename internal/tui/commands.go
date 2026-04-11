@@ -10,6 +10,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/compact"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/altcode-ai/altcode/internal/plugin"
 	"github.com/altcode-ai/altcode/internal/provider"
 	"github.com/altcode-ai/altcode/internal/workflow"
 	"github.com/altcode-ai/altcode/internal/workspace"
@@ -895,6 +896,18 @@ func (a *App) builtinAgentsText() string {
 	if a.engine.MemoryStore() != nil {
 		if mems, err := a.engine.MemoryStore().List(); err == nil {
 			sb.WriteString(fmt.Sprintf("  Memories:       %d loaded\n", len(mems)))
+		}
+	}
+	// Surface non-fatal plugin warnings (manifest parse errors, broken
+	// command/agent loads, etc.) — these used to be silently dropped.
+	if len(plugin.Warnings) > 0 {
+		sb.WriteString(fmt.Sprintf("\n  Plugin warnings (%d):\n", len(plugin.Warnings)))
+		for i, w := range plugin.Warnings {
+			if i >= 5 {
+				sb.WriteString(fmt.Sprintf("    + %d more (run /doctor for full list)\n", len(plugin.Warnings)-5))
+				break
+			}
+			sb.WriteString(fmt.Sprintf("    %s\n", w))
 		}
 	}
 
