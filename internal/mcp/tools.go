@@ -9,10 +9,51 @@ import (
 )
 
 // ToolInfo is a tool discovered from an MCP server.
+//
+// Annotations come from the MCP spec's optional ToolAnnotations:
+//   - readOnlyHint:    tool does not modify state (default: false)
+//   - destructiveHint: tool may perform destructive updates (default: true)
+//
+// Without parsing these the engine would treat every MCP tool as both
+// read-only and concurrency-safe — letting plan-mode users write files
+// through an MCP filesystem server unchecked, and serializing parallel
+// batches incorrectly.
 type ToolInfo struct {
 	Name        string          `json:"name"`
 	Description string          `json:"description"`
 	InputSchema json.RawMessage `json:"inputSchema"`
+	Annotations *struct {
+		Title           string `json:"title,omitempty"`
+		ReadOnlyHint    *bool  `json:"readOnlyHint,omitempty"`
+		DestructiveHint *bool  `json:"destructiveHint,omitempty"`
+		IdempotentHint  *bool  `json:"idempotentHint,omitempty"`
+	} `json:"annotations,omitempty"`
+}
+
+// IsReadOnly reports whether the MCP server marked the tool readOnly.
+// Default false (assume mutating) — safer to over-restrict than to
+// silently let a write-capable tool through plan-mode permission checks.
+func (t ToolInfo) IsReadOnly() bool {
+	if t.Annotations == nil || t.Annotations.ReadOnlyHint == nil {
+		return false
+	}
+	return *t.Annotations.ReadOnlyHint
+}
+
+// IsConcurrencySafe reports whether the tool is safe to run in parallel
+// with other tools. We approximate this as "read-only AND not
+// destructive" because the spec doesn't have a dedicated concurrency
+// flag — write-capable tools should run sequentially to keep ordering
+// deterministic.
+func (t ToolInfo) IsConcurrencySafe() bool {
+	if !t.IsReadOnly() {
+		return false
+	}
+	if t.Annotations != nil && t.Annotations.DestructiveHint != nil &&
+		*t.Annotations.DestructiveHint {
+		return false
+	}
+	return true
 }
 
 // DiscoverTools calls tools/list on the MCP server.
@@ -91,8 +132,8 @@ func RegisterMCPTools(ctx context.Context, registry *tool.Registry, client *Clie
 func (t *mcpTool) Name() string             { return t.prefix + t.info.Name }
 func (t *mcpTool) Description() string       { return t.info.Description }
 func (t *mcpTool) Parameters() json.RawMessage { return t.info.InputSchema }
-func (t *mcpTool) IsConcurrencySafe() bool   { return true }
-func (t *mcpTool) IsReadOnly() bool          { return true }
+func (t *mcpTool) IsConcurrencySafe() bool { return t.info.IsConcurrencySafe() }
+func (t *mcpTool) IsReadOnly() bool        { return t.info.IsReadOnly() }
 func (t *mcpTool) PermissionPattern(_ json.RawMessage) string {
 	return t.prefix + t.info.Name + ":*"
 }
@@ -127,8 +168,8 @@ type sseMCPTool struct {
 func (t *sseMCPTool) Name() string             { return t.prefix + t.info.Name }
 func (t *sseMCPTool) Description() string       { return t.info.Description }
 func (t *sseMCPTool) Parameters() json.RawMessage { return t.info.InputSchema }
-func (t *sseMCPTool) IsConcurrencySafe() bool   { return true }
-func (t *sseMCPTool) IsReadOnly() bool          { return true }
+func (t *sseMCPTool) IsConcurrencySafe() bool { return t.info.IsConcurrencySafe() }
+func (t *sseMCPTool) IsReadOnly() bool        { return t.info.IsReadOnly() }
 func (t *sseMCPTool) PermissionPattern(_ json.RawMessage) string {
 	return t.prefix + t.info.Name + ":*"
 }

@@ -146,7 +146,14 @@ func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
 		a.streaming = ""
 		a.resetTurnTransientState()
 		a.repromptForAPIKey(provider)
-		return a, nil
+		// Keep draining events until the engine emits Done — without
+		// this, the engine goroutine blocks forever on its next send
+		// because nobody is reading a.events. Cancel ctx so the
+		// engine exits promptly instead of finishing the turn.
+		if a.cancel != nil {
+			a.cancel()
+		}
+		return a, a.waitForEvent()
 	}
 	a.messages = append(a.messages,
 		chatMessage{role: roleInfo, content: ev.Error, meta: "error"})
@@ -154,7 +161,13 @@ func (a *App) onError(ev event.Event) (tea.Model, tea.Cmd) {
 	a.busy = false
 	a.resetTurnTransientState()
 	a.updateViewport()
-	return a, nil
+	// Same drain-and-cancel pattern: stop the engine but keep reading
+	// events so the deferred Done send doesn't block on a full buffer
+	// and leak the engine goroutine.
+	if a.cancel != nil {
+		a.cancel()
+	}
+	return a, a.waitForEvent()
 }
 
 // resetTurnTransientState clears the UI bits that should not persist

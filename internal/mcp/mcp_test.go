@@ -185,7 +185,12 @@ func TestMCP_RegisterTools(t *testing.T) {
 	}
 }
 
-func TestMCP_ToolIsConcurrencySafe(t *testing.T) {
+// TestMCP_ToolDefaultsAreSafe verifies the conservative default for
+// MCP tools that don't carry annotations: NOT read-only and NOT
+// concurrency-safe. The previous default ("everything is read-only")
+// let plan-mode users write files through MCP filesystem servers
+// unchecked and serialized parallel batches incorrectly.
+func TestMCP_ToolDefaultsAreSafe(t *testing.T) {
 	script, cleanup := setupMockServer(t)
 	defer cleanup()
 
@@ -199,11 +204,11 @@ func TestMCP_ToolIsConcurrencySafe(t *testing.T) {
 	mcp.RegisterMCPTools(ctx, registry, client, "srv")
 
 	echoTool, _ := registry.Get("mcp__srv__echo")
-	if !echoTool.IsConcurrencySafe() {
-		t.Error("MCP tools should be concurrency-safe")
+	if echoTool.IsReadOnly() {
+		t.Error("MCP tool without annotations should default to mutating")
 	}
-	if !echoTool.IsReadOnly() {
-		t.Error("MCP tools should be read-only by default")
+	if echoTool.IsConcurrencySafe() {
+		t.Error("MCP tool without annotations should default to sequential")
 	}
 }
 

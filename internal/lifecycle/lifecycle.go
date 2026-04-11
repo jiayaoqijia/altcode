@@ -93,10 +93,19 @@ func isTerminal(s workspace.WorkspaceStatus) bool {
 }
 
 // Advance drives one state-machine step for a session.
+//
+// Holds sess.mu around the entire transition so concurrent readers
+// (wsctl injectors, /workspace status, store snapshots) don't see
+// half-mutated state. Without this, lifecycle wrote to sess.Status
+// and rec.ActivityState while wsctl was iterating sess.Agents under
+// the same mutex — `go test -race` would catch the unsynchronized
+// writes immediately.
 func (m *Manager) Advance(
 	ctx context.Context,
 	sess *workspace.WorkspaceSession,
 ) error {
+	sess.Lock()
+	defer sess.Unlock()
 	switch sess.Status {
 	case workspace.WSSSpawning:
 		return advanceSpawning(ctx, sess, m.plugins)

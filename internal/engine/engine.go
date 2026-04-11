@@ -791,6 +791,14 @@ func (e *Engine) firePostToolUseHooks(
 	results []tool.Result,
 ) {
 	for i, tc := range toolCalls {
+		// Skip tool calls that never actually ran — denied by
+		// permission, hook, or unknown tool. PostToolUse hooks that
+		// auto-format files / refresh sidebars / bump journals on
+		// every tool use would otherwise fire on the canned
+		// "Permission denied" message and corrupt their state.
+		if results[i].Error != nil {
+			continue
+		}
 		e.hooks.Fire(ctx, hooks.PostToolUse, hooks.Input{
 			Event:      hooks.PostToolUse,
 			ToolName:   tc.Name,
