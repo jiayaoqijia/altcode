@@ -96,11 +96,15 @@ func (db *DB) LatestSession(projectID string) (*Session, error) {
 // UpdateSessionTitle updates the title and bumps updated_at.
 // Exposed so the engine can backfill a title on the first user message
 // of a session (the TUI creates sessions with empty titles up front).
+// Routes through BackfillTitleIfEmpty so concurrent first-message
+// writes don't clobber an already-set title.
 func (db *DB) UpdateSessionTitle(id, title string) error {
-	return db.updateSessionTitle(id, title)
+	return db.BackfillTitleIfEmpty(id, title)
 }
 
-// updateSessionTitle updates the title and bumps updated_at.
+// updateSessionTitle unconditionally renames a session. Used by /title
+// rename flows; not safe for backfill races. For race-safe backfill
+// from concurrent engines use BackfillTitleIfEmpty.
 func (db *DB) updateSessionTitle(id, title string) error {
 	now := time.Now().UnixMilli()
 	res, err := db.sql.Exec(
@@ -110,9 +114,35 @@ func (db *DB) updateSessionTitle(id, title string) error {
 	if err != nil {
 		return fmt.Errorf("store: update session title: %w", err)
 	}
-	n, _ := res.RowsAffected()
+	// Don't swallow the RowsAffected error — if the driver can't
+	// report it, surfacing it lets callers distinguish 'session
+	// missing' from 'driver broken'.
+	n, raErr := res.RowsAffected()
+	if raErr != nil {
+		return fmt.Errorf("store: update session title rows affected: %w", raErr)
+	}
 	if n == 0 {
 		return fmt.Errorf("store: session %q not found", id)
+	}
+	return nil
+}
+
+// BackfillTitleIfEmpty is the race-safe variant used when the engine
+// derives a title from the first user message. Two concurrent engines
+// can both try to set a title; the WHERE clause ensures only the
+// first writer wins. Once a real title exists, subsequent calls are
+// silent no-ops instead of clobbering it with stale data.
+func (db *DB) BackfillTitleIfEmpty(id, title string) error {
+	now := time.Now().UnixMilli()
+	res, err := db.sql.Exec(
+		`UPDATE session SET title = ?, updated_at = ? WHERE id = ? AND (title IS NULL OR title = '')`,
+		title, now, id,
+	)
+	if err != nil {
+		return fmt.Errorf("store: backfill session title: %w", err)
+	}
+	if _, raErr := res.RowsAffected(); raErr != nil {
+		return fmt.Errorf("store: backfill session title rows affected: %w", raErr)
 	}
 	return nil
 }
