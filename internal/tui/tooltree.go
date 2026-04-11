@@ -32,19 +32,22 @@ func smartTruncate(s string, maxLen int) string {
 	if maxLen < 5 {
 		maxLen = 5
 	}
-	if len(s) <= maxLen {
+	// Count runes, not bytes — multi-byte UTF-8 (CJK, emoji, accented
+	// characters) would otherwise truncate mid-rune and emit invalid
+	// UTF-8 / replacement glyphs. Slice via the rune slice for safety.
+	runes := []rune(s)
+	if len(runes) <= maxLen {
 		return s
 	}
-	// If it looks like a path, keep the basename
+	// If it looks like a path, keep the basename.
 	if i := strings.LastIndex(s, "/"); i >= 0 {
-		base := s[i+1:]
-		if len(base) < maxLen-2 {
-			return "…/" + base
+		baseRunes := []rune(s[i+1:])
+		if len(baseRunes) < maxLen-2 {
+			return "…/" + string(baseRunes)
 		}
-		return base[:maxLen-3] + "..."
+		return string(baseRunes[:maxLen-3]) + "..."
 	}
-	// Non-path: truncate from right
-	return s[:maxLen-3] + "..."
+	return string(runes[:maxLen-3]) + "..."
 }
 
 // toolEntry records a single tool call for the tool tree display.

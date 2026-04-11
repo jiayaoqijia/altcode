@@ -65,7 +65,11 @@ func (r *MarkdownRenderer) renderWithGlamour(input string) string {
 	processed := stripHeadingMarkers(input)
 	out, err := r.renderer.Render(processed)
 	if err != nil {
-		return input
+		// Return the PROCESSED text on fallback, not the raw input.
+		// Otherwise the heading lines that were converted to bold
+		// markers above briefly revert to '### Header' literal style
+		// when glamour errors out, causing visible formatting jumps.
+		return processed
 	}
 	return out
 }

@@ -201,9 +201,16 @@ func (s *SessionSwitcher) View() string {
 	return border.Render(sb.String())
 }
 
+// truncateStr is rune-safe. The previous version sliced by byte
+// offset, which split multi-byte UTF-8 characters mid-rune and
+// produced replacement glyphs in the rendered display.
 func truncateStr(s string, n int) string {
-	if len(s) <= n {
+	runes := []rune(s)
+	if len(runes) <= n {
 		return s
 	}
-	return s[:n-1] + "~"
+	if n < 1 {
+		return "~"
+	}
+	return string(runes[:n-1]) + "~"
 }
