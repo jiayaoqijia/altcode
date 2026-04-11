@@ -65,9 +65,15 @@ func NewTokenBudget(limit int) *TokenBudget {
 }
 
 // Consume adds n tokens. Returns true if the budget is still within limit.
+// Clamps n to non-negative — a buggy or corrected usage report from a
+// provider that hands back a negative count would otherwise rewind the
+// session-spend counter.
 func (b *TokenBudget) Consume(n int) bool {
 	if b == nil || b.limit <= 0 {
 		return true
+	}
+	if n < 0 {
+		n = 0
 	}
 	used := atomic.AddInt64(&b.used, int64(n))
 	return used <= b.limit
@@ -936,11 +942,11 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 		return
 	}
 
-	// Thrash detection: stop if we've compacted too many times consecutively
+	// Thrash detection: stop if we've compacted too many times consecutively.
+	// Note: previously this wrote to os.Stderr behind an ALTCODE_DEBUG gate,
+	// but stderr writes corrupt the TUI; the audit log is the right place.
 	if e.compactCount >= maxConsecutiveCompactions {
-		if os.Getenv("ALTCODE_DEBUG") == "1" {
-			fmt.Fprintf(os.Stderr, "[debug] compaction thrash detected (%d consecutive), skipping\n", e.compactCount)
-		}
+		e.logCompaction("thrash-skip", len(e.messages), tokens, len(e.messages))
 		return
 	}
 
@@ -1012,13 +1018,18 @@ func (e *Engine) ContextWindowSize() int {
 }
 
 func (e *Engine) maybeCompact(ctx context.Context) {
-	// Token-based trigger using model-specific context window (like Codex)
+	// Token-based trigger using model-specific context window (like Codex).
+	// Also check raw request size — pre-turn compaction has a 15MB byte
+	// guard to prevent oversized requests; post-tool compaction needs the
+	// same guard or large byte-heavy tool results (file dumps, screenshots,
+	// page snapshots) can blow past the byte cap with a low token estimate.
 	tokens := compact.EstimateTokens(e.messages)
 	threshold := e.contextWindowSize() * 7 / 10 // 70% of context window
 	if e.cfg.CompactThreshold > 0 {
 		threshold = e.cfg.CompactThreshold
 	}
-	if tokens < threshold && len(e.messages) < 100 {
+	bytes := e.messageBytes()
+	if tokens < threshold && len(e.messages) < 100 && bytes < maxRequestBytes {
 		return
 	}
 
