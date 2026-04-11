@@ -48,6 +48,33 @@ func NewSubTeam(name string, depth int) *Team {
 	}
 }
 
+// NewChildTeam creates a sub-team that shares its parent's registry
+// and inherits depth+1. The shared registry is what makes depth
+// enforcement actually fire — if a grandchild team also tries to
+// register at depth 3 in a registry whose maxDepth is 2, the
+// Register call returns false and the spawn is rejected. Without
+// sharing, each team had its own fresh registry and the maxDepth
+// check could never trip across team boundaries.
+//
+// Use this whenever an agent inside a team wants to spin up its
+// own sub-team. NewSubTeam (above) creates an isolated team for
+// top-level callers; NewChildTeam links to the parent for proper
+// depth accounting.
+func NewChildTeam(parent *Team, name string) *Team {
+	if parent == nil {
+		return NewTeam(name)
+	}
+	return &Team{
+		name:     name,
+		agents:   make(map[string]*RunningAgent),
+		cancels:  make(map[string]context.CancelFunc),
+		results:  make(map[string]string),
+		registry: parent.registry, // SHARED with parent
+		mailbox:  parent.mailbox,  // shared mailbox so siblings can talk
+		depth:    parent.depth + 1,
+	}
+}
+
 // Name returns the team's name.
 func (t *Team) Name() string { return t.name }
 
