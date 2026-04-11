@@ -129,11 +129,21 @@ func (c *Client) DidChange(ctx context.Context, uri, text string) error {
 	return c.notify("textDocument/didChange", params)
 }
 
-// GetDiagnostics returns cached diagnostics for the given URI.
+// GetDiagnostics returns a copy of cached diagnostics for the given URI.
+// Previously this returned the backing slice directly, so callers
+// could mutate shared state and race with readLoop's diags update.
+// Returns a non-nil empty slice if the URI is known but currently has
+// no diagnostics — distinct from "URI not tracked at all" (nil).
 func (c *Client) GetDiagnostics(uri string) []Diagnostic {
 	c.diagsMu.RLock()
 	defer c.diagsMu.RUnlock()
-	return c.diags[uri]
+	src, ok := c.diags[uri]
+	if !ok {
+		return nil
+	}
+	out := make([]Diagnostic, len(src))
+	copy(out, src)
+	return out
 }
 
 // Definition sends a textDocument/definition request.
