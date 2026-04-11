@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/command"
@@ -90,18 +91,41 @@ func Load(pluginDir string) (*Plugin, error) {
 	return p, nil
 }
 
+// safeJoin joins a user-supplied subpath onto a trusted base directory
+// and verifies the result stays inside base. Defends against malicious
+// plugin.json fields like "commands":"../../../etc" that would otherwise
+// escape the plugin directory.
+func safeJoin(base, sub string) (string, error) {
+	joined := filepath.Join(base, sub)
+	cleanBase := filepath.Clean(base)
+	cleanJoined := filepath.Clean(joined)
+	rel, err := filepath.Rel(cleanBase, cleanJoined)
+	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
+		return "", fmt.Errorf("path %q escapes plugin directory", sub)
+	}
+	return cleanJoined, nil
+}
+
 func loadCommands(pluginDir string, m *Manifest) ([]*command.Command, error) {
-	cmdDir := filepath.Join(pluginDir, "commands")
+	sub := "commands"
 	if m.Commands != "" {
-		cmdDir = filepath.Join(pluginDir, m.Commands)
+		sub = m.Commands
+	}
+	cmdDir, err := safeJoin(pluginDir, sub)
+	if err != nil {
+		return nil, fmt.Errorf("plugin commands path: %w", err)
 	}
 	return command.Discover(cmdDir)
 }
 
 func loadAgents(pluginDir string, m *Manifest) ([]*agent.Agent, error) {
-	agentDir := filepath.Join(pluginDir, "agents")
+	sub := "agents"
 	if m.Agents != "" {
-		agentDir = filepath.Join(pluginDir, m.Agents)
+		sub = m.Agents
+	}
+	agentDir, err := safeJoin(pluginDir, sub)
+	if err != nil {
+		return nil, fmt.Errorf("plugin agents path: %w", err)
 	}
 	return agent.Discover(agentDir)
 }

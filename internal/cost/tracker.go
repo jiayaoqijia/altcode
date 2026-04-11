@@ -3,6 +3,7 @@ package cost
 
 import (
 	"fmt"
+	"sort"
 	"sync"
 )
 
@@ -149,10 +150,22 @@ func (t *Tracker) lookupPricingLocked(model string) ModelPricing {
 	if p, ok := t.pricing[model]; ok {
 		return p
 	}
-	// Try prefix match (e.g. "claude-sonnet-4-..." -> "claude-sonnet")
-	for key, p := range t.pricing {
+	// Try prefix match (e.g. "claude-sonnet-4-..." -> "claude-sonnet").
+	// Map iteration is randomized in Go, so the previous version
+	// could return DIFFERENT pricing across runs for ambiguous model
+	// names like "claude-3" that prefix-match both "claude" and
+	// "claude-3-opus" entries. Sort keys descending by length so the
+	// LONGEST (most specific) prefix wins deterministically.
+	keys := make([]string, 0, len(t.pricing))
+	for k := range t.pricing {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		return len(keys[i]) > len(keys[j])
+	})
+	for _, key := range keys {
 		if len(model) > len(key) && model[:len(key)] == key {
-			return p
+			return t.pricing[key]
 		}
 	}
 	return fallbackPricing
