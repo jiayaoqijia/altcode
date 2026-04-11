@@ -60,6 +60,15 @@ func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, k
 	if cutoff > len(messages) {
 		cutoff = len(messages)
 	}
+	// Walk the cutoff backward until it doesn't sit between an
+	// assistant tool_use and its tool_result. Anthropic and OpenAI both
+	// reject orphaned tool_results with "tool_use ids not found in
+	// prior message", which would corrupt every session that compacts
+	// in the middle of a tool turn.
+	for cutoff > 2 && cutoff < len(messages) &&
+		(hasToolUse(messages[cutoff-1]) || isToolResult(messages[cutoff])) {
+		cutoff--
+	}
 	old := messages[:cutoff]
 	recent := messages[cutoff:]
 
@@ -141,6 +150,37 @@ func trimOldest(messages []provider.Message, n int) []provider.Message {
 		n = len(messages) / 2
 	}
 	return messages[n:]
+}
+
+// hasToolUse reports whether m is an assistant message that emitted at
+// least one tool_use block. The compact cutoff must never split such a
+// message from its tool_result, or providers reject the next request
+// with "tool_use ids not found in prior message".
+func hasToolUse(m provider.Message) bool {
+	if m.Role != "assistant" {
+		return false
+	}
+	for _, p := range m.Parts {
+		if p.Type == "tool_use" {
+			return true
+		}
+	}
+	return false
+}
+
+// isToolResult reports whether m carries any tool_result content.
+// OpenAI puts these in role=="tool"; Anthropic puts them in
+// role=="user" with Parts of type "tool_result".
+func isToolResult(m provider.Message) bool {
+	if m.Role == "tool" {
+		return true
+	}
+	for _, p := range m.Parts {
+		if p.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
 }
 
 // EstimateTokens gives a conservative token count for the message list.
