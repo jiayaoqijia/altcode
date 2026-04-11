@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"errors"
 	"fmt"
+	"os"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"sort"
 	"strings"
 	"time"
@@ -426,9 +430,18 @@ func (a *App) builtinContextText() string {
 			toolTokens += t
 		}
 	}
+	// System content lives in SystemSection, not Messages — fold them
+	// in so /context shows the real persona+tools+skills+memory cost
+	// instead of zero at startup.
+	for _, s := range a.engine.SystemPromptSections() {
+		systemTokens += len(s.Content) / 4
+	}
 
 	limit := a.engine.ContextWindowSize()
-	totalTokens := compact.EstimateTokens(msgs)
+	// Total = message tokens + system prompt tokens. Without the
+	// systemTokens addend the bar showed 0% at startup even when the
+	// system prompt alone consumed 20K+.
+	totalTokens := compact.EstimateTokens(msgs) + systemTokens
 	pct := 0
 	if limit > 0 {
 		pct = totalTokens * 100 / limit
@@ -578,6 +591,9 @@ func (a *App) builtinMemoryText(parts []string) string {
 				return "Usage: /memory rm <id>"
 			}
 			if err := store.Delete(parts[2]); err != nil {
+				if errors.Is(err, os.ErrNotExist) {
+					return fmt.Sprintf("Memory %q not found. Use /memory to list ids.", parts[2])
+				}
 				return fmt.Sprintf("Error deleting memory: %v", err)
 			}
 			return fmt.Sprintf("Deleted memory %q.", parts[2])
@@ -746,7 +762,38 @@ func (a *App) builtinVersionText() string {
 	if strings.TrimSpace(v) == "" {
 		v = "dev"
 	}
-	return fmt.Sprintf("altcode v%s", v)
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("altcode v%s\n", v))
+	sb.WriteString(fmt.Sprintf("  Go:       %s\n", runtime.Version()))
+	sb.WriteString(fmt.Sprintf("  Platform: %s/%s\n", runtime.GOOS, runtime.GOARCH))
+	if info, ok := debug.ReadBuildInfo(); ok {
+		var commit, modified, buildDate string
+		for _, s := range info.Settings {
+			switch s.Key {
+			case "vcs.revision":
+				commit = s.Value
+			case "vcs.modified":
+				modified = s.Value
+			case "vcs.time":
+				buildDate = s.Value
+			}
+		}
+		if commit != "" {
+			short := commit
+			if len(short) > 8 {
+				short = short[:8]
+			}
+			tag := short
+			if modified == "true" {
+				tag = short + "-dirty"
+			}
+			sb.WriteString(fmt.Sprintf("  Commit:   %s\n", tag))
+		}
+		if buildDate != "" {
+			sb.WriteString(fmt.Sprintf("  Built:    %s\n", buildDate))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (a *App) builtinTasksText() string {

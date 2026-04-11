@@ -167,8 +167,11 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		return a, nil, true
 	case "up":
-		// Up arrow: recall previous prompt from history
-		if !a.busy {
+		// Up arrow: recall previous prompt from history, but ONLY when
+		// the cursor is on the first line of a possibly-multi-line
+		// input. Otherwise we'd hijack the textarea cursor and clobber
+		// a multi-line draft the user typed with Ctrl+J.
+		if !a.busy && a.input.Line() == 0 {
 			if text, ok := a.inputHistory.Up(a.input.Value()); ok {
 				a.input.Reset()
 				a.input.SetValue(text)
@@ -176,8 +179,10 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return a, nil, true
 		}
 	case "down":
-		// Down arrow: recall next prompt from history
-		if !a.busy {
+		// Down arrow: recall next prompt from history, but ONLY when
+		// the cursor is on the last line of the input — otherwise
+		// move within the multi-line draft.
+		if !a.busy && a.input.Line() == a.input.LineCount()-1 {
 			if text, ok := a.inputHistory.Down(); ok {
 				a.input.Reset()
 				a.input.SetValue(text)

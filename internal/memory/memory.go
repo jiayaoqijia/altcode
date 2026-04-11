@@ -137,7 +137,9 @@ func (s *Store) List() ([]*Memory, error) {
 	return memories, nil
 }
 
-// Delete removes a memory and updates the index.
+// Delete removes a memory and updates the index. Returns
+// os.ErrNotExist (wrapped) if the memory doesn't exist so callers can
+// surface a friendly "not found" without leaking filesystem paths.
 func (s *Store) Delete(id string) error {
 	if err := validateMemoryID(id); err != nil {
 		return err
@@ -147,6 +149,9 @@ func (s *Store) Delete(id string) error {
 
 	path := filepath.Join(s.dir, id+".md")
 	if err := os.Remove(path); err != nil {
+		if os.IsNotExist(err) {
+			return fmt.Errorf("memory %q: %w", id, os.ErrNotExist)
+		}
 		return fmt.Errorf("delete memory: %w", err)
 	}
 	return s.updateIndexLocked()

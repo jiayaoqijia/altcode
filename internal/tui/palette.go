@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -23,6 +24,7 @@ type Palette struct {
 	width    int
 	visible  bool
 	cursor   int
+	offset   int // first visible row in p.filtered (scroll position)
 	input    textinput.Model
 	commands []PaletteCommand
 	filtered []PaletteCommand
@@ -46,6 +48,7 @@ func NewPalette(theme Theme, cmds []PaletteCommand) *Palette {
 func (p *Palette) Show() {
 	p.visible = true
 	p.cursor = 0
+	p.offset = 0
 	p.input.Focus()
 	p.input.Reset()
 	p.filtered = p.commands
@@ -77,15 +80,21 @@ func (p *Palette) UpdateKey(msg tea.KeyMsg) bool {
 	case "up":
 		if p.cursor > 0 {
 			p.cursor--
+			if p.cursor < p.offset {
+				p.offset = p.cursor
+			}
 		}
 		return true
 	case "down":
-		limit := len(p.filtered)
-		if limit > paletteMaxVisible {
-			limit = paletteMaxVisible
-		}
-		if p.cursor < limit-1 {
+		// Cap against the filtered list, NOT the visible window —
+		// previously the cursor stopped at index 9 even when 50
+		// matches existed, making items past the first page
+		// completely unreachable.
+		if p.cursor < len(p.filtered)-1 {
 			p.cursor++
+			if p.cursor >= p.offset+paletteMaxVisible {
+				p.offset = p.cursor - paletteMaxVisible + 1
+			}
 		}
 		return true
 	case "esc":
@@ -104,6 +113,7 @@ func (p *Palette) filter(query string) {
 	if query == "" {
 		p.filtered = p.commands
 		p.cursor = 0
+		p.offset = 0
 		return
 	}
 	q := strings.ToLower(query)
@@ -118,6 +128,8 @@ func (p *Palette) filter(query string) {
 	if p.cursor >= len(p.filtered) {
 		p.cursor = max(0, len(p.filtered)-1)
 	}
+	// Reset scroll on filter change so the user always sees the top.
+	p.offset = 0
 }
 
 // truncateRunes returns s truncated to at most max display runes,
@@ -191,10 +203,16 @@ func (p *Palette) View() string {
 		contentWidth = 16
 	}
 
-	for i, cmd := range p.filtered {
-		if i >= paletteMaxVisible {
-			break
-		}
+	// Render the visible window starting at p.offset. Cursor scrolls
+	// with the arrow keys (UpdateKey adjusts offset to keep the
+	// selection in view). Without this, items past index 9 used to
+	// be unreachable because the loop also bounded i < paletteMaxVisible.
+	end := p.offset + paletteMaxVisible
+	if end > len(p.filtered) {
+		end = len(p.filtered)
+	}
+	for i := p.offset; i < end; i++ {
+		cmd := p.filtered[i]
 		nameStyle := lipgloss.NewStyle().Foreground(p.theme.Primary).Bold(true)
 		descStyle := lipgloss.NewStyle().Foreground(p.theme.Muted)
 		if i == p.cursor {
@@ -214,6 +232,12 @@ func (p *Palette) View() string {
 		name := nameStyle.Render(cmd.Name)
 		desc := descStyle.Render("  " + descText)
 		sb.WriteString(name + desc + "\n")
+	}
+	// Show "+N more" footer when there are items below the visible window.
+	if end < len(p.filtered) {
+		moreStyle := lipgloss.NewStyle().Foreground(p.theme.Muted).Italic(true)
+		sb.WriteString(moreStyle.Render(fmt.Sprintf("  +%d more (↓)", len(p.filtered)-end)))
+		sb.WriteByte('\n')
 	}
 
 	box := border.Render(sb.String())

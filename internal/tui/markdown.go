@@ -8,10 +8,20 @@ import (
 )
 
 // MarkdownRenderer renders markdown text with syntax highlighting for the TUI.
+//
+// The cache is a bounded LRU keyed by input markdown. The previous
+// implementation reallocated the entire map when it hit the bound,
+// effectively defeating caching during long sessions — every entry
+// would be evicted at once and the next 100 messages would each
+// re-render via Glamour.
 type MarkdownRenderer struct {
 	width    int
 	renderer *glamour.TermRenderer
 	cache    map[string]string
+	// order is a FIFO of cache keys in insertion order. When the
+	// cache is full, the oldest key is evicted instead of dropping
+	// the whole map.
+	order []string
 }
 
 // NewMarkdownRenderer creates a renderer for the given terminal width.
@@ -27,6 +37,7 @@ func NewMarkdownRenderer(width int) *MarkdownRenderer {
 		width:    width,
 		renderer: r,
 		cache:    make(map[string]string),
+		order:    make([]string, 0, maxCacheEntries),
 	}
 }
 
@@ -46,11 +57,17 @@ func (r *MarkdownRenderer) Render(input string) string {
 	}
 
 	result := r.renderWithGlamour(input)
-	// Evict oldest entries if cache exceeds bound
-	if len(r.cache) >= maxCacheEntries {
-		r.cache = make(map[string]string)
+	// FIFO eviction: drop the oldest entry once when full instead of
+	// nuking the entire cache. Long sessions used to thrash because
+	// every 100th render reset the cache and the next 100 renders
+	// were all misses.
+	if len(r.cache) >= maxCacheEntries && len(r.order) > 0 {
+		oldest := r.order[0]
+		delete(r.cache, oldest)
+		r.order = r.order[1:]
 	}
 	r.cache[input] = result
+	r.order = append(r.order, input)
 	return result
 }
 

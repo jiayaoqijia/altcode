@@ -296,6 +296,32 @@ func (e *Engine) Messages() []provider.Message {
 	return out
 }
 
+// SystemPromptSections returns a snapshot of the system prompt sections
+// that would be sent on the next call. Built using the same code path
+// as callProvider so /context can show accurate system token counts
+// before the first turn — without this, /context displayed System: 0
+// at startup even though persona + tools + skills + memory were
+// non-empty.
+func (e *Engine) SystemPromptSections() []provider.SystemSection {
+	env := sysctl.DetectEnv()
+	system := sysctl.BuildSystemPrompt(e.cfg, e.tools, e.instructions, env)
+	if len(e.skills) > 0 {
+		infos := make([]sysctl.SkillInfo, len(e.skills))
+		for i, s := range e.skills {
+			infos[i] = sysctl.SkillInfo{Name: s.Name, Description: s.Description, Path: s.Path}
+		}
+		system = append(system, provider.SystemSection{
+			Content: sysctl.SkillsSection(infos),
+		})
+	}
+	if e.mem != nil {
+		if memCtx := e.mem.ForContext(25 * 1024); memCtx != "" {
+			system = append(system, provider.SystemSection{Content: memCtx})
+		}
+	}
+	return system
+}
+
 // SessionID returns the current session ID.
 func (e *Engine) SessionID() string {
 	return e.sessionID

@@ -140,7 +140,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
 		sessionSlug:     generateSessionSlug(),
-		inputHistory:    newInputHistory(),
+		inputHistory:    newPersistentInputHistory(DefaultHistoryPath()),
 		toolCounts:      make(map[string]int),
 		spinner:         newSpinner(theme),
 		teamView:        newTeamView(),
