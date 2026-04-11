@@ -8,6 +8,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/altcode-ai/altcode/internal/agent"
@@ -316,12 +317,18 @@ func needsMCP(prompt string) bool {
 }
 
 func runTUI(params engine.EngineParams) error {
+	// Install a signal-cancellable context so MCP subprocesses get
+	// torn down on Ctrl+C / SIGTERM even if Bubbletea exits abnormally.
+	// runExec and runWorkflow already do this; runTUI was the gap.
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
 	eng, err := engine.New(params)
 	if err != nil {
 		return fmt.Errorf("create engine: %w", err)
 	}
 
-	mcpCleanup := connectMCP(params.Config, eng)
+	mcpCleanup := connectMCPWithCtx(ctx, params.Config, eng)
 	defer mcpCleanup()
 
 	cmds := discoverCommands()
@@ -331,6 +338,18 @@ func runTUI(params engine.EngineParams) error {
 	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	_, err = p.Run()
 	return err
+}
+
+// connectMCPWithCtx is connectMCP with an explicit context so MCP
+// subprocesses can be cancelled by signal handling. Falls back to
+// connectMCP semantics if cfg.MCP is empty.
+func connectMCPWithCtx(ctx context.Context, cfg *config.Config, eng *engine.Engine) func() {
+	if len(cfg.MCP) == 0 {
+		return func() {}
+	}
+	mgr := mcp.NewManager(ctx, cfg.MCP)
+	mgr.RegisterAll(ctx, eng.Registry())
+	return mgr.Close
 }
 
 func connectMCP(cfg *config.Config, eng *engine.Engine) func() {
@@ -659,9 +678,20 @@ func userConfigPaths() []string {
 }
 
 func tryMerge(base *config.Config, path string) {
-	if overlay, err := config.LoadFile(path); err == nil {
-		mergeConfig(base, overlay)
+	overlay, err := config.LoadFile(path)
+	if err != nil {
+		// Missing files are normal — skip silently. Anything else
+		// (malformed JSON, permission denied, syntax error) is a real
+		// startup problem that the user needs to know about, so we
+		// print to stderr BEFORE the TUI takes over the screen.
+		// This is intentional: the alternative is silently dropping
+		// 'altcode ignored my settings' bug reports.
+		if !os.IsNotExist(err) {
+			fmt.Fprintf(os.Stderr, "altcode: failed to load config %q: %v\n", path, err)
+		}
+		return
 	}
+	mergeConfig(base, overlay)
 }
 
 func mergeConfig(base, overlay *config.Config) {
