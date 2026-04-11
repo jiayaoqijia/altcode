@@ -44,12 +44,21 @@ func NewRegistry(maxDepth int) *Registry {
 // nicknames are assigned to agents for human-friendly identification.
 var nicknames = []string{"Alice", "Bob", "Carol", "Dave", "Eve", "Frank", "Grace", "Hank"}
 
-// Register adds a running agent. Returns false if depth exceeded.
+// Register adds a running agent. Returns false if depth exceeded or
+// the name is already in use. Previously a duplicate name would
+// silently overwrite the prior entry, orphaning whatever goroutine
+// was waiting on that agent's Done channel.
 func (r *Registry) Register(name string, ag *Agent, depth int, parentPath string) (*RunningAgent, bool) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 
 	if depth > r.maxDepth {
+		return nil, false
+	}
+	if _, exists := r.agents[name]; exists {
+		// Caller asked for a name we already have running. Reject
+		// rather than clobber. Callers can pick a unique name
+		// (e.g. role-2) instead of stomping live state.
 		return nil, false
 	}
 
