@@ -3,9 +3,12 @@ package auth
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
+	"time"
 
 	"github.com/altcode-ai/altcode/internal/config"
 )
@@ -75,10 +78,21 @@ func loadClaudeCodeAuth(cfg *config.Config) {
 		ClaudeAiOauth struct {
 			AccessToken      string `json:"accessToken"`
 			SubscriptionType string `json:"subscriptionType"`
+			ExpiresAt        int64  `json:"expiresAt"`
 		} `json:"claudeAiOauth"`
 	}
 	if json.Unmarshal(data, &creds) != nil || creds.ClaudeAiOauth.AccessToken == "" {
 		return
+	}
+	// Skip expired tokens — without this, the cached access token gets
+	// happily loaded into the config and downstream API calls fail
+	// with confusing 401s instead of triggering the user to re-auth.
+	// expiresAt is unix milliseconds.
+	if creds.ClaudeAiOauth.ExpiresAt > 0 {
+		if time.UnixMilli(creds.ClaudeAiOauth.ExpiresAt).Before(time.Now()) {
+			fmt.Fprintln(os.Stderr, "altcode: Claude Code subscription token expired — run 'claude /login' to refresh")
+			return
+		}
 	}
 
 	cfg.Provider["anthropic"] = config.ProviderConfig{
@@ -132,30 +146,46 @@ func loadCodexAuth(cfg *config.Config) {
 	}
 }
 
-// parseCodexBaseURL extracts base_url from codex config.toml
+// parseCodexBaseURL extracts base_url from the top level of codex
+// config.toml. Skips values inside [section] headers — without this,
+// a base_url under [profile.foo] would override the user's actual
+// active config.
 func parseCodexBaseURL(path string) string {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return ""
-	}
-	// Simple TOML parsing for base_url
-	for _, line := range splitLines(string(data)) {
-		if key, val := parseTOMLKV(line); key == "base_url" {
-			return val
-		}
-	}
-	return ""
+	return parseCodexTOMLTop(path, "base_url")
 }
 
-// parseCodexModel extracts model from codex config.toml
+// parseCodexModel extracts the top-level model from codex config.toml.
+// Same section-aware behavior as parseCodexBaseURL — a [profile.x]
+// model used to silently win.
 func parseCodexModel(path string) string {
+	return parseCodexTOMLTop(path, "model")
+}
+
+// parseCodexTOMLTop returns the value of `key` if it appears at the
+// top level of a TOML file, ignoring any value inside a [section]
+// header. The previous parser walked every line and returned the
+// first match regardless of nesting, so a [profile.staging] block
+// could silently override the active model or base URL.
+func parseCodexTOMLTop(path, key string) string {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return ""
 	}
-	for _, line := range splitLines(string(data)) {
-		if key, val := parseTOMLKV(line); key == "model" {
-			return val
+	currentSection := ""
+	for _, raw := range splitLines(string(data)) {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			currentSection = line
+			continue
+		}
+		if currentSection != "" {
+			continue
+		}
+		if k, v := parseTOMLKV(line); k == key {
+			return v
 		}
 	}
 	return ""
@@ -321,8 +351,43 @@ func SaveProviderAPIKey(providerName, apiKey string) (string, error) {
 }
 
 func hasProviderKey(cfg *config.Config, name string) bool {
-	p, ok := cfg.Provider[name]
-	return ok && p.APIKey != ""
+	if p, ok := cfg.Provider[name]; ok && p.APIKey != "" {
+		return true
+	}
+	// Fall back to the conventional environment variable for that
+	// provider — without this, users with only ANTHROPIC_API_KEY /
+	// OPENAI_API_KEY in env got a "no credentials detected" prompt
+	// at startup even though CredentialSource happily picks them up
+	// at request time.
+	if env := providerEnvVar(name); env != "" && os.Getenv(env) != "" {
+		return true
+	}
+	return false
+}
+
+// providerEnvVar maps a provider name to the canonical env var that
+// holds its API key. Returns "" for providers without a conventional
+// env name (subscription-only auth like Claude Code OAuth).
+func providerEnvVar(name string) string {
+	switch name {
+	case "anthropic":
+		return "ANTHROPIC_API_KEY"
+	case "openai":
+		return "OPENAI_API_KEY"
+	case "openrouter":
+		return "OPENROUTER_API_KEY"
+	case "deepseek":
+		return "DEEPSEEK_API_KEY"
+	case "zhipu", "glm":
+		return "ZHIPU_API_KEY"
+	case "moonshot", "kimi":
+		return "MOONSHOT_API_KEY"
+	case "minimax":
+		return "MINIMAX_API_KEY"
+	case "qwen":
+		return "DASHSCOPE_API_KEY"
+	}
+	return ""
 }
 
 func currentProvider(model string) string {

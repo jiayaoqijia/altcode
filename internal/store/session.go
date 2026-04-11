@@ -80,6 +80,10 @@ func (db *DB) ListSessions() ([]*Session, error) {
 }
 
 // LatestSession returns the most recently updated session for a project.
+// Distinguishes "no rows" from real DB errors so a corrupted database
+// doesn't silently start a fresh empty session — callers can act on
+// errors.Is(err, sql.ErrNoRows) for the empty case and propagate any
+// other error to the user.
 func (db *DB) LatestSession(projectID string) (*Session, error) {
 	row := db.sql.QueryRow(
 		`SELECT id, project_id, title, model, created_at, updated_at, summary
@@ -88,7 +92,10 @@ func (db *DB) LatestSession(projectID string) (*Session, error) {
 	)
 	s, err := scanSession(row)
 	if err != nil {
-		return nil, fmt.Errorf("store: no sessions for project %q", projectID)
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("store: no sessions for project %q: %w", projectID, sql.ErrNoRows)
+		}
+		return nil, fmt.Errorf("store: latest session for project %q: %w", projectID, err)
 	}
 	return s, nil
 }

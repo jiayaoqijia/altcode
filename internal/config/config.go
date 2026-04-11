@@ -133,13 +133,20 @@ func LoadFile(path string) (*Config, error) {
 // turning required-but-templated fields like API keys into empty
 // strings, then loading 'successfully' with broken auth) and still
 // expand to "" so the JSON remains valid.
+//
+// Substituted values are JSON-escaped before insertion. Without
+// escaping, an env var containing `"` or `\` (legitimate password
+// content) would inject syntactically broken JSON and json.Unmarshal
+// would fail with a confusing parse error far from the offending
+// variable. The substitution happens on raw JSON source, so the
+// inserted string must be safe for the surrounding `"..."` context.
 func ExpandEnv(s string) string {
 	re := regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
 	warned := map[string]bool{}
 	return re.ReplaceAllStringFunc(s, func(match string) string {
 		name := match[1:] // strip leading '$'
 		if val, ok := os.LookupEnv(name); ok {
-			return val
+			return jsonStringContent(val)
 		}
 		if !warned[name] {
 			fmt.Fprintf(os.Stderr, "altcode: env var $%s referenced in config but not set; expanding to empty\n", name)
@@ -147,6 +154,18 @@ func ExpandEnv(s string) string {
 		}
 		return ""
 	})
+}
+
+// jsonStringContent returns s ready to be embedded inside a JSON
+// string literal — escaping `"`, `\`, and control characters. Used
+// by ExpandEnv so an env var like `pass"word` doesn't break the
+// surrounding JSON when substituted into `"apiKey": "$VAR"`.
+func jsonStringContent(s string) string {
+	b, err := json.Marshal(s)
+	if err != nil || len(b) < 2 {
+		return s
+	}
+	return string(b[1 : len(b)-1])
 }
 
 // stripJSONComments removes // line comments from a JSON string.
