@@ -73,6 +73,13 @@ type cliFlags struct {
 	promptFile string   // --prompt-file <path>; "-" = stdin
 	system     string   // --system <text>
 	systemFile string   // --system-file <path>
+
+	// Phase 10: inspection (all print-and-exit)
+	printConfig    bool // --print-config: effective config JSON
+	printToolsList bool // --print-tools-list: registered tools
+	printSkills    bool // --print-skills: discovered skills
+	printMCP       bool // --print-mcp: configured MCP servers
+	doctor         bool // --doctor: health check
 }
 
 func main() {
@@ -159,6 +166,18 @@ func main() {
 		"Deny a tool [name] or [name:pattern] for this session (repeatable)")
 	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
 		"Alias for --permission-mode plan (read-only, no writes)")
+
+	// --- Phase 10: inspection (print-and-exit) ---
+	root.Flags().BoolVar(&flags.printConfig, "print-config", false,
+		"Print effective config as JSON and exit")
+	root.Flags().BoolVar(&flags.printToolsList, "print-tools-list", false,
+		"List registered tools and exit")
+	root.Flags().BoolVar(&flags.printSkills, "print-skills", false,
+		"List discovered skills and exit")
+	root.Flags().BoolVar(&flags.printMCP, "print-mcp", false,
+		"List configured MCP servers and exit")
+	root.Flags().BoolVar(&flags.doctor, "doctor", false,
+		"Run environment health check and exit")
 
 	// --- Phase 5: input ---
 	root.Flags().StringArrayVar(&flags.images, "image", nil,
@@ -366,6 +385,26 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 	// sessions from an alternate database path.
 	if flags.listSessions {
 		return listSessionsFromDB(flags.sessionDB)
+	}
+
+	// Phase 10 shortcuts: inspection flags all print and exit
+	// without building an engine or opening a session. Each one
+	// is dispatched to a dedicated helper so main's run() stays
+	// thin.
+	if flags.printConfig {
+		return printConfig(cfg)
+	}
+	if flags.printToolsList {
+		return printToolsList()
+	}
+	if flags.printSkills {
+		return printSkillsList()
+	}
+	if flags.printMCP {
+		return printMCPServers(cfg)
+	}
+	if flags.doctor {
+		return printDoctorReport(cfg)
 	}
 
 	// --continue is a CC-compat alias for --last; merge them early

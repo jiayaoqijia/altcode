@@ -12,6 +12,23 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 10: inspection flags)
+
+- `--print-config` dumps the cascaded config as JSON with **all
+  credentials redacted** — Provider.APIKey, Provider.BaseURL
+  (if embedded credentials), MCPServerConfig.Env values, and
+  TeamModel.APIKey / TeamModel.BaseURL. Safe to pipe into bug
+  reports or jq. Live config is never mutated.
+- `--print-tools-list` prints every tool registered in a default
+  engine with a one-line description.
+- `--print-skills` prints discovered skills AND agents (matching
+  TUI `/skills`), sorted alphabetically with path + description.
+- `--print-mcp` lists configured MCP servers without starting
+  them (avoids the 1-5s startup latency per server).
+- `--doctor` runs an environment health check: provider creds,
+  tool count, MCP count, git repo presence, CLI agents on PATH
+  (claude/codex/opencode), and config cascade inventory.
+
 ### Added (Phase 5: input flags)
 
 - `--image <path>` attaches an image to the prompt as a multimodal

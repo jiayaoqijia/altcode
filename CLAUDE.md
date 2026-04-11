@@ -87,6 +87,12 @@ was reviewed across 7 rounds between CC and Codex before starting.
   carries the image `ContentPart`s into the first user message and is
   consumed once per engine. `--file` fence auto-extends to survive
   triple-backtick content.
+- **Phase 10**: `--print-config`, `--print-tools-list`, `--print-skills`,
+  `--print-mcp`, `--doctor`. All print-and-exit. `--print-config`
+  deep-copies and redacts every credential-bearing field: Provider.APIKey,
+  MCPServerConfig.Env, TeamModel.APIKey, and Provider/TeamModel BaseURLs
+  that embed `user:pass@host` (both CC + Codex caught secret-leak
+  BLOCKERs here).
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

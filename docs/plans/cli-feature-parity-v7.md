@@ -8,12 +8,12 @@
 | 2 — permission mode + allow/deny tools | **shipped** | 2aadd77 | 9 unit tests; documented config-deny-shadowing limitation |
 | 3 — permission-prompt-tool | pending | | Unblocked by Phase 2 |
 | 4 — continue + fork-session + session-db + list-sessions | **shipped** | 247fd14 | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
-| 5 — input flags | **shipped** | (this commit) | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
+| 5 — input flags | **shipped** | 9c67890 | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
 | 6 — hooks + ALTCODE_HOOK_DEPTH | pending | | |
 | 7 — save-* artifacts + --commit | pending | | |
 | 8 — MaxTurns + CostBudget | pending | | |
 | 9 — batch runner | pending | | |
-| 10 — inspection flags | pending | | |
+| 10 — inspection flags | **shipped** | (this commit) | `--print-config` deep-redacts Provider/MCP/Team secrets; both reviewers caught leaks in round 1 |
 | **11 — SIGTERM** | **shipped** | 4fcc3d1 | Folded into Phase 1 |
 | 12 — --print-tree ASCII renderer | pending | | |
 | 13 — integration tests | pending | | Partially grown per-phase alongside each implementation |
@@ -49,6 +49,23 @@
   the wrapper early.
 - 1 MB per-file cap and 20 MB per-image cap prevent pathological
   runs from blowing the context window.
+
+**Phase 10:**
+- `--print-config` redaction scope had to expand beyond
+  Provider.APIKey. Round-1 review caught two separate secret
+  leaks:
+  - CC: MCPServerConfig.Env routinely carries GITHUB_TOKEN /
+    ANTHROPIC_API_KEY / etc. via environment variables passed
+    to the MCP server subprocess.
+  - Codex: team.models[*].apiKey and team.models[*].baseURL
+    (per-role overrides on the TeamConfig).
+- BaseURL values that embed `user:pass@host` also redacted for
+  both ProviderConfig and TeamModel.
+- Deep-copy of every rewritten reference field (map, pointer)
+  so redaction never mutates the caller's live config.
+- `--print-skills` mirrors the TUI `/skills` command: union of
+  discoverSkills() + discoverAgents() with " (agent)" suffix,
+  not just the skills half.
 
 **Phase 11 (folded into Phase 1):**
 - `SIGTERM` trap added alongside `SIGINT` during the `runExec`
