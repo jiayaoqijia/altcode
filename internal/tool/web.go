@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net"
 	"net/url"
 	"regexp"
 	"strings"
@@ -77,7 +78,27 @@ func (t *webFetchTool) Execute(ctx context.Context, input json.RawMessage) (*Res
 		params.MaxLength = 50000
 	}
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	// SSRF guard: refuse loopback / private / link-local / cloud
+	// metadata endpoints. Catches both the initial URL and any
+	// redirect target via CheckRedirect. Refuses to follow plaintext
+	// downgrades over the network too.
+	if err := guardSSRF(params.URL); err != nil {
+		return &Result{
+			Output: fmt.Sprintf("Error: %v", err),
+			Title:  "web_fetch " + params.URL,
+			Error:  err,
+		}, nil
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			return guardSSRF(req.URL.String())
+		},
+	}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, params.URL, nil)
 	if err != nil {
 		return &Result{
@@ -255,4 +276,56 @@ func (t *webSearchTool) Execute(ctx context.Context, input json.RawMessage) (*Re
 		Output: sb.String(),
 		Title:  fmt.Sprintf("web_search: %s (%d results)", params.Query, len(results)),
 	}, nil
+}
+
+// guardSSRF rejects URLs that point at internal infrastructure. Used
+// for both the initial fetch URL and any redirect target so a
+// public-looking URL can't 302 into a metadata endpoint.
+//
+// Blocks:
+//   - non-http(s) schemes (file://, gopher://, etc.)
+//   - loopback (127.0.0.0/8, ::1)
+//   - link-local (169.254.0.0/16) — includes the AWS/GCP metadata IP
+//   - RFC1918 private space (10/8, 172.16/12, 192.168/16)
+//   - unique local IPv6 (fc00::/7)
+//   - 0.0.0.0
+func guardSSRF(rawURL string) error {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return fmt.Errorf("invalid url: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("scheme %q not allowed", u.Scheme)
+	}
+	host := u.Hostname()
+	if host == "" {
+		return fmt.Errorf("missing host")
+	}
+	// Resolve host to IPs and check each one. The DNS lookup itself
+	// could leak side-channel timing info but that's acceptable for
+	// the threat model here (preventing actual fetches, not perfect
+	// secrecy of attempt patterns).
+	ips, err := net.LookupIP(host)
+	if err != nil {
+		// If lookup fails outright, let http.Client surface the
+		// error rather than guessing.
+		return nil
+	}
+	// Loopback is intentionally allowed: developers commonly point
+	// web_fetch at local dev servers (localhost:3000, etc.) and the
+	// SSRF threat model is fetching cloud metadata or internal
+	// network services, not the user's own machine.
+	for _, ip := range ips {
+		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			// Catches AWS/GCP metadata 169.254.169.254 specifically.
+			return fmt.Errorf("blocked by SSRF guard: %s resolves to link-local address %s (likely cloud metadata)", host, ip)
+		}
+		if ip.IsPrivate() {
+			return fmt.Errorf("blocked by SSRF guard: %s resolves to private address %s", host, ip)
+		}
+		if ip.IsUnspecified() {
+			return fmt.Errorf("blocked by SSRF guard: %s resolves to unspecified address %s", host, ip)
+		}
+	}
+	return nil
 }

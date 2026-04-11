@@ -56,10 +56,29 @@ func (t *grepTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 	out, err := cmd.Output()
 	output := string(out)
 
-	if err != nil && output == "" {
+	// Distinguish 'no matches' (rg/grep exit code 1) from real errors
+	// (exit code 2 = malformed regex, missing path, permission denied,
+	// etc.). Previously any error with empty output was reported as
+	// 'No matches found.', so a typo'd regex looked like a clean miss.
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 && output == "" {
+			return &Result{
+				Output: "No matches found.",
+				Title:  "grep " + params.Pattern,
+			}, nil
+		}
+		stderr := ""
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			stderr = string(exitErr.Stderr)
+		}
+		msg := strings.TrimSpace(stderr)
+		if msg == "" {
+			msg = err.Error()
+		}
 		return &Result{
-			Output: "No matches found.",
+			Output: fmt.Sprintf("Error: %s", msg),
 			Title:  "grep " + params.Pattern,
+			Error:  fmt.Errorf("grep failed: %s", msg),
 		}, nil
 	}
 
