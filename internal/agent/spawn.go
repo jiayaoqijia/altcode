@@ -100,12 +100,24 @@ func SpawnWithOptions(
 		return ch
 	}
 
-	// Apply timeout if configured
+	// Apply timeout if configured. The previous version discarded the
+	// CancelFunc, which leaks the timer's resources until the deadline
+	// fires — even when the child completes normally well before then.
+	// Wrap child.Run so cancel() runs after the event channel closes.
 	runCtx := ctx
 	if opts.Timeout > 0 {
 		var cancel context.CancelFunc
 		runCtx, cancel = context.WithTimeout(ctx, opts.Timeout)
-		_ = cancel // child.Run manages its own goroutine; context propagates cancellation
+		raw := child.Run(runCtx, input)
+		out := make(chan event.Event, cap(raw))
+		go func() {
+			defer cancel()
+			defer close(out)
+			for ev := range raw {
+				out <- ev
+			}
+		}()
+		return out
 	}
 
 	return child.Run(runCtx, input)

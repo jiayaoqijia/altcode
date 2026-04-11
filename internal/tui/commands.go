@@ -1219,6 +1219,12 @@ func (a *App) builtinSendText(parts []string) string {
 	if !a.wsView.HasRole(role) {
 		return fmt.Sprintf("Unknown agent role %q. Check /agents for available roles.", role)
 	}
-	a.wsView.AppendAgentOutput(role, fmt.Sprintf("[operator] %s", message))
-	return fmt.Sprintf("Sent to %s: %s", role, message)
+	// External agents (claude/codex subprocess) don't expose an inbound
+	// message channel after spawn — there's no stdin protocol for
+	// arbitrary user input. /send currently annotates the pane so
+	// operators can leave a visible note for themselves; the agent
+	// itself does NOT receive the text. Tell the user that explicitly
+	// instead of pretending it landed in a mailbox.
+	a.wsView.AppendAgentOutput(role, fmt.Sprintf("[operator note] %s", message))
+	return fmt.Sprintf("Annotated %s pane (note: external agents have no inbound channel; restart the workspace with the new prompt to actually deliver it).", role)
 }
