@@ -27,9 +27,43 @@ func (t *webFetchTool) Description() string {
 func (t *webFetchTool) IsConcurrencySafe() bool { return true }
 func (t *webFetchTool) IsReadOnly() bool        { return true }
 func (t *webFetchTool) PermissionPattern(input json.RawMessage) string {
-	var p struct{ URL string `json:"url"` }
+	var p struct {
+		URL string `json:"url"`
+	}
 	json.Unmarshal(input, &p)
-	return "web_fetch:" + p.URL
+	return "web_fetch:" + normalizeURLForPermission(p.URL)
+}
+
+// normalizeURLForPermission canonicalizes a URL so origin-equivalent
+// requests share the same permission key. Lowercases scheme + host,
+// strips default ports, removes trailing dots, and drops the query
+// string. Without this, an allow rule for 'https://api.github.com/*'
+// would NOT match 'https://API.GitHub.com/...' or
+// 'https://api.github.com:443/...'.
+func normalizeURLForPermission(raw string) string {
+	if raw == "" {
+		return raw
+	}
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	scheme := strings.ToLower(u.Scheme)
+	host := strings.ToLower(u.Hostname())
+	host = strings.TrimSuffix(host, ".")
+	port := u.Port()
+	if (scheme == "http" && port == "80") || (scheme == "https" && port == "443") {
+		port = ""
+	}
+	hostPort := host
+	if port != "" {
+		hostPort = host + ":" + port
+	}
+	path := u.Path
+	if path == "" {
+		path = "/"
+	}
+	return scheme + "://" + hostPort + path
 }
 
 func (t *webFetchTool) Parameters() json.RawMessage {

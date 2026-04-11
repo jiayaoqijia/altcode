@@ -125,10 +125,28 @@ func TestWebFetchToolHTTPError(t *testing.T) {
 
 func TestWebFetchToolPermissionPattern(t *testing.T) {
 	ft := tool.NewWebFetchTool()
-	input, _ := json.Marshal(map[string]any{"url": "https://example.com"})
-	pattern := ft.PermissionPattern(input)
-	if pattern != "web_fetch:https://example.com" {
-		t.Fatalf("Pattern = %q, want web_fetch:https://example.com", pattern)
+	// Permission keys are normalized: scheme + host lowercased,
+	// default ports stripped, trailing dot removed, empty path
+	// rendered as "/", query string dropped. So origin-equivalent
+	// requests share a single permission rule.
+	tests := []struct {
+		url  string
+		want string
+	}{
+		{"https://example.com", "web_fetch:https://example.com/"},
+		{"https://Example.COM", "web_fetch:https://example.com/"},
+		{"https://example.com:443/foo", "web_fetch:https://example.com/foo"},
+		{"http://example.com:80/foo", "web_fetch:http://example.com/foo"},
+		{"https://api.github.com/repos?token=secret", "web_fetch:https://api.github.com/repos"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.url, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]any{"url": tt.url})
+			pattern := ft.PermissionPattern(input)
+			if pattern != tt.want {
+				t.Fatalf("Pattern(%q) = %q, want %q", tt.url, pattern, tt.want)
+			}
+		})
 	}
 }
 
