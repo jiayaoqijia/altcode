@@ -135,11 +135,14 @@ func (e *Evaluator) SetMode(mode Mode) {
 }
 
 func (e *Evaluator) isDoomLoop(toolName, pattern string) bool {
+	// Use the package-level constant so changing doomLoopThreshold in
+	// doom.go actually changes detection behavior. Previously the
+	// hardcoded 3 silently diverged from the named constant.
 	n := len(e.callHistory)
-	if n < 3 {
+	if n < doomLoopThreshold {
 		return false
 	}
-	for i := n - 3; i < n; i++ {
+	for i := n - doomLoopThreshold; i < n; i++ {
 		if e.callHistory[i].tool != toolName || e.callHistory[i].pattern != pattern {
 			return false
 		}
