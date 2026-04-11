@@ -221,7 +221,16 @@ func (wv *WorkspaceView) ScrollPane(delta int) {
 	if p.scrollOffset < 0 {
 		p.scrollOffset = 0
 	}
-	maxScroll := len(p.Lines) - 10
+	// Use the body height captured during the last Render so the
+	// scroll clamp tracks the actual visible window. The previous
+	// hardcoded 10 left a 10-line gap on tall terminals and
+	// prevented scrolling to the bottom on short ones. Falls back
+	// to 10 only when no Render has happened yet.
+	visible := p.lastBodyHeight
+	if visible <= 0 {
+		visible = 10
+	}
+	maxScroll := len(p.Lines) - visible
 	if maxScroll < 0 {
 		maxScroll = 0
 	}

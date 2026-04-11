@@ -6,6 +6,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/workspace"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const agentPaneOutputLines = 200
@@ -21,9 +22,10 @@ type wsAgentPane struct {
 	Priority workspace.AttentionPriority
 	CostUSD  float64
 	Turns    int
-	Lines        []string // rolling output buffer
-	Focused      bool     // true when this pane has keyboard focus
-	scrollOffset int      // 0 = bottom (latest), >0 = scrolled up
+	Lines          []string // rolling output buffer
+	Focused        bool     // true when this pane has keyboard focus
+	scrollOffset   int      // 0 = bottom (latest), >0 = scrolled up
+	lastBodyHeight int      // visible body lines from the last Render call
 }
 
 // AppendOutput adds a line to the pane's rolling buffer.
@@ -72,13 +74,22 @@ func (p *wsAgentPane) Render(
 	actIcon := activityIcon(p.Activity)
 	header := fmt.Sprintf("%s %s %s", badge, backend, actIcon)
 
-	// Branch line (if available)
+	// Branch line (if available). Truncation walks runes (not bytes)
+	// so a branch like `feature/測試` doesn't get sliced mid-rune
+	// and produce invalid UTF-8 in the rendered pane.
 	branchLine := ""
 	if p.Branch != "" {
+		runes := []rune(p.Branch)
 		shortBranch := p.Branch
-		if len(shortBranch) > width-6 {
-			shortBranch = shortBranch[len(shortBranch)-(width-9):] // show tail
-			shortBranch = "..." + shortBranch
+		if len(runes) > width-6 {
+			tail := width - 9
+			if tail < 1 {
+				tail = 1
+			}
+			if tail > len(runes) {
+				tail = len(runes)
+			}
+			shortBranch = "..." + string(runes[len(runes)-tail:])
 		}
 		branchLine = lipgloss.NewStyle().
 			Foreground(theme.Secondary).
@@ -115,6 +126,9 @@ func (p *wsAgentPane) Render(
 	if bodyHeight < 1 {
 		bodyHeight = 1
 	}
+	// Stash the body height so ScrollPane can clamp to the real
+	// visible window instead of a hardcoded magic number.
+	p.lastBodyHeight = bodyHeight
 	// Apply scroll offset: 0 = show latest lines, >0 = scrolled up
 	visible := p.Lines
 	if p.scrollOffset > 0 && len(visible) > bodyHeight {
@@ -136,13 +150,18 @@ func (p *wsAgentPane) Render(
 		maxLineWidth = 3
 	}
 	for _, l := range visible {
-		runes := []rune(l)
-		if len(runes) > maxLineWidth {
+		// Truncate by display columns. The previous version compared
+		// rune count to width and silently broke ANSI escapes mid-
+		// sequence when a tool piped colored output (`ls --color`,
+		// `cargo build`, `grep --color=always`). lipgloss.Width is
+		// ANSI-aware and counts visible columns, and ansi.Truncate
+		// preserves the escape state.
+		if lipgloss.Width(l) > maxLineWidth {
 			cut := maxLineWidth - 3
 			if cut < 0 {
 				cut = 0
 			}
-			l = string(runes[:cut]) + "..."
+			l = ansi.Truncate(l, cut, "") + "..."
 		}
 		body = append(body, l)
 	}

@@ -326,7 +326,17 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 				} else if strings.HasPrefix(lowerDetail, lowerName+":") {
 					detail = strings.TrimSpace(detail[len(e.name)+1:])
 				}
-				det := smartTruncate(detail, width-len(prefix)-len(e.name)-14)
+				// Width math must use display columns, not bytes —
+				// `lipgloss.Width("├─")` is 2 (cells) but `len("├─")`
+				// is 6 (bytes), and Unicode tool names like
+				// `mcp__rüm__open` get over-truncated under byte
+				// counting. Guard against negative budgets so a
+				// narrow column doesn't clamp to 5 chars.
+				avail := width - lipgloss.Width(prefix) - lipgloss.Width(e.name) - 14
+				if avail < 10 {
+					avail = 10
+				}
+				det := smartTruncate(detail, avail)
 				nameText = e.name + "(" + det + ")"
 			}
 			nameRendered := lipgloss.NewStyle().Foreground(nameColor).Bold(e.status == "running").Render(nameText)
