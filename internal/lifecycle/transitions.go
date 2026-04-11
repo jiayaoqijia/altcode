@@ -103,6 +103,11 @@ func advancePROpen(
 			// CI already failed before we polled
 			sess.Status = workspace.WSSCIFailed
 			return nil
+		case workspace.CIUnknown, workspace.CISkipped:
+			// No checks configured or skipped (e.g. doc-only PR).
+			// Treat as pass so the lifecycle doesn't stall waiting
+			// for CI signals that will never arrive.
+			return onCIPass(ctx, sess, rec, plugins)
 		}
 	}
 	// Stuck timeout: if PR has been open with no CI for too long
