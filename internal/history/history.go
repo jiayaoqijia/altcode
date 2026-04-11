@@ -100,18 +100,39 @@ func mapAction(display string) string {
 }
 
 // diff returns a unified diff for a given file path.
-// Uses the most recent entry for that path.
+// Uses the most recent entry for that path. Copies the matched entry
+// out under the lock so the (potentially expensive) unifiedDiff call
+// runs without blocking concurrent Record / Entries / Summary
+// callers — the previous version held j.mu through the whole diff
+// build, which serialized every other journal operation behind it.
 func (j *Journal) diff(path string) string {
 	j.mu.Lock()
-	defer j.mu.Unlock()
-
-	entry := j.findLatest(path)
-	if entry == nil {
+	entry, ok := j.findLatestLocked(path)
+	j.mu.Unlock()
+	if !ok {
 		return ""
 	}
 	return unifiedDiff(path, entry.Before, entry.After)
 }
 
+// findLatestLocked returns the most recent entry for path BY VALUE.
+// Returning a pointer into the backing slice (the previous behavior)
+// leaked an internal reference that callers could keep across an
+// unlock and then race with Record() reallocating the slice.
+//
+// Caller must hold j.mu.
+func (j *Journal) findLatestLocked(path string) (Entry, bool) {
+	for i := len(j.entries) - 1; i >= 0; i-- {
+		if j.entries[i].Path == path {
+			return j.entries[i], true
+		}
+	}
+	return Entry{}, false
+}
+
+// findLatest is the deprecated pointer-returning helper kept for
+// internal compatibility. Prefer findLatestLocked. Caller must hold
+// j.mu and must not retain the pointer after release.
 func (j *Journal) findLatest(path string) *Entry {
 	for i := len(j.entries) - 1; i >= 0; i-- {
 		if j.entries[i].Path == path {
