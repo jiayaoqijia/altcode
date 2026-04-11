@@ -63,13 +63,22 @@ func Run(ctx context.Context, p RunParams) error {
 // runSingleTurn handles interview/plan modes: save state, inject prompt, run once.
 func runSingleTurn(ctx context.Context, p RunParams, mode Mode, label, task, sysPrompt string, maxIter int, w io.Writer) error {
 	fmt.Fprintf(w, "[workflow] Starting %s for: %s\n\n", label, truncate(task, 80))
-	SaveState(p.ProjectRoot, &State{
+	saveStateOrWarn(w, p.ProjectRoot, &State{
 		Mode: mode, Phase: PhaseActive,
 		StartedAt: time.Now(), MaxIter: maxIter,
 	})
 	params := p.EngineParams
 	params.Instructions = appendInstruction(params.Instructions, "workflow/"+string(mode), sysPrompt)
 	return drainEngine(ctx, params, task, w)
+}
+
+// saveStateOrWarn persists state and surfaces any error to the writer.
+// Workflow execution continues even if state persistence fails — losing
+// state observability is preferable to aborting an in-flight task.
+func saveStateOrWarn(w io.Writer, root string, st *State) {
+	if err := SaveState(root, st); err != nil {
+		fmt.Fprintf(w, "[workflow] warning: failed to save %s state: %v\n", st.Mode, err)
+	}
 }
 
 func runInterview(ctx context.Context, p RunParams, task string, w io.Writer) error {
@@ -84,6 +93,8 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 	fmt.Fprintf(w, "[workflow] Starting persistent execution (ralph) for: %s\n", truncate(task, 80))
 	fmt.Fprintf(w, "[workflow] Max iterations: %d — will not stop until complete or blocked.\n\n", maxIter)
 
+	startedAt := time.Now()
+	var lastText string
 	for i := 1; i <= maxIter; i++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
@@ -91,9 +102,9 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 
 		st := &State{
 			Mode: ModeRalph, Phase: PhaseActive,
-			StartedAt: time.Now(), Iteration: i, MaxIter: maxIter,
+			StartedAt: startedAt, Iteration: i, MaxIter: maxIter,
 		}
-		SaveState(p.ProjectRoot, st)
+		saveStateOrWarn(w, p.ProjectRoot, st)
 
 		fmt.Fprintf(w, "[ralph] Iteration %d/%d\n", i, maxIter)
 
@@ -103,8 +114,14 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 		params.Messages = nil // fresh conversation each iteration
 
 		text, err := drainEngineCapture(ctx, params, task, w)
+		lastText = text
 		if err != nil {
 			fmt.Fprintf(w, "\n[ralph] Iteration %d error: %v\n", i, err)
+			// Persist the iteration error so /wf-status can surface it
+			// instead of showing a stale "active" with no explanation.
+			st.Error = fmt.Sprintf("iteration %d: %v", i, err)
+			st.Context = text
+			saveStateOrWarn(w, p.ProjectRoot, st)
 			continue
 		}
 		fmt.Fprintf(w, "\n[ralph] Iteration %d complete.\n\n", i)
@@ -113,17 +130,21 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 		if isRalphComplete(text) {
 			st.Phase = PhaseComplete
 			st.Iteration = i
-			SaveState(p.ProjectRoot, st)
+			st.Context = text
+			st.Error = ""
+			saveStateOrWarn(w, p.ProjectRoot, st)
 			fmt.Fprintf(w, "[ralph] Task verified complete after %d iteration(s).\n", i)
 			return nil
 		}
 	}
 
-	st := &State{
+	// Reached max iterations without an explicit complete signal — record
+	// the final iteration's output so the user can inspect what happened.
+	saveStateOrWarn(w, p.ProjectRoot, &State{
 		Mode: ModeRalph, Phase: PhaseComplete,
-		StartedAt: time.Now(), Iteration: maxIter, MaxIter: maxIter,
-	}
-	SaveState(p.ProjectRoot, st)
+		StartedAt: startedAt, Iteration: maxIter, MaxIter: maxIter,
+		Context: lastText,
+	})
 
 	fmt.Fprintf(w, "[ralph] Reached max iterations (%d).\n", maxIter)
 	return nil
