@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -112,24 +113,41 @@ func ParseFile(path string) (*WorkflowDef, error) {
 	return def, nil
 }
 
-// DiscoverWarnings collects per-file parse failures from the most
-// recent Discover call so the TUI can surface why a workflow file
-// failed to load instead of silently dropping it.
-var DiscoverWarnings []string
+// DiscoverWarnings is the package-level mirror of the warnings produced
+// by the most recent Discover call. Kept as a backwards-compat shim for
+// callers that haven't migrated to the (defs, warnings, error) return.
+// New callers should prefer DiscoverWithWarnings.
+var (
+	DiscoverWarnings   []string
+	discoverWarningsMu sync.Mutex
+)
 
 // Discover finds all workflow files in the given directories. Parse
-// failures are recorded in DiscoverWarnings rather than returned as
-// errors so a single broken workflow doesn't hide all the others.
+// failures are recorded in the returned warnings list (and mirrored
+// into the deprecated package-level DiscoverWarnings) rather than
+// returned as errors so a single broken workflow doesn't hide all
+// the others.
 func Discover(dirs ...string) ([]*WorkflowDef, error) {
-	DiscoverWarnings = DiscoverWarnings[:0]
+	defs, warnings, err := DiscoverWithWarnings(dirs...)
+	discoverWarningsMu.Lock()
+	DiscoverWarnings = warnings
+	discoverWarningsMu.Unlock()
+	return defs, err
+}
+
+// DiscoverWithWarnings is the race-safe form of Discover. Returns the
+// warning list explicitly so concurrent callers don't trample each
+// other through the package-level slice.
+func DiscoverWithWarnings(dirs ...string) ([]*WorkflowDef, []string, error) {
 	var defs []*WorkflowDef
+	var warnings []string
 	for _, dir := range dirs {
 		entries, err := os.ReadDir(dir)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
 			}
-			return nil, err
+			return nil, warnings, err
 		}
 		for _, e := range entries {
 			if e.IsDir() || !strings.HasSuffix(e.Name(), ".md") {
@@ -138,14 +156,14 @@ func Discover(dirs ...string) ([]*WorkflowDef, error) {
 			path := filepath.Join(dir, e.Name())
 			def, err := ParseFile(path)
 			if err != nil {
-				DiscoverWarnings = append(DiscoverWarnings,
+				warnings = append(warnings,
 					fmt.Sprintf("workflow %s: %v", path, err))
 				continue
 			}
 			defs = append(defs, def)
 		}
 	}
-	return defs, nil
+	return defs, warnings, nil
 }
 
 // TopoSort returns phase names in dependency order.

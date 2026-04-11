@@ -30,7 +30,13 @@ func InjectWorkspaceContext(
 	path := filepath.Join(workDir, filename)
 
 	existing, _ := os.ReadFile(path)
-	merged := string(existing)
+	// Strip any prior "# Workspace Context" block we wrote ourselves
+	// before appending the new one. The previous code appended
+	// unconditionally so every Inject call grew CLAUDE.md / AGENTS.md
+	// linearly — over a long session the file could balloon to MBs of
+	// stale workspace state.
+	stripped := stripWorkspaceContextBlock(string(existing))
+	merged := stripped
 	if len(merged) > 0 && !strings.HasSuffix(merged, "\n") {
 		merged += "\n"
 	}
@@ -41,7 +47,22 @@ func InjectWorkspaceContext(
 		return fmt.Errorf("secret guard: %w", err)
 	}
 
-	return os.WriteFile(path, []byte(merged), 0o644)
+	// 0o600 keeps the file out of world-readable workspace dirs.
+	return os.WriteFile(path, []byte(merged), 0o600)
+}
+
+// stripWorkspaceContextBlock removes a "# Workspace Context" block
+// (the one buildContent writes) from `s`, returning everything before
+// the block. Idempotent: if no such block exists, returns s unchanged.
+func stripWorkspaceContextBlock(s string) string {
+	const marker = "# Workspace Context"
+	idx := strings.Index(s, marker)
+	if idx < 0 {
+		return s
+	}
+	// Trim trailing whitespace from the section we keep so the next
+	// merge doesn't double-up newlines.
+	return strings.TrimRight(s[:idx], " \t\n")
 }
 
 // targetFile returns the context file name for the given backend.
