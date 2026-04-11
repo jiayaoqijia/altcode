@@ -80,8 +80,25 @@ func (wv *WorkspaceView) AddAgent(rec *workspace.AgentRecord) {
 		Priority: rec.Priority(),
 	}
 	wv.panes[rec.Role] = pane
+	// Capture the focused role BEFORE the sort, then restore the
+	// index after — without this, sort.Strings shifts indices and
+	// wv.focus silently points at a different agent than the user
+	// last selected. Downstream FocusedRole / ScrollPane / renderPanes
+	// all key off this index.
+	focusedRole := ""
+	if wv.focus >= 0 && wv.focus < len(wv.order) {
+		focusedRole = wv.order[wv.focus]
+	}
 	wv.order = append(wv.order, rec.Role)
 	sort.Strings(wv.order)
+	if focusedRole != "" {
+		for i, r := range wv.order {
+			if r == focusedRole {
+				wv.focus = i
+				break
+			}
+		}
+	}
 }
 
 // IsActive reports whether the workspace view should be displayed.
