@@ -132,13 +132,18 @@ func toAnthropicMessage(m Message) anthropicMessage {
 }
 
 // processSSE reads SSE events from body and sends StreamEvents to ch.
+//
+// Anthropic's content_block_* events all carry an `index` and content
+// blocks may interleave (text + tool_use + text). Track each block by
+// its index so deltas and stops route to the right block instead of
+// being mis-attributed to whichever tool block happened to start last.
 func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 	defer body.Close()
 	defer close(ch)
 
 	decoder := NewSSEDecoder(body)
-	toolIndex := -1
-	var toolID, toolName, stopReason string
+	blocks := make(map[int]*blockState)
+	var stopReason string
 
 	for {
 		evtType, data, err := decoder.Next()
@@ -151,10 +156,7 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 		if data == "" {
 			continue
 		}
-		reason, err := dispatchSSEEvent(
-			evtType, data, ch,
-			&toolIndex, &toolID, &toolName,
-		)
+		reason, err := dispatchSSEEvent(evtType, data, ch, blocks)
 		if err != nil {
 			ch <- StreamEvent{Type: StreamError, Error: err}
 			break
@@ -166,27 +168,44 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
 
+// blockState tracks a single content block. Each Anthropic message may
+// have several blocks (text + tool_use + text...) and they can interleave.
+type blockState struct {
+	kind   string // "text", "thinking", "tool_use"
+	toolID string
+	name   string
+}
+
 func dispatchSSEEvent(
 	evtType, data string,
 	ch chan<- StreamEvent,
-	toolIndex *int, toolID, toolName *string,
+	blocks map[int]*blockState,
 ) (string, error) {
 	switch evtType {
 	case "content_block_start":
-		return "", handleContentBlockStart(data, ch, toolIndex, toolID, toolName)
+		return "", handleContentBlockStart(data, ch, blocks)
 	case "content_block_delta":
-		return "", handleContentBlockDelta(data, ch, *toolIndex, *toolID, *toolName)
+		return "", handleContentBlockDelta(data, ch, blocks)
 	case "content_block_stop":
-		if *toolIndex >= 0 {
+		var p struct {
+			Index int `json:"index"`
+		}
+		if err := json.Unmarshal([]byte(data), &p); err != nil {
+			return "", fmt.Errorf("parse content_block_stop: %w", err)
+		}
+		bs := blocks[p.Index]
+		if bs == nil {
+			return "", nil
+		}
+		switch bs.kind {
+		case "tool_use":
 			ch <- StreamEvent{Type: StreamToolCallEnd, ToolUse: &ToolCallEvent{
-				ID: *toolID, Name: *toolName,
+				ID: bs.toolID, Name: bs.name,
 			}}
-			*toolIndex = -1
-			*toolID = ""
-			*toolName = ""
-		} else {
+		case "text":
 			ch <- StreamEvent{Type: StreamTextDone}
 		}
+		delete(blocks, p.Index)
 	case "message_delta":
 		return handleMessageDeltaWithReason(data, ch)
 	case "message_stop":
@@ -209,6 +228,7 @@ type sseContentBlockStart struct {
 }
 
 type sseContentBlockDelta struct {
+	Index int `json:"index"`
 	Delta struct {
 		Type        string `json:"type"`
 		Text        string `json:"text"`
@@ -231,43 +251,50 @@ type sseError struct {
 }
 
 func handleContentBlockStart(
-	data string, ch chan<- StreamEvent,
-	toolIndex *int, toolID, toolName *string,
+	data string, ch chan<- StreamEvent, blocks map[int]*blockState,
 ) error {
 	var p sseContentBlockStart
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
 		return fmt.Errorf("parse content_block_start: %w", err)
 	}
+	bs := &blockState{kind: p.ContentBlock.Type}
 	if p.ContentBlock.Type == "tool_use" {
-		*toolIndex = p.Index
-		*toolID = p.ContentBlock.ID
-		*toolName = p.ContentBlock.Name
+		bs.toolID = p.ContentBlock.ID
+		bs.name = p.ContentBlock.Name
 		ch <- StreamEvent{Type: StreamToolCallStart, ToolUse: &ToolCallEvent{
 			ID: p.ContentBlock.ID, Name: p.ContentBlock.Name,
 		}}
-	} else {
-		*toolIndex = -1
 	}
+	blocks[p.Index] = bs
 	return nil
 }
 
 func handleContentBlockDelta(
-	data string, ch chan<- StreamEvent,
-	toolIndex int, toolID, toolName string,
+	data string, ch chan<- StreamEvent, blocks map[int]*blockState,
 ) error {
 	var p sseContentBlockDelta
 	if err := json.Unmarshal([]byte(data), &p); err != nil {
 		return fmt.Errorf("parse content_block_delta: %w", err)
 	}
+	bs := blocks[p.Index]
 	switch p.Delta.Type {
 	case "text_delta":
-		ch <- StreamEvent{Type: StreamTextDelta, Delta: p.Delta.Text}
+		// Only emit if we know the block is text — drops misrouted
+		// deltas instead of mixing them into the active text stream.
+		if bs == nil || bs.kind == "text" {
+			ch <- StreamEvent{Type: StreamTextDelta, Delta: p.Delta.Text}
+		}
 	case "thinking_delta":
-		ch <- StreamEvent{Type: StreamThinkingDelta, Delta: p.Delta.Thinking}
+		if bs == nil || bs.kind == "thinking" {
+			ch <- StreamEvent{Type: StreamThinkingDelta, Delta: p.Delta.Thinking}
+		}
 	case "input_json_delta":
-		if toolIndex >= 0 {
+		// Look up the tool block by index, not by 'last seen tool'.
+		// Previously a tool delta could be silently dropped if a
+		// non-tool block had reset the global toolIndex to -1.
+		if bs != nil && bs.kind == "tool_use" {
 			ch <- StreamEvent{Type: StreamToolCallDelta, ToolUse: &ToolCallEvent{
-				ID: toolID, Name: toolName, Delta: p.Delta.PartialJSON,
+				ID: bs.toolID, Name: bs.name, Delta: p.Delta.PartialJSON,
 			}}
 		}
 	}
