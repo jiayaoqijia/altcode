@@ -9,6 +9,7 @@ import (
 
 	"github.com/altcode-ai/altcode/internal/agent"
 	"github.com/altcode-ai/altcode/internal/compact"
+	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/orchestrator"
 	"github.com/altcode-ai/altcode/internal/plugin"
 	"github.com/altcode-ai/altcode/internal/provider"
@@ -44,6 +45,12 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.builtinClear()
 	case "/tools":
 		a.appendInfo(a.builtinToolsText())
+	case "/skills":
+		a.appendInfo(a.builtinSkillsText())
+	case "/mcp":
+		a.appendInfo(a.builtinMCPText())
+	case "/plugins":
+		a.appendInfo(a.builtinPluginsText())
 	case "/sessions":
 		a.appendInfo(a.builtinSessionsText())
 	case "/memory":
@@ -188,6 +195,7 @@ func (a *App) appendInfo(text string) {
 func (a *App) slashCommandNames() []string {
 	builtins := []string{
 		"/help", "/status", "/context", "/model", "/clear", "/tools",
+		"/skills", "/mcp", "/plugins",
 		"/cost", "/history", "/diff", "/compact", "/sessions", "/memory",
 		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
 		"/backends", "/undo", "/redo", "/search",
@@ -307,6 +315,9 @@ func builtinHelpText() string {
 		{"/model", "current model"},
 		{"/clear", "clear conversation"},
 		{"/tools", "list tools"},
+		{"/skills", "list discovered skills"},
+		{"/mcp", "list MCP servers"},
+		{"/plugins", "list plugins + warnings"},
 		{"/cost", "cost breakdown"},
 		{"/history", "file changes this session"},
 		{"/diff", "diff of changed files"},
@@ -966,6 +977,116 @@ func (a *App) builtinAgentsText() string {
 
 	sb.WriteString("```")
 	return sb.String()
+}
+
+// builtinSkillsText lists every skill (markdown command) discovered
+// from the skills/commands cascade. Until /skills existed, users with
+// installed Claude Code skills had no way to inspect them from the TUI.
+func (a *App) builtinSkillsText() string {
+	if a.engine == nil {
+		return "No engine."
+	}
+	skills := a.engine.Skills()
+	if len(skills) == 0 {
+		return "No skills discovered. Install skills under .claude/skills/, ~/.claude/skills/, or .agents/skills/."
+	}
+	sorted := make([]engine.Skill, len(skills))
+	copy(sorted, skills)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].Name < sorted[j].Name })
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("Discovered skills (%d):\n", len(sorted)))
+	for _, s := range sorted {
+		desc := strings.TrimSpace(s.Description)
+		if len(desc) > 100 {
+			desc = desc[:99] + "…"
+		}
+		if desc != "" {
+			sb.WriteString(fmt.Sprintf("  - %-30s  %s\n", s.Name, desc))
+		} else {
+			sb.WriteString(fmt.Sprintf("  - %s\n", s.Name))
+		}
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// builtinMCPText lists configured MCP servers. The /tools listing
+// surfaces MCP tools mixed with native ones; this command shows just
+// the servers and their connection state so users can debug a server
+// that loaded zero tools.
+func (a *App) builtinMCPText() string {
+	if a.engine == nil {
+		return "No engine."
+	}
+	cfg := a.engine.Config()
+	if cfg == nil || len(cfg.MCP) == 0 {
+		return "No MCP servers configured. Add servers to .mcp.json or settings.json."
+	}
+	names := make([]string, 0, len(cfg.MCP))
+	for n := range cfg.MCP {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("MCP servers (%d configured):\n", len(names)))
+	for _, n := range names {
+		s := cfg.MCP[n]
+		kind := "stdio"
+		if s.URL != "" {
+			kind = "sse"
+		}
+		sb.WriteString(fmt.Sprintf("  - %-24s %s\n", n, kind))
+	}
+
+	// Count MCP-prefixed tools so users can confirm at least one server
+	// actually connected and registered tools.
+	if reg := a.engine.Registry(); reg != nil {
+		mcpTools := 0
+		for _, t := range reg.All() {
+			if strings.HasPrefix(t.Name(), "mcp__") {
+				mcpTools++
+			}
+		}
+		sb.WriteString(fmt.Sprintf("\n  Registered MCP tools: %d (use /tools for the full list)", mcpTools))
+	}
+	return sb.String()
+}
+
+// builtinPluginsText lists discovered plugins and any non-fatal
+// warnings from manifest parsing or sub-resource loading. Plugins
+// that loaded successfully don't currently surface their commands or
+// agents — those are folded into /skills and /agents instead.
+func (a *App) builtinPluginsText() string {
+	var sb strings.Builder
+	if len(plugin.Warnings) > 0 {
+		sb.WriteString(fmt.Sprintf("Plugin warnings (%d):\n", len(plugin.Warnings)))
+		for _, w := range plugin.Warnings {
+			sb.WriteString(fmt.Sprintf("  %s\n", w))
+		}
+		sb.WriteString("\n")
+	}
+	pluginCmds := 0
+	pluginAgts := 0
+	if a.engine != nil {
+		// Plugin commands and agents are folded into the global skill /
+		// agent lists at startup; we don't keep a separate count today.
+		// Surface what we can: the warnings list above is usually the
+		// thing the user actually wants to debug.
+		pluginCmds = -1
+		pluginAgts = -1
+		_ = pluginCmds
+		_ = pluginAgts
+	}
+	if sb.Len() == 0 {
+		sb.WriteString("No plugin warnings. Plugins are merged into /skills and /agents.\n")
+		sb.WriteString("Plugin search paths:\n")
+		sb.WriteString("  - .altcode/plugins/\n")
+		sb.WriteString("  - .claude/plugins/\n")
+		sb.WriteString("  - ~/.config/altcode/plugins/\n")
+		sb.WriteString("  - ~/.claude/plugins/ (recursive)\n")
+	}
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (a *App) builtinSearchText(query string) string {

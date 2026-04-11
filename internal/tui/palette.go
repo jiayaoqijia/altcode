@@ -120,6 +120,42 @@ func (p *Palette) filter(query string) {
 	}
 }
 
+// truncateRunes returns s truncated to at most max display runes,
+// appending an ellipsis when truncated. Uses []rune slicing so multi-byte
+// characters (CJK, accented) don't get split.
+func truncateRunes(s string, max int) string {
+	r := []rune(s)
+	if len(r) <= max {
+		return s
+	}
+	if max < 1 {
+		return ""
+	}
+	return string(r[:max-1]) + "…"
+}
+
+// collapseWhitespace replaces every run of whitespace (incl. newlines)
+// with a single space. Skill descriptions often contain embedded
+// newlines from their SKILL.md frontmatter, which Lipgloss would
+// otherwise turn into multi-row entries in the palette.
+func collapseWhitespace(s string) string {
+	var sb strings.Builder
+	sb.Grow(len(s))
+	prevSpace := false
+	for _, r := range s {
+		if r == ' ' || r == '\t' || r == '\n' || r == '\r' {
+			if !prevSpace {
+				sb.WriteByte(' ')
+				prevSpace = true
+			}
+			continue
+		}
+		sb.WriteRune(r)
+		prevSpace = false
+	}
+	return strings.TrimSpace(sb.String())
+}
+
 // View renders the palette overlay.
 func (p *Palette) View() string {
 	if !p.visible {
@@ -146,6 +182,15 @@ func (p *Palette) View() string {
 	sb.WriteString(p.input.View())
 	sb.WriteByte('\n')
 
+	// Compute the per-line content budget: box minus the rounded border
+	// (2 cells) and horizontal padding (2 cells). Without explicit
+	// truncation, lipgloss soft-wraps long descriptions on character
+	// boundaries, producing splits like "application/s" or "a/sks".
+	contentWidth := boxWidth - 4
+	if contentWidth < 16 {
+		contentWidth = 16
+	}
+
 	for i, cmd := range p.filtered {
 		if i >= paletteMaxVisible {
 			break
@@ -156,8 +201,18 @@ func (p *Palette) View() string {
 			nameStyle = nameStyle.Background(p.theme.Primary).Foreground(lipgloss.Color("#000000"))
 			descStyle = descStyle.Background(p.theme.Primary).Foreground(lipgloss.Color("#000000"))
 		}
+		// Truncate description so the whole line (name + 2 spaces + desc)
+		// fits within contentWidth. Names are short (~16 cells max), so
+		// the description gets the remainder.
+		nameRunes := []rune(cmd.Name)
+		descBudget := contentWidth - len(nameRunes) - 2
+		if descBudget < 8 {
+			descBudget = 8
+		}
+		descText := truncateRunes(collapseWhitespace(cmd.Description), descBudget)
+
 		name := nameStyle.Render(cmd.Name)
-		desc := descStyle.Render("  " + cmd.Description)
+		desc := descStyle.Render("  " + descText)
 		sb.WriteString(name + desc + "\n")
 	}
 
