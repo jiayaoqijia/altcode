@@ -66,6 +66,13 @@ type cliFlags struct {
 	forkSession     string // --fork-session <id>, branch off past session
 	sessionDB       string // --session-db, override ~/.altcode/sessions.db path
 	listSessions    bool   // --list-sessions, print + exit
+
+	// Phase 5: input
+	images     []string // --image <path> (repeatable); "-" = stdin
+	files      []string // --file <path>  (repeatable); context injection
+	promptFile string   // --prompt-file <path>; "-" = stdin
+	system     string   // --system <text>
+	systemFile string   // --system-file <path>
 }
 
 func main() {
@@ -152,6 +159,19 @@ func main() {
 		"Deny a tool [name] or [name:pattern] for this session (repeatable)")
 	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
 		"Alias for --permission-mode plan (read-only, no writes)")
+
+	// --- Phase 5: input ---
+	root.Flags().StringArrayVar(&flags.images, "image", nil,
+		"Attach image file (repeatable). Path or '-' for stdin. "+
+			"Anthropic models only in v1.")
+	root.Flags().StringArrayVar(&flags.files, "file", nil,
+		"Inject file contents as pre-loaded prompt context (repeatable)")
+	root.Flags().StringVar(&flags.promptFile, "prompt-file", "",
+		"Read prompt from file (or '-' for stdin)")
+	root.Flags().StringVar(&flags.system, "system", "",
+		"Append a string to the system prompt")
+	root.Flags().StringVar(&flags.systemFile, "system-file", "",
+		"Append a file's contents to the system prompt")
 
 	// --- Phase 4: session / history ---
 	root.Flags().BoolVar(&flags.continueSession, "continue", false,
@@ -489,8 +509,19 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			AllowTools:     flags.allowTools,
 			DenyTools:      flags.denyTools,
 			DryRun:         flags.dryRun,
+			Images:         flags.images,
+			Files:          flags.files,
+			PromptFile:     flags.promptFile,
+			System:         flags.system,
+			SystemFile:     flags.systemFile,
 		}
 		if err := ep.Validate(); err != nil {
+			return err
+		}
+		// Phase 5: read --prompt-file / --file / --system / --image
+		// before the engine is built. PrepareInputs mutates ep.Prompt,
+		// ep.EngineParams.Instructions, and ep.EngineParams.PendingInputParts.
+		if err := ep.PrepareInputs(os.Stdin); err != nil {
 			return err
 		}
 		return runExec(ep)

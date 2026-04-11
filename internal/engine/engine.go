@@ -40,17 +40,24 @@ type Skill struct {
 // EngineParams holds all dependencies for creating an Engine.
 type EngineParams struct {
 	Config       *config.Config
-	Perm         *permission.Evaluator  // nil = allow all
-	Store        *store.DB              // nil = no persistence
-	SessionID    string                 // empty = new session
-	Messages     []provider.Message     // pre-loaded for session resume
-	Hooks        *hooks.Runner          // nil = no hooks
-	Instructions []config.Instruction   // loaded from CLAUDE.md etc.
-	Memory       *memory.Store          // nil = no persistent memory
-	Sandbox      *sandbox.Sandbox       // nil = no sandboxing
-	TaskQueue    *task.Queue            // nil = auto-created
-	Skills       []Skill                // discovered slash commands/skills
-	TokenBudget  *TokenBudget           // nil = unlimited (session-wide cap)
+	Perm         *permission.Evaluator // nil = allow all
+	Store        *store.DB             // nil = no persistence
+	SessionID    string                // empty = new session
+	Messages     []provider.Message    // pre-loaded for session resume
+	Hooks        *hooks.Runner         // nil = no hooks
+	Instructions []config.Instruction  // loaded from CLAUDE.md etc.
+	Memory       *memory.Store         // nil = no persistent memory
+	Sandbox      *sandbox.Sandbox      // nil = no sandboxing
+	TaskQueue    *task.Queue           // nil = auto-created
+	Skills       []Skill               // discovered slash commands/skills
+	TokenBudget  *TokenBudget          // nil = unlimited (session-wide cap)
+
+	// PendingInputParts are content blocks to prepend to the user
+	// message on the FIRST Run() call (and only the first). Used by
+	// Phase 5 CLI flags --image and --file to attach image bytes
+	// and pre-loaded file context to the initial prompt without
+	// touching the Run signature. Consumed on first use.
+	PendingInputParts []provider.ContentPart
 }
 
 // TokenBudget is a session-wide cap shared across parent engine + subagents.
@@ -117,7 +124,11 @@ type Engine struct {
 	messages     []provider.Message
 	instructions []config.Instruction
 	skills       []Skill
-	totalTokens        int // running token count
+	// pendingInputParts is consumed on first Run() and merged into
+	// the first user message. Populated by EngineParams.PendingInputParts
+	// for Phase 5 --image / --file / etc. CLI flags.
+	pendingInputParts []provider.ContentPart
+	totalTokens       int // running token count
 	cost               *cost.Tracker
 	journal            *history.Journal
 	tokenBudget         *TokenBudget
@@ -178,23 +189,24 @@ func New(params EngineParams) (*Engine, error) {
 	}
 
 	return &Engine{
-		cfg:          cfg,
-		provider:     p,
-		tools:        registry,
-		perm:         perm,
-		hooks:        hooksRunner,
-		mem:          params.Memory,
-		store:        params.Store,
-		sandbox:      params.Sandbox,
-		taskQueue:    tq,
-		sessionID:    params.SessionID,
-		model:        modelName,
-		messages:     msgs,
-		instructions: params.Instructions,
-		skills:       params.Skills,
-		cost:         cost.NewTracker(),
-		journal:      history.NewJournal(),
-		tokenBudget:  params.TokenBudget,
+		cfg:               cfg,
+		provider:          p,
+		tools:             registry,
+		perm:              perm,
+		hooks:             hooksRunner,
+		mem:               params.Memory,
+		store:             params.Store,
+		sandbox:           params.Sandbox,
+		taskQueue:         tq,
+		sessionID:         params.SessionID,
+		model:             modelName,
+		messages:          msgs,
+		instructions:      params.Instructions,
+		skills:            params.Skills,
+		pendingInputParts: params.PendingInputParts,
+		cost:              cost.NewTracker(),
+		journal:           history.NewJournal(),
+		tokenBudget:       params.TokenBudget,
 	}, nil
 }
 
@@ -470,21 +482,22 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 	}
 
 	return &Engine{
-		cfg:          cfg,
-		provider:     p,
-		tools:        registry,
-		perm:         perm,
-		hooks:        hooksRunner,
-		mem:          params.Memory,
-		store:        params.Store,
-		sessionID:    params.SessionID,
-		model:        modelName,
-		messages:     msgs,
-		instructions: params.Instructions,
-		skills:       params.Skills,
-		cost:         cost.NewTracker(),
-		journal:      history.NewJournal(),
-		tokenBudget:  params.TokenBudget,
+		cfg:               cfg,
+		provider:          p,
+		tools:             registry,
+		perm:              perm,
+		hooks:             hooksRunner,
+		mem:               params.Memory,
+		store:             params.Store,
+		sessionID:         params.SessionID,
+		model:             modelName,
+		messages:          msgs,
+		instructions:      params.Instructions,
+		skills:            params.Skills,
+		pendingInputParts: params.PendingInputParts,
+		cost:              cost.NewTracker(),
+		journal:           history.NewJournal(),
+		tokenBudget:       params.TokenBudget,
 	}, nil
 }
 
@@ -558,7 +571,20 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 	// Classify intent to auto-adjust engine behavior
 	intent := ClassifyIntent(input)
 
+	// Phase 5: if PendingInputParts were set at engine construction
+	// (--image / --file CLI flags), merge them into the user message
+	// alongside the text prompt and consume them. This runs once —
+	// subsequent Run() calls on the same engine see a plain text
+	// message. The engine holds no lock here because pendingInputParts
+	// is mutated only from this single-goroutine loop path.
 	userMsg := provider.TextMessage("user", input)
+	if len(e.pendingInputParts) > 0 {
+		parts := make([]provider.ContentPart, 0, len(e.pendingInputParts)+1)
+		parts = append(parts, e.pendingInputParts...)
+		parts = append(parts, provider.NewTextPart(input))
+		userMsg = provider.Message{Role: "user", Parts: parts}
+		e.pendingInputParts = nil
+	}
 	e.appendMessageLocked(userMsg)
 	e.persistMessage("user", userMsg)
 

@@ -80,6 +80,13 @@ was reviewed across 7 rounds between CC and Codex before starting.
   via new `store.DB.ForkSession`. Named `--session-db` not
   `--session-dir` because `store.Open` takes a file path, not a
   directory (CC Phase 4 review caught this).
+- **Phase 5**: `--image`, `--file`, `--prompt-file`, `--system`,
+  `--system-file`. Image provider gate requires `anthropic/` prefix
+  — non-Anthropic multimodal would silently drop via `toOpenAIMessages`
+  (both reviewers caught this as a BLOCKER). `engine.EngineParams.PendingInputParts`
+  carries the image `ContentPart`s into the first user message and is
+  consumed once per engine. `--file` fence auto-extends to survive
+  triple-backtick content.
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

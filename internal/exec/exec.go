@@ -11,9 +11,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/permission"
+	"github.com/altcode-ai/altcode/internal/provider"
 )
 
 // Output format constants. Empty string = text (default).
@@ -108,6 +110,33 @@ type Params struct {
 	// Phase 2 takes the plan-mode shortcut; a future phase can
 	// diverge if users ask for it.
 	DryRun bool
+
+	// --- Phase 5: input flags ---
+	// Images is a list of filesystem paths (or "-" for stdin) to
+	// attach as image content blocks on the first user message.
+	// Supports Anthropic multimodal shape; OpenAI multimodal is
+	// future work. Phase 5 ships Anthropic-only.
+	Images []string
+
+	// Files is a list of filesystem paths whose contents are
+	// injected into the prompt as pre-loaded context. Each file
+	// is wrapped as a fenced code block with the path as a tag.
+	// Unlike --image, this is a text-only mechanism that works
+	// across all providers.
+	Files []string
+
+	// PromptFile replaces the Prompt text with contents of a file.
+	// "-" means stdin. When both Prompt and PromptFile are set,
+	// Validate() errors.
+	PromptFile string
+
+	// System appends a free-form string to the assembled system
+	// prompt. Useful for one-off overrides without editing config.
+	System string
+
+	// SystemFile is a path whose contents are appended to the
+	// system prompt. Combines with --system (both are appended).
+	SystemFile string
 }
 
 // Permission mode constants. Match the permission.Mode enum at
@@ -184,6 +213,221 @@ func (p *Params) Validate() error {
 	for _, s := range p.DenyTools {
 		if _, _, err := parseToolRuleSpec(s); err != nil {
 			return NewUsageError("invalid --deny-tool %q: %v", s, err)
+		}
+	}
+	// Phase 5: stdin consumer checks. Only one source can read
+	// from FD 0 because binary image bytes + text prompt bytes
+	// can't multiplex on the same stream.
+	stdinConsumers := 0
+	if p.PromptFile == "-" {
+		stdinConsumers++
+	}
+	for _, img := range p.Images {
+		if img == "-" {
+			stdinConsumers++
+		}
+	}
+	if stdinConsumers > 1 {
+		return NewUsageError(
+			"at most one of --prompt-file=- / --image=- may read stdin "+
+				"(%d consumers requested)",
+			stdinConsumers,
+		)
+	}
+	// --prompt-file and a positional prompt are redundant and
+	// likely indicate user confusion. Error with a clear message
+	// instead of silently preferring one over the other.
+	if p.PromptFile != "" && p.Prompt != "" {
+		return NewUsageError(
+			"--prompt-file and positional prompt are mutually exclusive "+
+				"(got both: file=%q, prompt=%q)",
+			p.PromptFile, truncatePrompt(p.Prompt, 40),
+		)
+	}
+	return nil
+}
+
+// Max bytes for a single --file injection. Keeps a gigantic log
+// file from blowing the context window. Phase 5 review caught this
+// as a missing guard — 200 MB log files would otherwise be silently
+// serialized into the prompt.
+const maxFileContextBytes = 1 * 1024 * 1024 // 1 MB
+
+// longestBacktickFence returns a run of backticks one longer than
+// the longest backtick sequence found in content. Used to wrap
+// --file output so a file containing ``` can't terminate the
+// wrapper early. Minimum fence is 3 backticks for readability.
+func longestBacktickFence(content string) string {
+	longest := 0
+	run := 0
+	for _, c := range content {
+		if c == '`' {
+			run++
+			if run > longest {
+				longest = run
+			}
+		} else {
+			run = 0
+		}
+	}
+	n := longest + 1
+	if n < 3 {
+		n = 3
+	}
+	return strings.Repeat("`", n)
+}
+
+// PrepareInputs applies Phase 5 input flags to the Params and
+// EngineParams:
+//   - Reads --prompt-file into p.Prompt (or stdin for "-")
+//   - Reads --system-file and appends to Instructions
+//   - Appends --system text to Instructions
+//   - Reads --file paths, wraps each as a fenced code block, and
+//     prepends to the prompt text so the agent sees the context
+//     without having to call read().
+//   - Reads --image paths, base64-encodes, and fills
+//     EngineParams.PendingInputParts so the engine merges them
+//     into the first user message.
+//
+// Must be called BEFORE exec.Run constructs the engine. Returns a
+// UsageError for user-input problems (missing file, unsupported
+// image type, etc.).
+func (p *Params) PrepareInputs(stdin io.Reader) error {
+	// Provider gate for --image: Phase 5 ships Anthropic multimodal
+	// only. If the user passes --image with an OpenAI / Chinese
+	// provider / etc., fail fast with a clear message instead of
+	// letting the ContentPart be silently dropped by toOpenAIMessages.
+	//
+	// Strictness: only an explicit "anthropic/..." prefix passes.
+	// Bareword models like `--model gpt-4o` or an empty model
+	// string are REJECTED because defaulting to anthropic for those
+	// would hit a downstream API mismatch anyway. A user who
+	// wants multimodal on Anthropic must use the canonical prefix.
+	if len(p.Images) > 0 {
+		var modelStr string
+		if p.EngineParams.Config != nil {
+			modelStr = p.EngineParams.Config.Model
+		}
+		if !strings.HasPrefix(modelStr, "anthropic/") {
+			return NewUsageError(
+				"--image requires an anthropic/ model prefix (got %q); "+
+					"multimodal for other providers is future work",
+				modelStr)
+		}
+	}
+
+	// 1. --prompt-file
+	if p.PromptFile != "" {
+		var data []byte
+		var err error
+		if p.PromptFile == "-" {
+			if stdin == nil {
+				stdin = os.Stdin
+			}
+			data, err = io.ReadAll(stdin)
+		} else {
+			data, err = os.ReadFile(p.PromptFile)
+		}
+		if err != nil {
+			return NewUsageError("--prompt-file %q: %v", p.PromptFile, err)
+		}
+		// Trim CRLF too — Windows-authored files end with \r\n and
+		// TrimRight(s, "\n") leaves the \r dangling.
+		p.Prompt = strings.TrimRight(string(data), "\r\n")
+	}
+
+	// 2. --file entries become pre-loaded context in the prompt text
+	if len(p.Files) > 0 {
+		var contextBlocks []string
+		for _, path := range p.Files {
+			info, err := os.Stat(path)
+			if err != nil {
+				return NewUsageError("--file %q: %v", path, err)
+			}
+			if info.Size() > maxFileContextBytes {
+				return NewUsageError(
+					"--file %q is %d bytes (max %d bytes / 1 MB) — "+
+						"large files would blow the context window",
+					path, info.Size(), int64(maxFileContextBytes))
+			}
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return NewUsageError("--file %q: %v", path, err)
+			}
+			// Use a fence longer than any run of backticks in the
+			// content so an included file containing triple-backticks
+			// (e.g. a markdown file or another Go file with raw
+			// string literals) doesn't accidentally terminate the
+			// wrapper early. Same strategy that markdown renderers use.
+			content := strings.TrimRight(string(data), "\r\n")
+			fence := longestBacktickFence(content)
+			block := fmt.Sprintf("%s%s\n%s\n%s", fence, path, content, fence)
+			contextBlocks = append(contextBlocks, block)
+		}
+		// Context blocks come BEFORE the user prompt text so the
+		// model has the files in view when reasoning about the
+		// request.
+		if p.Prompt == "" {
+			p.Prompt = strings.Join(contextBlocks, "\n\n")
+		} else {
+			p.Prompt = strings.Join(contextBlocks, "\n\n") + "\n\n" + p.Prompt
+		}
+	}
+
+	// 3. --system and --system-file both append to Instructions.
+	// Use DISTINCT synthetic paths ("cli:system" vs "cli:system-file")
+	// so any downstream deduping by Path doesn't silently drop one.
+	// The actual content from --system-file carries the source path
+	// as a suffix for debuggability.
+	if p.SystemFile != "" {
+		data, err := os.ReadFile(p.SystemFile)
+		if err != nil {
+			return NewUsageError("--system-file %q: %v", p.SystemFile, err)
+		}
+		p.EngineParams.Instructions = append(p.EngineParams.Instructions, config.Instruction{
+			Path:    "cli:system-file:" + p.SystemFile,
+			Content: strings.TrimRight(string(data), "\r\n"),
+		})
+	}
+	if p.System != "" {
+		p.EngineParams.Instructions = append(p.EngineParams.Instructions, config.Instruction{
+			Path:    "cli:system",
+			Content: p.System,
+		})
+	}
+
+	// 4. --image entries become ContentPart blocks. Anthropic-only
+	// for Phase 5 (gated above). OpenAI multimodal is future work.
+	if len(p.Images) > 0 {
+		var parts []provider.ContentPart
+		for _, path := range p.Images {
+			var part provider.ContentPart
+			var err error
+			if path == "-" {
+				if stdin == nil {
+					stdin = os.Stdin
+				}
+				data, rerr := io.ReadAll(stdin)
+				if rerr != nil {
+					return NewUsageError("--image -: %v", rerr)
+				}
+				part, err = provider.NewImagePartFromBytes(data)
+			} else {
+				part, err = provider.NewImagePartFromFile(path)
+			}
+			if err != nil {
+				return NewUsageError("--image %q: %v", path, err)
+			}
+			parts = append(parts, part)
+		}
+		p.EngineParams.PendingInputParts = append(
+			p.EngineParams.PendingInputParts, parts...)
+
+		// Image-only runs (no text prompt, no --file) get a default
+		// prompt so the model has something to respond to. Anthropic
+		// accepts empty text parts but models work better with a cue.
+		if p.Prompt == "" {
+			p.Prompt = "Describe what you see in the attached image(s)."
 		}
 	}
 	return nil

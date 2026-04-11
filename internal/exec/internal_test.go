@@ -6,11 +6,15 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"sync"
 	"testing"
 
+	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
 	"github.com/altcode-ai/altcode/internal/permission"
 )
@@ -532,7 +536,306 @@ func TestApplyPermissionOverrides_BadRuleReturnsUsageError(t *testing.T) {
 	}
 }
 
+// --- Phase 5: input flags -------------------------------------------
+
+func TestValidate_StdinConsumerConflict(t *testing.T) {
+	p := &Params{PromptFile: "-", Images: []string{"-"}}
+	err := p.Validate()
+	if err == nil {
+		t.Fatal("expected stdin-consumer conflict error")
+	}
+	if !strings.Contains(err.Error(), "stdin") {
+		t.Errorf("expected stdin mention, got: %v", err)
+	}
+}
+
+func TestValidate_PromptFileAndPositionalConflict(t *testing.T) {
+	p := &Params{PromptFile: "/tmp/x.txt", Prompt: "hello"}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected conflict error")
+	}
+}
+
+func TestValidate_PromptFileAloneOK(t *testing.T) {
+	p := &Params{PromptFile: "/tmp/x.txt"}
+	if err := p.Validate(); err != nil {
+		t.Errorf("unexpected: %v", err)
+	}
+}
+
+func TestPrepareInputs_PromptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(path, []byte("write a fibonacci function\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{PromptFile: path}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatalf("PrepareInputs: %v", err)
+	}
+	if p.Prompt != "write a fibonacci function" {
+		t.Errorf("expected trimmed prompt, got %q", p.Prompt)
+	}
+}
+
+func TestPrepareInputs_PromptFileStdin(t *testing.T) {
+	p := &Params{PromptFile: "-"}
+	stdin := strings.NewReader("from stdin\n")
+	if err := p.PrepareInputs(stdin); err != nil {
+		t.Fatal(err)
+	}
+	if p.Prompt != "from stdin" {
+		t.Errorf("got %q", p.Prompt)
+	}
+}
+
+func TestPrepareInputs_FileContextInjection(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "foo.go")
+	if err := os.WriteFile(path, []byte("package x\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{Files: []string{path}, Prompt: "review"}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(p.Prompt, "```"+path) {
+		t.Errorf("expected fenced block with path, got: %q", p.Prompt)
+	}
+	if !strings.Contains(p.Prompt, "package x") {
+		t.Error("expected file content in prompt")
+	}
+	if !strings.HasSuffix(p.Prompt, "review") {
+		t.Error("expected user prompt at end")
+	}
+}
+
+func TestPrepareInputs_SystemAppends(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "extra.md")
+	if err := os.WriteFile(path, []byte("be concise\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{System: "be polite", SystemFile: path}
+	before := len(p.EngineParams.Instructions)
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.EngineParams.Instructions) != before+2 {
+		t.Errorf("expected 2 appended instructions, got %d new",
+			len(p.EngineParams.Instructions)-before)
+	}
+}
+
+func TestPrepareInputs_ImageBytes(t *testing.T) {
+	// 1x1 transparent PNG
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+		0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41,
+		0x54, 0x78, 0x9C, 0x63, 0x00, 0x01, 0x00, 0x00,
+		0x05, 0x00, 0x01, 0x0D, 0x0A, 0x2D, 0xB4, 0x00,
+		0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, 0x44, 0xAE,
+		0x42, 0x60, 0x82,
+	}
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.png")
+	if err := os.WriteFile(path, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{
+		Images:       []string{path},
+		EngineParams: engineParamsWithModel("anthropic/claude-sonnet-4"),
+	}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(p.EngineParams.PendingInputParts) != 1 {
+		t.Fatalf("expected 1 pending part, got %d",
+			len(p.EngineParams.PendingInputParts))
+	}
+	part := p.EngineParams.PendingInputParts[0]
+	if part.Type != "image" {
+		t.Errorf("expected type=image, got %q", part.Type)
+	}
+	if part.Source == nil || !strings.HasPrefix(part.Source.MediaType, "image/") {
+		t.Errorf("bad source: %+v", part.Source)
+	}
+}
+
+func TestPrepareInputs_ImageMissingFile(t *testing.T) {
+	p := &Params{
+		Images:       []string{"/tmp/definitely-does-not-exist-xyz.png"},
+		EngineParams: engineParamsWithModel("anthropic/claude-sonnet-4"),
+	}
+	err := p.PrepareInputs(nil)
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	var uerr *UsageError
+	if !errors.As(err, &uerr) {
+		t.Errorf("expected UsageError, got %T", err)
+	}
+}
+
+// TestPrepareInputs_ImageOpenAIRejected pins the Phase 5 provider
+// gate: --image with a non-Anthropic provider must fail fast
+// instead of reaching toOpenAIMessages (which silently drops image
+// parts AND clobbers the text prompt — both CC and Codex caught
+// this as a BLOCKER).
+func TestPrepareInputs_ImageOpenAIRejected(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.png")
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+		0x89,
+	}
+	if err := os.WriteFile(path, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{
+		Images: []string{path},
+		EngineParams: engineParamsWithModel("openai/gpt-4o"),
+	}
+	err := p.PrepareInputs(nil)
+	if err == nil {
+		t.Fatal("expected openai+image to error")
+	}
+	if !strings.Contains(err.Error(), "anthropic/") {
+		t.Errorf("expected anthropic/ prefix mention, got: %v", err)
+	}
+}
+
+// TestPrepareInputs_ImageDefaultsPromptIfEmpty verifies that an
+// image-only run (no --prompt, no --file) gets a default textual
+// cue so the model has something to respond to. Anthropic would
+// accept pure-image content blocks but models perform better with
+// a short nudge.
+func TestPrepareInputs_ImageDefaultsPromptIfEmpty(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "tiny.png")
+	pngBytes := []byte{
+		0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A,
+		0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52,
+		0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01,
+		0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4,
+		0x89,
+	}
+	if err := os.WriteFile(path, pngBytes, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{
+		Images:       []string{path},
+		EngineParams: engineParamsWithModel("anthropic/claude-sonnet-4"),
+	}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatalf("PrepareInputs: %v", err)
+	}
+	if p.Prompt == "" {
+		t.Error("expected default prompt for image-only run")
+	}
+}
+
+// TestPrepareInputs_FileSizeCap verifies the 1 MB guard on --file.
+// Without the cap, a 200 MB log could be silently serialized into
+// the prompt and blow the context window.
+func TestPrepareInputs_FileSizeCap(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "big.log")
+	// Write 2 MB — well over the 1 MB cap
+	big := make([]byte, 2*1024*1024)
+	for i := range big {
+		big[i] = 'x'
+	}
+	if err := os.WriteFile(path, big, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{Files: []string{path}}
+	err := p.PrepareInputs(nil)
+	if err == nil {
+		t.Fatal("expected size-cap error")
+	}
+	if !strings.Contains(err.Error(), "bytes") {
+		t.Errorf("expected byte-count error, got: %v", err)
+	}
+}
+
+// TestPrepareInputs_CRLFPromptFile verifies Windows-authored files
+// with CRLF line endings have the trailing \r trimmed.
+func TestPrepareInputs_CRLFPromptFile(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "prompt.txt")
+	if err := os.WriteFile(path, []byte("hello\r\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{PromptFile: path}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatal(err)
+	}
+	if p.Prompt != "hello" {
+		t.Errorf("CRLF not trimmed: got %q", p.Prompt)
+	}
+}
+
+// TestPrepareInputs_SystemDistinctPaths verifies --system and
+// --system-file use distinct synthetic paths so they don't collide
+// in any future dedupe-by-path cascade logic.
+func TestPrepareInputs_SystemDistinctPaths(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "extra.md")
+	if err := os.WriteFile(path, []byte("from file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{System: "inline", SystemFile: path}
+	if err := p.PrepareInputs(nil); err != nil {
+		t.Fatal(err)
+	}
+	seen := make(map[string]bool)
+	for _, inst := range p.EngineParams.Instructions {
+		if inst.Path == "" {
+			continue
+		}
+		if seen[inst.Path] {
+			t.Errorf("duplicate path %q in instructions", inst.Path)
+		}
+		seen[inst.Path] = true
+	}
+}
+
+func TestPrepareInputs_ImageNotAnImage(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "fake.txt")
+	if err := os.WriteFile(path, []byte("not an image, this is text"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	p := &Params{
+		Images:       []string{path},
+		EngineParams: engineParamsWithModel("anthropic/claude-sonnet-4"),
+	}
+	err := p.PrepareInputs(nil)
+	if err == nil {
+		t.Fatal("expected error for text file")
+	}
+	if !strings.Contains(err.Error(), "not an image") {
+		t.Errorf("expected 'not an image' message, got: %v", err)
+	}
+}
+
 // --- test helpers ----------------------------------------------------
+
+// engineParamsWithModel builds a minimal engine.EngineParams for
+// provider-gate tests. Only the Config.Model field is needed; the
+// provider-gate check happens before any engine construction.
+func engineParamsWithModel(model string) engine.EngineParams {
+	return engine.EngineParams{
+		Config: &config.Config{Model: model},
+	}
+}
 
 // brokenWriter returns io.ErrShortWrite (and eventually EPIPE-ish
 // errors) after `limit` bytes. Used to verify drainJSON keeps

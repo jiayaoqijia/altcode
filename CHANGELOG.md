@@ -12,6 +12,33 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 5: input flags)
+
+- `--image <path>` attaches an image to the prompt as a multimodal
+  content block. Path `-` reads from stdin. **Anthropic provider
+  only** (`--model anthropic/...`); OpenAI/Chinese provider
+  multimodal is future work. Non-Anthropic + `--image` fails fast
+  with an EX_USAGE error. Max 20 MB per image, auto-detected MIME.
+- `--file <path>` injects file contents as fenced-code context at
+  the top of the prompt. Max 1 MB per file to keep the context
+  window sane. Wrapper fence auto-extends to survive files that
+  contain triple-backticks.
+- `--prompt-file <path>` reads the prompt body from a file. `-`
+  means stdin. Mutually exclusive with a positional prompt arg.
+- `--system <text>` and `--system-file <path>` append to the
+  system prompt. Both use distinct synthetic paths so any future
+  dedupe-by-path cascade logic won't silently drop one.
+- New `engine.EngineParams.PendingInputParts` gets consumed on the
+  first `Run()` call and merged into the first user message
+  alongside the text prompt.
+- `provider.NewImagePartFromFile` + `NewImagePartFromBytes` helpers
+  (Anthropic shape; OpenAI multimodal translator is future work).
+- Image-only runs (no text prompt or --file) default the text
+  part to "Describe what you see in the attached image(s)." so
+  the model has a cue to respond to.
+- Windows `--prompt-file`/`--file`/`--system-file` inputs have
+  trailing `\r\n` trimmed (not just `\n`).
+
 ### Added (Phase 4: session / history)
 
 - `--continue` resumes the most recent session (CC-compat alias

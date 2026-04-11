@@ -7,8 +7,8 @@
 | 1 — output format + observability | **shipped** | 4fcc3d1 | 15 unit tests; both CC+Codex PASS on round 2 |
 | 2 — permission mode + allow/deny tools | **shipped** | 2aadd77 | 9 unit tests; documented config-deny-shadowing limitation |
 | 3 — permission-prompt-tool | pending | | Unblocked by Phase 2 |
-| 4 — continue + fork-session + session-db + list-sessions | **shipped** | (this commit) | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
-| 5 — input flags | pending | | |
+| 4 — continue + fork-session + session-db + list-sessions | **shipped** | 247fd14 | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
+| 5 — input flags | **shipped** | (this commit) | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
 | 6 — hooks + ALTCODE_HOOK_DEPTH | pending | | |
 | 7 — save-* artifacts + --commit | pending | | |
 | 8 — MaxTurns + CostBudget | pending | | |
@@ -33,6 +33,22 @@
   matching in the `forkSession` wrapper.
 - Forked messages preserve their original `CreatedAt` timestamps
   (not `time.Now()`) so audit/ordering semantics survive the fork.
+
+**Phase 5:**
+- Strict `anthropic/` prefix required for `--image`. Bareword
+  models (no prefix) or OpenAI-compatible providers are rejected
+  at flag validation. Without this gate, `toOpenAIMessages` would
+  silently drop the image parts AND clobber the text prompt.
+- Added `engine.EngineParams.PendingInputParts` as the vehicle
+  for passing image content blocks to the first user message.
+  Consumed once in `loop()` and nil'd out so a second Run() on
+  the same engine doesn't double-send.
+- `--file` uses an auto-extending backtick fence (longer than
+  any run of backticks in the file content) so markdown files
+  or Go files containing raw string literals don't terminate
+  the wrapper early.
+- 1 MB per-file cap and 20 MB per-image cap prevent pathological
+  runs from blowing the context window.
 
 **Phase 11 (folded into Phase 1):**
 - `SIGTERM` trap added alongside `SIGINT` during the `runExec`
