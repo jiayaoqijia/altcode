@@ -7,6 +7,11 @@ import (
 )
 
 // ParseFile reads a markdown file and returns a Command.
+//
+// Normalizes CRLF -> LF before any frontmatter parsing so .md files
+// authored on Windows don't leave stray \r in field values or fail
+// to find the closing --- delimiter (which the previous version
+// matched as exactly "\n---" and so missed "\r\n---").
 func ParseFile(path string) (*Command, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -14,7 +19,7 @@ func ParseFile(path string) (*Command, error) {
 	}
 
 	name := strings.TrimSuffix(filepath.Base(path), ".md")
-	body := string(data)
+	body := strings.ReplaceAll(string(data), "\r\n", "\n")
 
 	cmd := &Command{
 		Name: name,
@@ -32,18 +37,39 @@ func ParseFile(path string) (*Command, error) {
 }
 
 // splitFrontmatter splits a markdown file at --- delimiters.
+//
+// The closing delimiter must match a whole '---' line — i.e. the
+// next character after the three dashes is either end-of-string,
+// a newline, or whitespace. The previous version matched any
+// '\n---' substring, so a multiline body containing a line that
+// merely *starts* with --- (e.g. a horizontal rule mid-doc) would
+// prematurely terminate frontmatter parsing.
 func splitFrontmatter(content string) (frontmatter, body string, ok bool) {
 	if !strings.HasPrefix(content, "---") {
 		return "", content, false
 	}
 	rest := content[3:]
-	idx := strings.Index(rest, "\n---")
-	if idx < 0 {
-		return "", content, false
+	// Skip optional whitespace after the opening --- on its line.
+	for {
+		idx := strings.Index(rest, "\n---")
+		if idx < 0 {
+			return "", content, false
+		}
+		// Verify the match is on its own line: char after "---" must
+		// be EOL, EOF, or whitespace.
+		end := idx + 4
+		if end == len(rest) || rest[end] == '\n' || rest[end] == ' ' || rest[end] == '\t' {
+			fm := strings.TrimSpace(rest[:idx])
+			body = strings.TrimSpace(rest[end:])
+			return fm, body, true
+		}
+		// False match; advance past it and keep looking.
+		rest = rest[idx+4:]
+		// Stop if no more newlines.
+		if !strings.Contains(rest, "\n---") {
+			return "", content, false
+		}
 	}
-	fm := strings.TrimSpace(rest[:idx])
-	body = strings.TrimSpace(rest[idx+4:])
-	return fm, body, true
 }
 
 // parseFrontmatterFields extracts known fields from YAML-like frontmatter.
