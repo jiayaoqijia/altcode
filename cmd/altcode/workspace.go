@@ -625,6 +625,24 @@ func listAll(
 		if lerr != nil {
 			continue
 		}
+		// A workspace whose UpdatedAt is more than 6 hours old in a
+		// non-terminal state was almost certainly killed (process
+		// crash, machine reboot, host shutdown). Without this guard
+		// the listing showed "spawning" indefinitely and users
+		// thought the agent was still working.
+		const staleThreshold = 6 * time.Hour
+		if !isTerminalStatus(sess.Status) {
+			lastSeen := sess.UpdatedAt
+			if lastSeen.IsZero() {
+				lastSeen = sess.CreatedAt
+			}
+			if time.Since(lastSeen) > staleThreshold {
+				sess.Status = workspace.WSSFailed
+				if sess.Error == "" {
+					sess.Error = fmt.Sprintf("stale: no updates for %s", time.Since(lastSeen).Truncate(time.Hour))
+				}
+			}
+		}
 		if !showAll && isTerminalStatus(sess.Status) {
 			continue
 		}
