@@ -22,6 +22,11 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 
 	cmd := exec.CommandContext(ctx, "sh", "-c", entry.Command)
 	cmd.WaitDelay = time.Second // ensure child processes are cleaned up
+	// Group the hook child + its descendants so we can SIGKILL them all
+	// on timeout. Without this, a hook like `sh -c "validator | helper"`
+	// would leave `helper` orphaned when the timeout fires.
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {

@@ -49,6 +49,10 @@ type Input struct {
 	ToolInput  json.RawMessage `json:"toolInput,omitempty"`
 	ToolOutput string          `json:"toolOutput,omitempty"`
 	SessionID  string          `json:"sessionId,omitempty"`
+	// UserPrompt is the prompt the user typed (UserPromptSubmit only).
+	// Without this field, prompt hooks expanding $USER_PROMPT and
+	// command hooks reading the JSON payload both saw an empty value.
+	UserPrompt string `json:"userPrompt,omitempty"`
 }
 
 // Result is the JSON payload returned by a hook command.

@@ -899,9 +899,13 @@ func (e *Engine) runPostEditVerify(toolCalls []collectedToolCall, results []tool
 }
 
 func (e *Engine) fireUserPromptSubmit(ctx context.Context, input string) string {
+	// Pass the user's prompt text to the hook payload — without
+	// UserPrompt set, command hooks reading stdin saw an empty value
+	// and prompt hooks expanding $USER_PROMPT got "".
 	results, _ := e.hooks.Fire(ctx, hooks.UserPromptSubmit, hooks.Input{
-		Event:     hooks.UserPromptSubmit,
-		SessionID: e.sessionID,
+		Event:      hooks.UserPromptSubmit,
+		SessionID:  e.sessionID,
+		UserPrompt: input,
 	})
 	for _, r := range results {
 		if r.Message != "" {

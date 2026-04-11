@@ -36,11 +36,15 @@ func runPromptHook(
 }
 
 // expandTemplate replaces placeholders in the prompt template.
+// $USER_PROMPT was previously bound to ToolOutput by mistake — for
+// PostToolUse hooks that worked accidentally, but for UserPromptSubmit
+// it expanded to "" because nothing populated ToolOutput.
 func expandTemplate(tmpl string, input Input) string {
 	r := strings.NewReplacer(
 		"$TOOL_NAME", input.ToolName,
 		"$TOOL_INPUT", string(input.ToolInput),
-		"$USER_PROMPT", input.ToolOutput,
+		"$TOOL_OUTPUT", input.ToolOutput,
+		"$USER_PROMPT", input.UserPrompt,
 	)
 	return r.Replace(tmpl)
 }
