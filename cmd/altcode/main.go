@@ -377,6 +377,9 @@ func discoverAgents() []*agent.Agent {
 		)
 	}
 	agents, _ := agent.Discover(dirs...)
+	// Plugin-contributed agents discovered earlier in loadPlugins —
+	// fold them in so user-installed plugins can ship subagents.
+	agents = append(agents, pluginAgents...)
 	return agents
 }
 
@@ -405,6 +408,9 @@ func discoverCommands() []*command.Command {
 		filepath.Join(projectRoot, ".agents", "skills"),
 	}
 	cmds, _ := command.Discover(dirs...)
+	// Fold in commands contributed by plugins. Plugins were previously
+	// parsed but their commands never reached the slash-command loader.
+	cmds = append(cmds, pluginCommands...)
 	return cmds
 }
 
@@ -814,6 +820,15 @@ func loadMCPJSON(cfg *config.Config, projectRoot string) {
 	}
 }
 
+// pluginCommands and pluginAgents hold contributions from loaded plugins
+// so discoverCommands/discoverAgents can fold them into the global slash
+// command and subagent registries. Plugins parsed without this wiring
+// were silently dropped — Plugin.Merge only ever propagated hooks.
+var (
+	pluginCommands []*command.Command
+	pluginAgents   []*agent.Agent
+)
+
 // loadPlugins discovers plugins from standard directories and merges them.
 func loadPlugins(cfg *config.Config, projectRoot string) {
 	home, _ := os.UserHomeDir()
@@ -828,7 +843,11 @@ func loadPlugins(cfg *config.Config, projectRoot string) {
 		)
 	}
 	plugins, _ := plugin.Discover(dirs...)
+	pluginCommands = pluginCommands[:0]
+	pluginAgents = pluginAgents[:0]
 	for _, p := range plugins {
 		p.Merge(cfg)
+		pluginCommands = append(pluginCommands, p.Commands...)
+		pluginAgents = append(pluginAgents, p.Agents...)
 	}
 }
