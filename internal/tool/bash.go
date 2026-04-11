@@ -85,9 +85,22 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", params.Command)
+	// Run the command in its own process group so background children
+	// (e.g. 'sleep 1000 &') get killed along with bash on timeout.
+	// Without Setpgid the timeout fires, exec.CommandContext kills only
+	// the bash PID, and orphaned children survive indefinitely until
+	// they hit their own exit conditions.
+	configureProcessGroup(cmd)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+
+	// Cancel function that kills the entire process group on timeout.
+	// CommandContext's default behavior is single-PID kill which leaks
+	// the children spawned by the command.
+	cmd.Cancel = func() error {
+		return killProcessGroup(cmd)
+	}
 
 	err := cmd.Run()
 	output := stdout.String()

@@ -1,6 +1,10 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"strings"
+
+	"github.com/charmbracelet/lipgloss"
+)
 
 // Theme defines the color palette for the TUI.
 type Theme struct {
@@ -132,8 +136,11 @@ var Themes = map[string]Theme{
 }
 
 // GetTheme returns the named theme, falling back to DefaultTheme.
+// Lookup is case-insensitive — config keys like "Dracula" or
+// "DRACULA" silently used to fall back to DefaultTheme even though
+// the user clearly meant the dracula theme.
 func GetTheme(name string) Theme {
-	if t, ok := Themes[name]; ok {
+	if t, ok := Themes[strings.ToLower(name)]; ok {
 		return t
 	}
 	return DefaultTheme
