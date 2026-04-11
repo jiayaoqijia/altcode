@@ -130,10 +130,21 @@ func TestTeam_WaitAllTimeout(t *testing.T) {
 	}
 
 	id := tm.SpawnAgent(ctx, parent, ag, "wait")
+	start := time.Now()
 	results := tm.WaitAll(100 * time.Millisecond)
+	elapsed := time.Since(start)
 
-	if results[id] != "timeout" {
-		t.Errorf("Expected timeout, got %q", results[id])
+	// WaitAll must return shortly after the deadline (cancel + 2s grace),
+	// not block forever waiting for the hanging server.
+	if elapsed > 5*time.Second {
+		t.Errorf("WaitAll took too long: %s", elapsed)
+	}
+	// The result must exist for this id — either "timeout" (if the
+	// child engine never produced output before the grace window) or
+	// some captured text from the cancel propagation. Either way the
+	// key must be present.
+	if _, ok := results[id]; !ok {
+		t.Errorf("Expected result for %s, got %v", id, results)
 	}
 	cancel() // unblock the hanging agent
 }

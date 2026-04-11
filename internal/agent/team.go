@@ -14,6 +14,7 @@ import (
 type Team struct {
 	name     string
 	agents   map[string]*RunningAgent
+	cancels  map[string]context.CancelFunc // per-agent cancel funcs
 	results  map[string]string
 	registry *Registry
 	mailbox  *Mailbox // shared mailbox for all team agents
@@ -26,6 +27,7 @@ func NewTeam(name string) *Team {
 	return &Team{
 		name:     name,
 		agents:   make(map[string]*RunningAgent),
+		cancels:  make(map[string]context.CancelFunc),
 		results:  make(map[string]string),
 		registry: NewRegistry(5),
 		mailbox:  NewMailbox(),
@@ -37,6 +39,10 @@ func (t *Team) Name() string { return t.name }
 
 // SpawnAgent starts an agent in its own goroutine and returns an ID.
 // Uses the Registry for lifecycle tracking and Mailbox for IPC.
+//
+// The team owns a per-agent cancel func so WaitAll can stop a stuck
+// child engine on timeout instead of letting it drain naturally and
+// burn tokens after the user already gave up.
 func (t *Team) SpawnAgent(
 	ctx context.Context,
 	parent *engine.Engine,
@@ -55,9 +61,12 @@ func (t *Team) SpawnAgent(
 	}
 	ra.Task = input
 	t.agents[id] = ra
+
+	agentCtx, cancel := context.WithCancel(ctx)
+	t.cancels[id] = cancel
 	t.mu.Unlock()
 
-	go t.runAgent(ctx, parent, ag, id, input)
+	go t.runAgent(agentCtx, parent, ag, id, input)
 	return id
 }
 
@@ -92,6 +101,15 @@ func (t *Team) markDoneWithStatus(id string, status AgentStatus) {
 		default:
 			close(ra.Done)
 		}
+	}
+	// Drop the cancel func so the team doesn't hold a reference to a
+	// completed agent's context after WaitAll returns.
+	if cancel, ok := t.cancels[id]; ok {
+		delete(t.cancels, id)
+		// Calling cancel() on an already-finished agent is safe and a
+		// no-op for downstream consumers — but releases any resources
+		// that the cancel func might still be holding (timer, etc).
+		go cancel()
 	}
 	t.mu.Unlock()
 	t.registry.Release(id, status)
@@ -162,6 +180,8 @@ func (t *Team) PendingMessages(id string) []string {
 }
 
 // WaitAll blocks until all agents finish or timeout, returning results.
+// On timeout, the per-agent cancel func is invoked so the child engine
+// stops processing instead of running to completion in the background.
 func (t *Team) WaitAll(timeout time.Duration) map[string]string {
 	t.mu.Lock()
 	agents := make(map[string]*RunningAgent, len(t.agents))
@@ -175,10 +195,30 @@ func (t *Team) WaitAll(timeout time.Duration) map[string]string {
 		select {
 		case <-ra.Done:
 		case <-deadline:
-			t.storeResult(id, "timeout")
+			// Cancel the spawned agent so its engine loop exits
+			// promptly. Then wait briefly for the goroutine to finish
+			// flushing its result; if it never does, record "timeout".
+			t.cancelAgent(id)
+			select {
+			case <-ra.Done:
+			case <-time.After(2 * time.Second):
+				t.storeResult(id, "timeout")
+			}
 		}
 	}
 	return t.copyResults()
+}
+
+// cancelAgent invokes the per-agent cancel func so the child engine
+// stops processing. Safe to call multiple times.
+func (t *Team) cancelAgent(id string) {
+	t.mu.Lock()
+	cancel, ok := t.cancels[id]
+	delete(t.cancels, id)
+	t.mu.Unlock()
+	if ok && cancel != nil {
+		cancel()
+	}
 }
 
 func (t *Team) copyResults() map[string]string {
