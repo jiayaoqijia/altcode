@@ -385,8 +385,13 @@ func handleClaudeLine(line string, stdin io.Writer, events chan<- AgentEvent) bo
 
 	switch msgType {
 	case "control_request":
-		// Auto-approve all tool use (like multica claude.go:224-260)
-		handleClaudeControlRequest(raw, stdin)
+		// Auto-approve all tool use (like multica claude.go:224-260).
+		// Surface stdin write failures so the caller (and the user)
+		// sees why the claude backend stalled instead of waiting on
+		// a never-arriving approval.
+		if err := handleClaudeControlRequest(raw, stdin); err != nil {
+			trySend(events, AgentEvent{Type: EventError, Content: err.Error()})
+		}
 		return true
 
 	case "assistant":
@@ -420,37 +425,83 @@ func handleClaudeLine(line string, stdin io.Writer, events chan<- AgentEvent) bo
 }
 
 // handleClaudeControlRequest responds to a control_request with auto-approve.
-func handleClaudeControlRequest(raw map[string]json.RawMessage, stdin io.Writer) {
+//
+// claude can emit request_id as either a JSON string or a JSON number.
+// The previous code unmarshaled into a string field directly, so a
+// numeric id silently became "" and the response targeted the empty
+// id — claude then waited forever for the real approval and the
+// agent timed out.
+//
+// Returns an error so the caller can surface broken pipes / send
+// failures instead of having claude stall mysteriously.
+func handleClaudeControlRequest(raw map[string]json.RawMessage, stdin io.Writer) error {
 	if stdin == nil {
-		return
+		return nil
 	}
-	// Extract request_id from the control request
-	var req struct {
-		RequestID string `json:"request_id"`
-	}
-	if data, ok := raw["request"]; ok {
-		json.Unmarshal(data, &req)
-	}
-	// If no nested request, try top-level
-	if req.RequestID == "" {
-		json.Unmarshal([]byte(raw["request_id"]), &req.RequestID)
-	}
+	requestID := extractClaudeRequestID(raw)
 
 	// Send approval response via stdin (multica pattern)
 	resp := map[string]any{
 		"type": "control_response",
 		"response": map[string]any{
 			"subtype":    "success",
-			"request_id": req.RequestID,
+			"request_id": requestID,
 			"response": map[string]any{
 				"behavior":     "allow",
 				"updatedInput": map[string]any{},
 			},
 		},
 	}
-	data, _ := json.Marshal(resp)
+	data, err := json.Marshal(resp)
+	if err != nil {
+		return fmt.Errorf("marshal control_response: %w", err)
+	}
 	data = append(data, '\n')
-	stdin.Write(data)
+	if _, err := stdin.Write(data); err != nil {
+		return fmt.Errorf("write control_response to claude stdin: %w", err)
+	}
+	return nil
+}
+
+// extractClaudeRequestID handles the two shapes claude uses for
+// request_id: nested {"request":{"request_id":...}} and top-level
+// "request_id". The id may be a JSON string OR a JSON number.
+func extractClaudeRequestID(raw map[string]json.RawMessage) string {
+	// Try nested first.
+	if data, ok := raw["request"]; ok {
+		var nested struct {
+			RequestID json.RawMessage `json:"request_id"`
+		}
+		if json.Unmarshal(data, &nested) == nil {
+			if id := decodeStringOrNumber(nested.RequestID); id != "" {
+				return id
+			}
+		}
+	}
+	// Top-level fallback.
+	if data, ok := raw["request_id"]; ok {
+		if id := decodeStringOrNumber(data); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+// decodeStringOrNumber accepts a JSON value that may be either a
+// string or a number and returns its string representation.
+func decodeStringOrNumber(data json.RawMessage) string {
+	if len(data) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err == nil {
+		return s
+	}
+	var n json.Number
+	if err := json.Unmarshal(data, &n); err == nil {
+		return n.String()
+	}
+	return ""
 }
 
 // parseClaudeAssistant extracts typed events from a claude assistant message.
