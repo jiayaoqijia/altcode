@@ -85,7 +85,7 @@ altcode workspace "build auth system" claude:architect codex:coder
 
 **15 built-in tools**: Read, Write, Edit, Glob, Grep, Ls, Bash, Patch, WebFetch, WebSearch, Agent, TaskCreate, TaskUpdate, TaskList, TaskGet.
 
-**20+ slash commands**: `/help` `/status` `/tools` `/init` `/doctor` `/compare` `/workspace` `/spawn` `/review` `/ship` `/evaluate` `/investigate` `/codex` `/cost` `/clear` `/compact` `/memory` `/diff` `/quit`
+**20+ slash commands**: `/help` `/status` `/tools` `/skills` `/mcp` `/plugins` `/init` `/doctor` `/compare` `/workspace` `/spawn` `/review` `/ship` `/evaluate` `/investigate` `/codex` `/cost` `/clear` `/compact` `/memory` `/diff` `/quit`
 
 **12 keyboard shortcuts**: `Up/Down` history, `Ctrl+C` cancel/copy, `Ctrl+L` clear, `Ctrl+R` retry, `Ctrl+K` palette, `Ctrl+J` newline, `Ctrl+D` quit, `Tab` complete, `@` files, `Esc` cancel/vim, `PgUp/Down` scroll
 
@@ -537,7 +537,7 @@ altcode natively loads the entire Claude Code ecosystem:
 - **.claude/settings.json** — permissions and hooks
 - **.claude/skills/** — 47 skill definitions with YAML frontmatter
 - **.agents/skills/** — agent skill definitions
-- **.claude-plugin/** — plugin directories with commands, agents, hooks
+- **.claude-plugin/** — plugin directories with commands, agents, hooks. Both the altcode native format (`"commands": "commands/"`) and Claude Code's marketplace array form (`"commands": ["./commands/setup.md", ...]`) are accepted. Plugins under `~/.claude/plugins/cache/<owner>/<repo>/` from the Claude Code marketplace are auto-discovered.
 
 ## Development
 

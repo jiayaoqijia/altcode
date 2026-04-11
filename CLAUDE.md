@@ -218,12 +218,14 @@ Common CI failures and how to avoid them:
 - 26 packages: engine, orchestrator, provider, tool (10), hooks (13 events), agent (teams), mcp, command, plugin, memory, cost, history, sandbox, task, auth, exec, tui, config, compact, store, sysctl, event
 - CI green on Linux + macOS + Windows
 - 5ms startup, 10MB binary
-- 5ms startup, 10MB binary
 - Providers: Anthropic, OpenAI/Codex, altllm, DeepSeek, Zhipu/GLM, Moonshot/Kimi, MiniMax, Qwen, Ollama, LMStudio, OpenRouter (100+ models)
 - Auth: auto-detects Claude Code sub + Codex CLI sub + 8 provider API keys + OpenRouter
 - Claude Code compatible: loads CLAUDE.md, .mcp.json, settings.json, hooks, skills, plugins, agents, memory natively
+- Plugin marketplace compatible: accepts both altcode native (`"commands": "commands/"`) and Claude Code marketplace (`"commands": ["./commands/setup.md", ...]`) manifest formats; auto-discovers nested plugins under `~/.claude/plugins/cache/<owner>/<repo>/`
+- MCP spec compliant: performs the JSON-RPC `initialize` + `notifications/initialized` handshake on connect; lenient on `-32601 method not found` for minimal servers
 - Workflow mode: optional interview → plan → ralph pipeline (altcode workflow)
-- Skills: 47 discovered from .claude/skills/ + .agents/skills/ (Codex-style paths in system prompt)
+- Skills: 117 discovered from `.claude/skills/` + `.agents/skills/` + plugin contributions (Codex-style paths in system prompt)
+- TUI inspection commands: `/skills`, `/mcp`, `/plugins` show what's actually loaded into the session (in addition to `/tools`, `/agents`, `/backends`, `/memory`, `/doctor`)
 - Benchmarks: DeepSeek 96%, MiniMax 93%, Qwen 93%, Claude 90% (5 suites × 6 models)
 - 7-model benchmark: all 7 models pass identical coding task (see docs/benchmark-multi-model.md)
 
