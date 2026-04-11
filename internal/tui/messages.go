@@ -36,10 +36,14 @@ func (a *App) renderMessage(msg chatMessage) string {
 	var rendered string
 	if msg.role == roleTool && looksLikeDiff(msg.content) {
 		rendered = renderInlineDiff(msg.content, a.theme, 15)
-	} else if msg.role == roleInfo {
-		// Info messages are plain-text status output — skip markdown rendering
-		// so embedded newlines stay intact. Only render markdown when the content
-		// is explicitly wrapped in a code fence (which glamour preserves).
+	} else if msg.role == roleInfo || msg.role == roleUser {
+		// Info messages and user input are plain-text — skip markdown
+		// rendering so embedded newlines (Ctrl+J multi-line input,
+		// pasted code blocks) stay intact. Glamour collapses adjacent
+		// lines into paragraphs which would otherwise turn a 5-line
+		// pasted snippet into one wrapped line. Only render markdown
+		// when the content is explicitly wrapped in a code fence,
+		// which glamour preserves.
 		if a.mdRenderer != nil && strings.Contains(msg.content, "```") {
 			rendered = a.mdRenderer.Render(msg.content)
 		} else {
