@@ -104,16 +104,34 @@ func Run(ctx context.Context, p RunParams) error {
 			case wfdef.FailureAbort:
 				return fmt.Errorf("phase %q failed (abort policy)", phaseName)
 			case wfdef.FailureHuman:
-				// Block until user decides
+				// Block until user decides. Loop on commands the gate
+				// doesn't understand (Pause, Inject) so they aren't
+				// silently consumed and reinterpreted as continue.
 				trySendEvent(p.Events, PhaseEvent{
 					Phase: phaseName, Type: KindError,
-					Text: fmt.Sprintf("Phase %q failed. Press Ctrl+S to skip or Ctrl+Q to abort.", phaseName),
+					Text: fmt.Sprintf("Phase %q failed. Send Skip/Resume to continue or Abort to stop.", phaseName),
 				})
-				if cmd, ok := waitOverride(ctx, p.Override); ok {
-					if cmd.Op == OpAbort {
-						return fmt.Errorf("workflow aborted by user")
+				for {
+					cmd, ok := waitOverride(ctx, p.Override)
+					if !ok {
+						break
 					}
-					// OpSkip or OpResume: continue to next phase
+					switch cmd.Op {
+					case OpAbort:
+						return fmt.Errorf("workflow aborted by user")
+					case OpSkip, OpResume:
+						// continue to next phase
+					default:
+						// Unknown / Pause / Inject — wait for the
+						// operator to send a real continue/abort
+						// instead of consuming and reinterpreting.
+						trySendEvent(p.Events, PhaseEvent{
+							Phase: phaseName, Type: KindError,
+							Text: fmt.Sprintf("Failure-gate ignored %q; send Skip, Resume, or Abort.", cmd.Op),
+						})
+						continue
+					}
+					break
 				}
 			case wfdef.FailureSkip:
 				// continue
