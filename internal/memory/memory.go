@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,9 +25,13 @@ type Memory struct {
 	Path      string    // absolute file path
 }
 
-// Store manages persistent memories on disk.
+// Store manages persistent memories on disk. The mutex serializes
+// writes from concurrent callers (multiple sessions or background
+// goroutines saving memories at once) so MEMORY.md and individual
+// entries don't get corrupted by interleaved writes.
 type Store struct {
 	dir string // directory containing memory files
+	mu  sync.Mutex
 }
 
 // NewStore creates a Store at the given directory.
@@ -66,11 +71,16 @@ func validateMemoryID(id string) error {
 	return nil
 }
 
-// Save writes a memory to disk and updates the index.
+// Save writes a memory to disk and updates the index. The write is
+// guarded by the store mutex and uses an atomic temp-file + rename
+// so partial writes from a crash never leave a half-written file.
 func (s *Store) Save(id, title, content string) error {
 	if err := validateMemoryID(id); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	if err := os.MkdirAll(s.dir, 0o755); err != nil {
 		return fmt.Errorf("create memory dir: %w", err)
 	}
@@ -79,11 +89,11 @@ func (s *Store) Save(id, title, content string) error {
 	body := fmt.Sprintf("---\nname: %s\ndescription: %s\ncreated: %s\n---\n\n%s\n",
 		title, firstLine(content), time.Now().Format(time.RFC3339), content)
 
-	if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+	if err := writeFileAtomic(path, []byte(body), 0o644); err != nil {
 		return fmt.Errorf("write memory: %w", err)
 	}
 
-	return s.updateIndex()
+	return s.updateIndexLocked()
 }
 
 // Load reads a single memory by ID.
@@ -132,11 +142,14 @@ func (s *Store) Delete(id string) error {
 	if err := validateMemoryID(id); err != nil {
 		return err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	path := filepath.Join(s.dir, id+".md")
 	if err := os.Remove(path); err != nil {
 		return fmt.Errorf("delete memory: %w", err)
 	}
-	return s.updateIndex()
+	return s.updateIndexLocked()
 }
 
 // Search returns memories containing the query string.
@@ -190,7 +203,10 @@ func (s *Store) LoadIndex() (string, error) {
 	return string(data), err
 }
 
-func (s *Store) updateIndex() error {
+// updateIndexLocked rewrites MEMORY.md. The caller must hold s.mu.
+// Renamed from updateIndex so the locking discipline is visible at
+// every call site (Save and Delete both already hold the lock).
+func (s *Store) updateIndexLocked() error {
 	memories, err := s.List()
 	if err != nil {
 		return err
@@ -215,7 +231,34 @@ func (s *Store) updateIndex() error {
 	}
 
 	path := filepath.Join(s.dir, "MEMORY.md")
-	return os.WriteFile(path, []byte(strings.Join(lines, "\n")), 0o644)
+	return writeFileAtomic(path, []byte(strings.Join(lines, "\n")), 0o644)
+}
+
+// writeFileAtomic writes data to path via a temp file in the same
+// directory and an os.Rename. This survives a crash mid-write — either
+// the old file remains intact or the new file is fully committed.
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	dir := filepath.Dir(path)
+	tmp, err := os.CreateTemp(dir, ".memory-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	if _, err := tmp.Write(data); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Chmod(perm); err != nil {
+		tmp.Close()
+		os.Remove(tmpName)
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpName)
+		return err
+	}
+	return os.Rename(tmpName, path)
 }
 
 func parseMemoryFile(path string) (*Memory, error) {
