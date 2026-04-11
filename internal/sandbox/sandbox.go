@@ -95,8 +95,62 @@ func (s *Sandbox) checkStrict(command string) error {
 	)
 }
 
+// matchPattern checks whether `cmd` matches `pattern`. Both are
+// tokenized on whitespace; the pattern matches if every pattern token
+// matches some cmd token in order, allowing arbitrary other cmd
+// tokens between matches. A pattern token matches a cmd token if:
+//
+//   - they are exactly equal,
+//   - the cmd token's basename equals the pattern token (so 'rm'
+//     matches '/bin/rm' or 'sudo rm'),
+//   - the cmd token starts with the pattern token (so 'if=' matches
+//     'if=/dev/zero' and '/dev/sd' matches '/dev/sda'),
+//   - the cmd token has the pattern token as a prefix segment (so
+//     'mkfs' matches 'mkfs.ext4').
+//
+// The previous implementation was a raw substring containment which
+// both missed obvious variants ('rm  -rf  /' with extra spaces, `rm
+// --recursive --force`) AND false-positived on lines like
+// `echo "confirmed"` where 'rm' happened to appear inside another
+// word.
 func matchPattern(cmd, pattern string) bool {
-	return strings.Contains(cmd, pattern)
+	cmdTokens := strings.Fields(cmd)
+	patternTokens := strings.Fields(pattern)
+	if len(patternTokens) == 0 || len(cmdTokens) == 0 {
+		return false
+	}
+	ci := 0
+	for _, pat := range patternTokens {
+		found := false
+		for ; ci < len(cmdTokens); ci++ {
+			if cmdTokenMatches(cmdTokens[ci], pat) {
+				found = true
+				ci++
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	}
+	return true
+}
+
+// cmdTokenMatches reports whether a command-line token matches a
+// pattern token under the rules described in matchPattern.
+func cmdTokenMatches(cmdTok, patTok string) bool {
+	if cmdTok == patTok {
+		return true
+	}
+	if i := strings.LastIndex(cmdTok, "/"); i >= 0 {
+		if cmdTok[i+1:] == patTok {
+			return true
+		}
+	}
+	if strings.HasPrefix(cmdTok, patTok) {
+		return true
+	}
+	return false
 }
 
 func truncateCmd(cmd string) string {
