@@ -91,24 +91,29 @@ func ClearState(projectRoot string, mode Mode) error {
 }
 
 // ClearAll removes all workflow state JSON files.
-func ClearAll(projectRoot string) error {
+// ClearAll removes every workflow state file under the project root.
+// Returns the number of files actually removed so callers (e.g. /wf-cancel)
+// can distinguish 'cleared 3 active workflows' from 'nothing to clear'.
+func ClearAll(projectRoot string) (int, error) {
 	dir := StateDir(projectRoot)
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil
+			return 0, nil
 		}
-		return err
+		return 0, err
 	}
+	removed := 0
 	for _, entry := range entries {
 		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".json") {
 			continue
 		}
 		if err := os.Remove(filepath.Join(dir, entry.Name())); err != nil {
-			return err
+			return removed, err
 		}
+		removed++
 	}
-	return nil
+	return removed, nil
 }
 
 // ListActive returns all modes with active (non-complete) state.

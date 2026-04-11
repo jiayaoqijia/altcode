@@ -99,7 +99,7 @@ func TestClearAll(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := ClearAll(dir); err != nil {
+	if _, err := ClearAll(dir); err != nil {
 		t.Fatal(err)
 	}
 
@@ -114,7 +114,7 @@ func TestClearAll(t *testing.T) {
 
 func TestClearAll_MissingStateDir(t *testing.T) {
 	dir := t.TempDir()
-	if err := ClearAll(dir); err != nil {
+	if _, err := ClearAll(dir); err != nil {
 		t.Fatal(err)
 	}
 }

@@ -802,10 +802,14 @@ func (a *App) builtinWorkflowStatusText() string {
 }
 
 func (a *App) builtinWorkflowCancelText() string {
-	if err := workflow.ClearAll(a.projectRoot); err != nil {
+	n, err := workflow.ClearAll(a.projectRoot)
+	if err != nil {
 		return fmt.Sprintf("Error clearing workflow state: %v", err)
 	}
-	return "Workflow state cleared."
+	if n == 0 {
+		return "No workflow state to clear."
+	}
+	return fmt.Sprintf("Cleared %d workflow state file(s).", n)
 }
 
 func (a *App) builtinWorkflowPauseText() string {
