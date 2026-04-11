@@ -69,6 +69,47 @@ func TestGlobTool(t *testing.T) {
 	t.Logf("Glob output: %s", result.Output)
 }
 
+// TestGlobTool_DoubleStar is a regression test: the tool description
+// promises **/*.go works, but the previous matcher used filepath.Match
+// against the basename only, returning zero matches for any **-prefixed
+// pattern. With matchGlob the pattern must find the nested .txt file.
+func TestGlobTool_DoubleStar(t *testing.T) {
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "root.go"), []byte("package main"), 0o644)
+	os.MkdirAll(filepath.Join(dir, "pkg", "deep"), 0o755)
+	os.WriteFile(filepath.Join(dir, "pkg", "shallow.go"), []byte("package pkg"), 0o644)
+	os.WriteFile(filepath.Join(dir, "pkg", "deep", "buried.go"), []byte("package deep"), 0o644)
+
+	tests := []struct {
+		name    string
+		pattern string
+		want    []string // expected substrings in output
+	}{
+		{"flat star", "*.go", []string{"root.go"}},
+		{"recursive double-star", "**/*.go", []string{"root.go", "shallow.go", "buried.go"}},
+		{"prefixed double-star", "pkg/**/*.go", []string{"shallow.go", "buried.go"}},
+	}
+	gt := tool.NewGlobTool()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			input, _ := json.Marshal(map[string]any{
+				"pattern": tt.pattern,
+				"path":    dir,
+			})
+			result, err := gt.Execute(context.Background(), input)
+			if err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			for _, want := range tt.want {
+				if !strings.Contains(result.Output, want) {
+					t.Errorf("pattern %q: output missing %q\nfull:\n%s",
+						tt.pattern, want, result.Output)
+				}
+			}
+		})
+	}
+}
+
 func TestLsTool(t *testing.T) {
 	dir := setupTestDir(t)
 	lt := tool.NewLsTool()
