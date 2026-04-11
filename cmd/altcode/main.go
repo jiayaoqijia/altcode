@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -34,20 +35,44 @@ import (
 // Version is set at build time via -ldflags.
 var Version = "dev"
 
+// cliFlags bundles exec-mode flags so run() / runExec() don't grow
+// a parameter list per phase. Each Cobra RunE populates one.
+type cliFlags struct {
+	// Phase 0 (pre-existing)
+	jsonMode  bool
+	last      bool
+	sessionID string
+
+	// Phase 1: output format + observability
+	outputFormat   string
+	verbose        bool
+	quiet          bool
+	printCost      bool
+	printTools     bool
+	printTree      bool
+	showSystem     bool
+	saveTranscript string
+	saveCost       string
+	saveDiff       string
+}
+
 func main() {
-	var modelFlag, configFlag, themeFlag, sessionFlag string
-	var jsonFlag, lastFlag, debugFlag bool
+	var modelFlag, configFlag, themeFlag string
+	var debugFlag bool
+	var flags cliFlags
 
 	root := &cobra.Command{
 		Use:   "altcode [prompt]",
 		Short: "AI-assisted coding CLI",
 		Long: `altcode — AI-assisted coding CLI.
 
-  altcode                    Interactive TUI mode
-  altcode "prompt"           Run prompt headlessly, print response
-  altcode --json "prompt"    Run prompt, emit JSONL events
-  altcode --last             Resume last session in TUI
-  altcode --last "prompt"    Resume last session with new prompt`,
+  altcode                           Interactive TUI mode
+  altcode "prompt"                  Run prompt headlessly, print response
+  altcode --output-format json "p"  Run prompt, emit single JSON object
+  altcode --output-format diff "p"  Run prompt, print final diff only
+  altcode --json "prompt"           Alias for --output-format stream-json
+  altcode --last                    Resume last session in TUI
+  altcode --last "prompt"           Resume last session with new prompt`,
 		Version:      Version,
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
@@ -57,17 +82,59 @@ func main() {
 			if debugFlag {
 				os.Setenv("ALTCODE_DEBUG", "1")
 			}
-			return run(cfg, prompt, jsonFlag, lastFlag, sessionFlag)
+			if err := run(cfg, prompt, flags); err != nil {
+				// Top-level UsageError → print + exit AFTER all
+				// deferred cleanup (MCP teardown etc.) has run,
+				// which happens inside run() before the return.
+				// See spec v7 — os.Exit inside runExec would leak
+				// subprocess-backed MCP servers.
+				var uerr *exec.UsageError
+				if errors.As(err, &uerr) {
+					fmt.Fprintln(os.Stderr, "altcode:", uerr.Msg)
+					os.Exit(uerr.ExitCode)
+				}
+				return err
+			}
+			return nil
 		},
 	}
 
 	root.PersistentFlags().StringVar(&modelFlag, "model", "", "Model override")
 	root.PersistentFlags().StringVar(&configFlag, "config", "", "Config file path")
 	root.PersistentFlags().StringVar(&themeFlag, "theme", "", "Theme name")
-	root.Flags().BoolVar(&jsonFlag, "json", false, "Emit JSONL events (exec mode)")
-	root.Flags().BoolVar(&lastFlag, "last", false, "Resume last session")
-	root.Flags().StringVar(&sessionFlag, "session", "", "Resume session by ID")
 	root.PersistentFlags().BoolVar(&debugFlag, "debug", false, "Print events to stderr for debugging")
+
+	// --- Phase 0: session + json alias ---
+	root.Flags().BoolVar(&flags.jsonMode, "json", false, "Emit JSONL events (alias for --output-format stream-json)")
+	root.Flags().BoolVar(&flags.last, "last", false, "Resume last session")
+	root.Flags().StringVar(&flags.sessionID, "session", "", "Resume session by ID")
+
+	// --- Phase 1: output format + observability ---
+	root.Flags().StringVar(&flags.outputFormat, "output-format", "",
+		"Output shape: text (default) | json | stream-json | diff")
+	root.Flags().BoolVar(&flags.verbose, "verbose", false,
+		"Include tool args + thinking blocks in text mode")
+	root.Flags().BoolVar(&flags.quiet, "quiet", false,
+		"Suppress banner, tool chatter, and trailing newline")
+	root.Flags().BoolVar(&flags.printCost, "print-cost", false,
+		"Print cost + timing summary to stderr at end of run")
+	root.Flags().BoolVar(&flags.printTools, "print-tools", false,
+		"Log each tool call to stderr (forces on even when not a TTY)")
+	root.Flags().BoolVar(&flags.printTree, "print-tree", false,
+		"Print end-of-run ASCII tool tree to stderr (Phase 12 — accepted but flat)")
+	root.Flags().BoolVar(&flags.showSystem, "show-system", false,
+		"Print the system prompt to stderr at start (debugging aid)")
+	root.Flags().StringVar(&flags.saveTranscript, "save-transcript", "",
+		"Write full JSONL transcript to file (Phase 7)")
+	root.Flags().StringVar(&flags.saveCost, "save-cost", "",
+		"Write cost report (JSON) to file (Phase 7)")
+	root.Flags().StringVar(&flags.saveDiff, "save-diff", "",
+		"Write final unified diff to file (Phase 7)")
+
+	// Cobra-enforced mutual exclusion (flag presence only — value-dependent
+	// rules like --prompt-file - vs --image - live in exec.Params.Validate).
+	root.MarkFlagsMutuallyExclusive("quiet", "verbose")
+	root.MarkFlagsMutuallyExclusive("quiet", "show-system")
 
 	sessCmd := &cobra.Command{
 		Use:   "sessions",
@@ -215,9 +282,9 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 	}
 }
 
-func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID string) error {
+func run(cfg *config.Config, prompt string, flags cliFlags) error {
 	// Skip SQLite in exec mode when no session resume needed — saves ~5-10ms
-	needsDB := last || sessionID != "" || prompt == ""
+	needsDB := flags.last || flags.sessionID != "" || prompt == ""
 	var db *store.DB
 	if needsDB {
 		db, _ = store.Open("")
@@ -269,12 +336,34 @@ func run(cfg *config.Config, prompt string, jsonMode, last bool, sessionID strin
 		Skills:       skills,
 		Perm:         permEval,
 	}
-	if err := loadSession(db, &params, last, sessionID); err != nil {
+	if err := loadSession(db, &params, flags.last, flags.sessionID); err != nil {
 		return err
 	}
 
 	if prompt != "" {
-		return runExec(params, prompt, jsonMode)
+		// Build exec.Params from the engine params + CLI flags.
+		// Phase 1 adds output-format + observability fields; later
+		// phases extend this struct with permission/input/artifact
+		// flags. Keeping construction in one place makes each phase
+		// a localized additive edit.
+		ep := exec.Params{
+			EngineParams:   params,
+			Prompt:         prompt,
+			JSON:           flags.jsonMode,
+			Quiet:          flags.quiet,
+			Model:          cfg.Model,
+			Auth:           auth.CredentialSource(cfg),
+			OutputFormat:   flags.outputFormat,
+			Verbose:        flags.verbose,
+			PrintCost:      flags.printCost,
+			PrintTools:     flags.printTools,
+			PrintTree:      flags.printTree,
+			ShowSystem:     flags.showSystem,
+			SaveTranscript: flags.saveTranscript,
+			SaveCost:       flags.saveCost,
+			SaveDiff:       flags.saveDiff,
+		}
+		return runExec(ep)
 	}
 	return runTUI(params)
 }
@@ -313,34 +402,56 @@ func buildPermissionEvaluator(cfg *config.Config, projectRoot string) *permissio
 	return permission.NewEvaluator(permission.ModeDefault, projectRoot, rules)
 }
 
-func runExec(params engine.EngineParams, prompt string, jsonMode bool) error {
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+// runExec is the headless entry point. Takes a fully-populated
+// exec.Params; constructs the engine, starts MCP servers if needed,
+// threads the signal-cancellable ctx down to exec.Run, and ensures
+// deferred MCP cleanup runs on every return path (including typed
+// UsageError returns — those must unwind through this function so
+// defers fire before the top-level caller translates to os.Exit).
+//
+// Signal handling: traps SIGINT and SIGTERM. SIGTERM lets container
+// runners and batch orchestrators ask for clean shutdown (spec v7
+// Phase 11 folded in early — trivial change, avoids another edit
+// in the same file).
+func runExec(ep exec.Params) error {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	eng, err := engine.New(params)
+	eng, err := engine.New(ep.EngineParams)
 	if err != nil {
 		return fmt.Errorf("create engine: %w", err)
 	}
+	ep.Engine = eng
 
 	// Only start MCP servers if prompt likely needs them.
 	// MCP startup adds 1-5s of blocking latency per server.
 	// Use the signal-cancellable ctx so SIGTERM tears down servers
 	// instead of leaking them with context.Background().
+	//
+	// Phase 3 will add: `|| ep.PermissionPromptTool != ""` so that
+	// headless permission-prompt-tool works even when the prompt
+	// doesn't happen to mention MCP. For Phase 1 we keep the current
+	// keyword-only gating.
 	var mcpCleanup func()
-	if needsMCP(prompt) {
-		mcpCleanup = connectMCPWithCtx(ctx, params.Config, eng)
+	if needsMCP(ep.Prompt) {
+		mcpCleanup = connectMCPWithCtx(ctx, ep.EngineParams.Config, eng)
 	}
 	if mcpCleanup != nil {
 		defer mcpCleanup()
 	}
 
-	return exec.Run(ctx, exec.Params{
-		Engine: eng,
-		Prompt: prompt,
-		JSON:   jsonMode,
-		Model:  params.Config.Model,
-		Auth:   auth.CredentialSource(params.Config),
-	})
+	// Banner fields on exec.Params were previously populated from
+	// engine.EngineParams.Config inside runExec. Now that the caller
+	// passes exec.Params directly we still backfill the Model/Auth
+	// fields here so the banner renders identically.
+	if ep.Model == "" && ep.EngineParams.Config != nil {
+		ep.Model = ep.EngineParams.Config.Model
+	}
+	if ep.Auth == "" && ep.EngineParams.Config != nil {
+		ep.Auth = auth.CredentialSource(ep.EngineParams.Config)
+	}
+
+	return exec.Run(ctx, ep)
 }
 
 // needsMCP returns true if the prompt likely requires MCP tools.

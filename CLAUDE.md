@@ -58,6 +58,38 @@ tmux capture-pane -t bench -p  # capture rendered TUI output
 altcode "Write a Fibonacci function in Go"  # skips TUI entirely
 ```
 
+### CLI Feature Parity (in progress)
+
+Spec: `docs/plans/cli-feature-parity-v7.md` — 13 phases bringing the
+headless `altcode "prompt"` surface to ~90% of TUI features. Design
+was reviewed across 7 rounds between CC and Codex before starting.
+
+**Landed:**
+- **Phase 1**: `--output-format text|json|stream-json|diff`, `--verbose`,
+  `--quiet`, `--print-cost`, `--print-tools`, `--show-system`, plus
+  `--save-transcript/cost/diff` placeholders. `runExec` now takes
+  `exec.Params` and translates typed `*exec.UsageError` to exit 64
+  after deferred MCP cleanup runs (never `os.Exit` inside `runExec`).
+- **Phase 11**: `SIGTERM` folded into exec mode signal handling.
+
+**Hard rule when extending `exec.Params`:**
+1. Never replace existing fields — only extend. Later phases are
+   additive struct fields + additive Cobra flag registration.
+2. Never call `os.Exit` from inside `runExec`. Return a typed
+   `*exec.UsageError{Msg, ExitCode}` and let the top-level cobra
+   `RunE` wrapper translate it to exit code AFTER deferred cleanup.
+   This is how MCP subprocess teardown stays correct on failure
+   paths (spec v7 Codex round-3 finding).
+3. Drain functions (`drainText`/`drainJSON`/`drainJSONFinal`/`drainDiff`)
+   must ALWAYS respond to `PermissionRequest` events — even after
+   an encode error on stdout. The auto-deny response path is
+   independent from the stdout path; nesting it inside `encodeErr == nil`
+   wedges the engine on a later permission-gated tool call.
+4. Run the full review loop per phase: implement → build → test →
+   CC review diff → Codex review diff → fix blockers → commit. Two
+   reviewers catch different classes of bug (CC tends to find
+   mechanical/API mismatches, Codex tends to find deadlock/leak paths).
+
 ### Pre-Push Gate (HARD RULE)
 
 **NEVER push without passing these locally first:**

@@ -5,6 +5,52 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased] — CLI feature parity
+
+Brings the headless `altcode "prompt"` surface closer to the TUI for users
+who work out of vim/tmux/scripts. Design doc lives at
+`docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
+between Claude Code and Codex before implementation.
+
+### Added (Phase 1: output format + observability)
+
+- `--output-format text|json|stream-json|diff` picks the stdout shape.
+  - `text` is the current human-readable default.
+  - `json` emits a single final JSON object with text, tool calls,
+    permissions, cost, and accumulated errors.
+  - `stream-json` is JSONL (the legacy `--json` behavior, kept as an alias).
+  - `diff` runs the turn and prints `git diff HEAD` for files touched by
+    `write`/`edit`/`apply_patch` tool calls.
+- `--verbose` surfaces tool args and thinking blocks in text mode.
+- `--quiet` suppresses the banner, tool chatter, and trailing newline.
+- `--print-cost` writes a cost + timing summary to stderr at end of run
+  (works outside a TTY, unlike the existing banner).
+- `--print-tools` forces tool-call chatter to stderr even when piping.
+- `--show-system` dumps the assembled instruction set (CLAUDE.md cascade)
+  to stderr at start for debugging.
+- `--print-tree`, `--save-transcript`, `--save-cost`, `--save-diff`
+  registered as placeholders; full implementation lands in later phases.
+- `runExec` now takes `exec.Params` directly and translates typed
+  `*exec.UsageError` returns into `os.Exit(64)` after deferred MCP
+  cleanup runs. No `os.Exit` inside `runExec` — that would leak
+  subprocess-backed MCP servers.
+- Signal handling now traps `SIGTERM` alongside `SIGINT` in exec mode so
+  container/batch runners get clean shutdown.
+
+### Fixed
+
+- `drainJSON` no longer deadlocks the engine if stdout breaks (EPIPE)
+  before a permission request arrives: the auto-deny response now
+  sends independently of encoder state.
+- `drainJSONFinal` accumulates every `ErrorEvent` instead of keeping
+  only the last one, and reconciles tool `Input` from `ToolResultEvent`
+  (engine re-sends the full input there).
+- `drainDiff` surfaces git failures as a `UsageError` instead of
+  silently writing to stderr, so scripts can tell "diff requested but
+  unavailable" apart from "diff produced nothing".
+- `apply_patch` tool inputs are now parsed for `+++ b/<path>` headers
+  so `--output-format diff` picks up multi-file patches.
+
 ## [v0.7.0] — 2026-04-07
 
 The last release before the workspace-driven orchestration pivot. Everything below works with the internal engine + external CLI backends.
