@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -108,6 +109,11 @@ type Engine struct {
 	taskQueue    *task.Queue
 	sessionID    string
 	model        string
+	// msgMu serializes reads and writes to `messages`. Without it,
+	// the streaming loop appending to `messages` raced with /clear,
+	// /compact, and /rollback mutating the same slice — go test
+	// -race caught this when a user slash-cleared mid-stream.
+	msgMu        sync.Mutex
 	messages     []provider.Message
 	instructions []config.Instruction
 	skills       []Skill
@@ -291,6 +297,8 @@ func truncate(s string, n int) string {
 // Returns a copy so callers can't mutate the engine's backing slice
 // concurrently with a running turn.
 func (e *Engine) Messages() []provider.Message {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	out := make([]provider.Message, len(e.messages))
 	copy(out, e.messages)
 	return out
@@ -368,12 +376,21 @@ func (e *Engine) Instructions() []config.Instruction {
 }
 
 // ClearMessages resets the conversation history.
+//
+// Mutators take e.msgMu so they don't race with the streaming loop
+// appending to e.messages from a turn goroutine. Without the mutex,
+// /clear or /rollback during an in-flight turn produced a data race
+// the race detector caught immediately.
 func (e *Engine) ClearMessages() {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	e.messages = []provider.Message{}
 }
 
 // TruncateMessages keeps only the first n messages, discarding the rest.
 func (e *Engine) TruncateMessages(n int) {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	if n < 0 {
 		n = 0
 	}
@@ -394,10 +411,38 @@ func (e *Engine) FileJournal() *history.Journal {
 
 // Compact manually triggers context compaction on the message history.
 func (e *Engine) Compact() int {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	before := len(e.messages)
 	mc := compact.NewMicrocompactor(20)
 	e.messages = mc.Apply(e.messages)
 	return before - len(e.messages)
+}
+
+// appendMessageLocked appends m to e.messages under the mutex. Used
+// by the streaming loop and tool dispatch path so concurrent /clear
+// /compact /rollback callers don't race with the appends.
+func (e *Engine) appendMessageLocked(m provider.Message) {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	e.messages = append(e.messages, m)
+}
+
+// messageCountLocked returns len(e.messages) under the mutex.
+func (e *Engine) messageCountLocked() int {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	return len(e.messages)
+}
+
+// messagesSnapshotLocked returns a copy of e.messages under the mutex.
+// Use this when callers need the slice for read-only iteration.
+func (e *Engine) messagesSnapshotLocked() []provider.Message {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	out := make([]provider.Message, len(e.messages))
+	copy(out, e.messages)
+	return out
 }
 
 // NewWithRegistry creates an Engine with an externally-provided tool registry.
@@ -454,9 +499,19 @@ func (e *Engine) persistMessage(role string, msg provider.Message) {
 	}
 	data, err := json.Marshal(msg)
 	if err != nil {
+		// Log to stderr at minimum so users notice when their session
+		// can't be persisted. Previously this error was silently dropped
+		// (not even an _ assignment), so a marshal failure left the
+		// in-memory turn intact and the on-disk session missing the
+		// message — users discovered the loss only on next launch.
+		fmt.Fprintf(os.Stderr, "altcode: failed to marshal %s message for persistence: %v\n", role, err)
 		return
 	}
-	e.store.AddMessage(e.sessionID, role, data, e.model, 0, 0)
+	if _, err := e.store.AddMessage(e.sessionID, role, data, e.model, 0, 0); err != nil {
+		// Same rationale as the marshal branch — surface the failure
+		// instead of pretending the write succeeded.
+		fmt.Fprintf(os.Stderr, "altcode: failed to persist %s message: %v\n", role, err)
+	}
 
 	// Backfill session title on the first user message so the session
 	// switcher stops showing '(untitled)' for every row. We only write
@@ -504,7 +559,7 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 	intent := ClassifyIntent(input)
 
 	userMsg := provider.TextMessage("user", input)
-	e.messages = append(e.messages, userMsg)
+	e.appendMessageLocked(userMsg)
 	e.persistMessage("user", userMsg)
 
 	defer func() {
@@ -538,7 +593,7 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		stream, err := e.callProvider(ctx)
 		if err != nil {
 			// Reactive compact on overflow (fallback if pre-turn didn't catch it)
-			if isContextOverflow(err.Error()) && len(e.messages) > 4 {
+			if isContextOverflow(err.Error()) && e.messageCountLocked() > 4 {
 				e.Compact()
 				stream, err = e.callProvider(ctx)
 			}
@@ -562,12 +617,12 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 
 		if len(turn.ToolCalls) == 0 {
 			assistMsg := provider.TextMessage("assistant", turn.Text)
-			e.messages = append(e.messages, assistMsg)
+			e.appendMessageLocked(assistMsg)
 			e.persistMessage("assistant", assistMsg)
 
 			// Fire Stop hooks — may block completion
 			if reason := e.fireStopHooks(ctx); reason != "" {
-				e.messages = append(e.messages, provider.TextMessage("user", reason))
+				e.appendMessageLocked(provider.TextMessage("user", reason))
 				continue // loop back for another turn
 			}
 			return
@@ -584,11 +639,11 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 // a continuation prompt so the engine loop retries with the model.
 func (e *Engine) appendTruncatedAndContinue(turn *turnResult) {
 	assistMsg := provider.TextMessage("assistant", turn.Text)
-	e.messages = append(e.messages, assistMsg)
+	e.appendMessageLocked(assistMsg)
 	e.persistMessage("assistant", assistMsg)
 	contMsg := provider.TextMessage("user",
 		"Continue from where you left off.")
-	e.messages = append(e.messages, contMsg)
+	e.appendMessageLocked(contMsg)
 	e.persistMessage("user", contMsg)
 }
 
@@ -629,9 +684,11 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 		}
 	}
 
+	// Snapshot under the mutex so a concurrent /clear or /compact
+	// can't mutate the slice underneath the provider request.
 	req := &provider.Request{
 		Model:     e.model,
-		Messages:  e.messages,
+		Messages:  e.messagesSnapshotLocked(),
 		System:    system,
 		Tools:     e.toolSchemas(),
 		MaxTokens: 16384,
@@ -688,7 +745,7 @@ func (e *Engine) appendAssistantWithTools(turn *turnResult) {
 			Input: tc.Input,
 		})
 	}
-	e.messages = append(e.messages, provider.Message{Role: "assistant", Parts: parts})
+	e.appendMessageLocked(provider.Message{Role: "assistant", Parts: parts})
 }
 
 func (e *Engine) dispatchTools(
@@ -898,11 +955,11 @@ func (e *Engine) appendToolResults(toolCalls []collectedToolCall, results []tool
 		for i, tc := range toolCalls {
 			parts = append(parts, provider.NewToolResultPart(tc.ID, outputs[i]))
 		}
-		e.messages = append(e.messages, provider.ToolResultMessage(parts))
+		e.appendMessageLocked(provider.ToolResultMessage(parts))
 	} else {
 		// OpenAI-compatible: one role="tool" message per result
 		for i, tc := range toolCalls {
-			e.messages = append(e.messages, provider.Message{
+			e.appendMessageLocked(provider.Message{
 				Role: "tool",
 				Parts: []provider.ContentPart{
 					provider.NewToolResultPart(tc.ID, outputs[i]),
@@ -980,6 +1037,8 @@ const maxConsecutiveCompactions = 3
 // This is a byte-level safety check for the API's 20MB request ceiling,
 // which token-based estimates can miss when tool results contain dense data.
 func (e *Engine) messageBytes() int {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	total := 0
 	for _, m := range e.messages {
 		total += len(m.Content)
@@ -997,7 +1056,8 @@ const maxRequestBytes = 15 * 1024 * 1024
 // maybePreTurnCompact runs BEFORE sending a request to the provider.
 // Triggers on either token count (90% of window) or byte count (15MB).
 func (e *Engine) maybePreTurnCompact(ctx context.Context) {
-	tokens := compact.EstimateTokens(e.messages)
+	snap := e.messagesSnapshotLocked()
+	tokens := compact.EstimateTokens(snap)
 	limit := e.contextWindowSize()
 	bytes := e.messageBytes()
 	// Trigger at 90% of context window OR 15MB of raw bytes
@@ -1007,30 +1067,34 @@ func (e *Engine) maybePreTurnCompact(ctx context.Context) {
 	}
 
 	// Thrash detection: stop if we've compacted too many times consecutively.
-	// Note: previously this wrote to os.Stderr behind an ALTCODE_DEBUG gate,
-	// but stderr writes corrupt the TUI; the audit log is the right place.
 	if e.compactCount >= maxConsecutiveCompactions {
-		e.logCompaction("thrash-skip", len(e.messages), tokens, len(e.messages))
+		e.logCompaction("thrash-skip", len(snap), tokens, len(snap))
 		return
 	}
 
-	beforeMsgs := len(e.messages)
+	beforeMsgs := len(snap)
 	beforeTokens := tokens
 
 	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
 		Event: hooks.PreCompact, SessionID: e.sessionID,
 	})
 	summarizer := compact.NewSummarizer(e.provider, e.model)
-	compacted, err := summarizer.Compact(ctx, e.messages, 5)
+	compacted, err := summarizer.Compact(ctx, snap, 5)
 	if err != nil {
 		mc := compact.NewMicrocompactor(10)
+		e.msgMu.Lock()
 		e.messages = mc.Apply(e.messages)
-		e.logCompaction("micro", beforeMsgs, beforeTokens, len(e.messages))
+		afterMsgs := len(e.messages)
+		e.msgMu.Unlock()
+		e.logCompaction("micro", beforeMsgs, beforeTokens, afterMsgs)
 		e.compactCount++
 		return
 	}
+	e.msgMu.Lock()
 	e.messages = compacted
-	e.logCompaction("llm", beforeMsgs, beforeTokens, len(e.messages))
+	afterMsgs := len(e.messages)
+	e.msgMu.Unlock()
+	e.logCompaction("llm", beforeMsgs, beforeTokens, afterMsgs)
 	e.compactCount++
 }
 
@@ -1087,17 +1151,18 @@ func (e *Engine) maybeCompact(ctx context.Context) {
 	// guard to prevent oversized requests; post-tool compaction needs the
 	// same guard or large byte-heavy tool results (file dumps, screenshots,
 	// page snapshots) can blow past the byte cap with a low token estimate.
-	tokens := compact.EstimateTokens(e.messages)
+	snap := e.messagesSnapshotLocked()
+	tokens := compact.EstimateTokens(snap)
 	threshold := e.contextWindowSize() * 7 / 10 // 70% of context window
 	if e.cfg.CompactThreshold > 0 {
 		threshold = e.cfg.CompactThreshold
 	}
 	bytes := e.messageBytes()
-	if tokens < threshold && len(e.messages) < 100 && bytes < maxRequestBytes {
+	if tokens < threshold && len(snap) < 100 && bytes < maxRequestBytes {
 		return
 	}
 
-	beforeMsgs := len(e.messages)
+	beforeMsgs := len(snap)
 	beforeTokens := tokens
 
 	e.hooks.Fire(ctx, hooks.PreCompact, hooks.Input{
@@ -1106,16 +1171,22 @@ func (e *Engine) maybeCompact(ctx context.Context) {
 
 	// Try LLM-summarized compaction first (like Codex)
 	summarizer := compact.NewSummarizer(e.provider, e.model)
-	compacted, err := summarizer.Compact(ctx, e.messages, 5)
+	compacted, err := summarizer.Compact(ctx, snap, 5)
 	if err != nil {
 		// Fallback to mechanical compaction
 		mc := compact.NewMicrocompactor(20)
+		e.msgMu.Lock()
 		e.messages = mc.Apply(e.messages)
-		e.logCompaction("micro", beforeMsgs, beforeTokens, len(e.messages))
+		afterMsgs := len(e.messages)
+		e.msgMu.Unlock()
+		e.logCompaction("micro", beforeMsgs, beforeTokens, afterMsgs)
 		return
 	}
+	e.msgMu.Lock()
 	e.messages = compacted
-	e.logCompaction("llm", beforeMsgs, beforeTokens, len(e.messages))
+	afterMsgs := len(e.messages)
+	e.msgMu.Unlock()
+	e.logCompaction("llm", beforeMsgs, beforeTokens, afterMsgs)
 }
 
 func (e *Engine) fireStopHooks(ctx context.Context) string {
@@ -1345,7 +1416,7 @@ func (e *Engine) buildTurnSummary(intent TaskIntent) string {
 
 // logCompaction records a compaction event for debugging and audit.
 func (e *Engine) logCompaction(method string, beforeMsgs, beforeTokens, afterMsgs int) {
-	afterTokens := compact.EstimateTokens(e.messages)
+	afterTokens := compact.EstimateTokens(e.messagesSnapshotLocked())
 	if os.Getenv("ALTCODE_DEBUG") == "1" {
 		fmt.Fprintf(os.Stderr, "[debug] compaction (%s): %d→%d msgs, ~%d→~%d tokens\n",
 			method, beforeMsgs, afterMsgs, beforeTokens, afterTokens)
