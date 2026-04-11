@@ -15,7 +15,95 @@ func matchRule(rule Rule, toolName, pattern string) bool {
 		arg = pattern[idx+1:]
 	}
 
+	// Bash commands containing shell separators or substitution markers
+	// must be split into segments and EVERY segment must independently
+	// match an allow rule. Without this, a rule like "git status" would
+	// approve "git status; rm -rf ~" because the matcher only saw the
+	// first token. The wildcard rule "*" still matches anything.
+	if toolName == "bash" && rule.Pattern != "*" && hasShellSeparator(arg) {
+		segments := splitShellSegments(arg)
+		for _, seg := range segments {
+			seg = strings.TrimSpace(seg)
+			if seg == "" {
+				continue
+			}
+			if !globMatch(rule.Pattern, seg) {
+				return false
+			}
+		}
+		return len(segments) > 0
+	}
+
 	return globMatch(rule.Pattern, arg)
+}
+
+// hasShellSeparator reports whether s contains a shell command separator
+// or substitution marker that would let an attacker chain extra commands
+// past a permission check.
+func hasShellSeparator(s string) bool {
+	// Skip when the only "|" is inside a glob (e.g. {a,b|c}) — but in
+	// practice glob extensions don't use |, and `find . -name "*.go"` is
+	// fine because it doesn't use any separator.
+	for i := 0; i < len(s); i++ {
+		switch s[i] {
+		case ';':
+			return true
+		case '|':
+			return true
+		case '&':
+			// "&" alone is background; "&&" is and-list. Both bypass.
+			return true
+		case '`':
+			return true
+		case '\n':
+			return true
+		case '$':
+			if i+1 < len(s) && s[i+1] == '(' {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// splitShellSegments splits s on shell separators into individual
+// command segments. The split is naive — it doesn't honor quoting —
+// but the goal is conservative: if ANY split looks like a separate
+// command, every segment must be allowlisted.
+func splitShellSegments(s string) []string {
+	var segments []string
+	var current strings.Builder
+	flush := func() {
+		seg := current.String()
+		current.Reset()
+		if seg != "" {
+			segments = append(segments, seg)
+		}
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		switch c {
+		case ';', '\n':
+			flush()
+			continue
+		case '|':
+			// "||" or "|" both terminate a segment.
+			flush()
+			if i+1 < len(s) && s[i+1] == '|' {
+				i++
+			}
+			continue
+		case '&':
+			flush()
+			if i+1 < len(s) && s[i+1] == '&' {
+				i++
+			}
+			continue
+		}
+		current.WriteByte(c)
+	}
+	flush()
+	return segments
 }
 
 func globMatch(pattern, value string) bool {
