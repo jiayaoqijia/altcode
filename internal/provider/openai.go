@@ -219,7 +219,12 @@ func buildOpenAIRequest(req *Request) ([]byte, error) {
 	}
 
 	for _, m := range req.Messages {
-		msgs = append(msgs, toOpenAIMessage(m))
+		// toOpenAIMessages may return multiple openai messages for one
+		// altcode message — a user message containing N tool_result
+		// parts becomes N OpenAI tool messages. The previous code
+		// silently dropped all but the first result and the model
+		// then complained about an unmatched tool_call_id.
+		msgs = append(msgs, toOpenAIMessages(m)...)
 	}
 
 	var tools []openaiTool
@@ -248,9 +253,13 @@ func buildOpenAIRequest(req *Request) ([]byte, error) {
 	return json.Marshal(r)
 }
 
-func toOpenAIMessage(m Message) openaiMessage {
+// toOpenAIMessages converts an altcode Message to one or more OpenAI
+// messages. A user message holding N tool_result parts produces N
+// OpenAI `role: tool` messages — the previous single-message version
+// silently dropped all but the first.
+func toOpenAIMessages(m Message) []openaiMessage {
 	if len(m.Parts) == 0 {
-		return openaiMessage{Role: m.Role, Content: m.Content}
+		return []openaiMessage{{Role: m.Role, Content: m.Content}}
 	}
 
 	// Handle tool_use (assistant with tool calls)
@@ -273,23 +282,38 @@ func toOpenAIMessage(m Message) openaiMessage {
 			}
 		}
 		msg.ToolCalls = toolCalls
-		return msg
+		return []openaiMessage{msg}
 	}
 
-	// Handle tool_result (user sending back tool results)
-	// OpenAI expects role="tool" with tool_call_id, one message per result
-	// But we batch — return the first result; the engine should split these
+	// Handle tool_result (user sending back tool results).
+	// OpenAI expects role="tool" with tool_call_id, ONE message per
+	// result — fan out every tool_result part into its own message.
+	var out []openaiMessage
 	for _, p := range m.Parts {
 		if p.Type == "tool_result" {
-			return openaiMessage{
+			out = append(out, openaiMessage{
 				Role:       "tool",
 				Content:    p.Content,
 				ToolCallID: p.ToolUseID,
-			}
+			})
 		}
 	}
+	if len(out) > 0 {
+		return out
+	}
 
-	return openaiMessage{Role: m.Role, Content: m.Content}
+	return []openaiMessage{{Role: m.Role, Content: m.Content}}
+}
+
+// toOpenAIMessage is kept as a thin shim for any callers expecting a
+// single message; new callers should prefer toOpenAIMessages so they
+// don't drop multi-tool-result batches.
+func toOpenAIMessage(m Message) openaiMessage {
+	msgs := toOpenAIMessages(m)
+	if len(msgs) == 0 {
+		return openaiMessage{Role: m.Role, Content: m.Content}
+	}
+	return msgs[0]
 }
 
 // --- SSE processing ---
@@ -409,6 +433,14 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 		}
 	}
 
+	// Some OpenAI-compatible providers return finish_reason="stop"
+	// (or no finish_reason at all) on a turn that includes tool_calls.
+	// The non-stream path was already fixed; mirror it here so the
+	// engine sees stop_reason="tool_use" and dispatches the tools
+	// instead of treating the turn as finished.
+	if (stopReason == "stop" || stopReason == "") && len(toolState) > 0 {
+		stopReason = "tool_use"
+	}
 	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
 }
 

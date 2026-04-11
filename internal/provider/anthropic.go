@@ -106,10 +106,18 @@ func buildAnthropicRequest(req *Request) ([]byte, error) {
 			CacheControl: s.CacheControl,
 		}
 	}
+	maxTokens := req.MaxTokens
+	if maxTokens <= 0 {
+		// Anthropic /v1/messages REQUIRES max_tokens and rejects the
+		// request with 400 when it's missing or zero. Default to a
+		// reasonable cap so a forgetful caller doesn't get a confusing
+		// 'invalid_request_error' instead of a working response.
+		maxTokens = 4096
+	}
 	ar := anthropicRequest{
 		Model:       req.Model,
 		Messages:    msgs,
-		MaxTokens:   req.MaxTokens,
+		MaxTokens:   maxTokens,
 		Stream:      true,
 		Temperature: req.Temperature,
 		Thinking:    req.Thinking,
