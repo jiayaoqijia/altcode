@@ -160,19 +160,26 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 			defer stdin.Close()
 		}
 
-		// Drain stderr in background
+		// Drain stderr in background. Bigger buffer (4 MiB max token)
+		// because external agents emit long JSON blobs and stack traces
+		// that overflow the 1 MiB default. Surface scanner errors as
+		// events so they don't disappear silently.
 		go func() {
 			sc := bufio.NewScanner(stderr)
-			sc.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 			for sc.Scan() {
 				trySend(events, AgentEvent{Type: EventError, Content: sc.Text()})
 			}
+			if err := sc.Err(); err != nil {
+				trySend(events, AgentEvent{Type: EventError, Content: "stderr scan error: " + err.Error()})
+			}
 		}()
 
-		// Stream stdout line by line
+		// Stream stdout line by line. Same buffer + error reporting
+		// as the stderr drain above.
 		var output strings.Builder
 		scanner := bufio.NewScanner(stdout)
-		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+		scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 		for scanner.Scan() {
 			line := scanner.Text()
 			output.WriteString(line + "\n")
@@ -189,6 +196,12 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 			trySend(lines, line)
 			// Typed event
 			trySend(events, AgentEvent{Type: EventText, Content: line})
+		}
+
+		// Surface scanner errors before Wait so the caller knows
+		// stdout was truncated, not just that the process exited weird.
+		if err := scanner.Err(); err != nil {
+			trySend(events, AgentEvent{Type: EventError, Content: "stdout scan error: " + err.Error()})
 		}
 
 		exitCode := 0
@@ -241,7 +254,18 @@ func WaitAll(streams map[string]*ExternalAgentStream, timeout time.Duration) map
 			// Drain lines (they're consumed by TUI, but drain here as fallback)
 			for range s.Lines {
 			}
-			r := <-s.Result
+			// Check the receive ok flag — without this, if the
+			// producer ever closes Result without sending (panic
+			// path, ctx cancel before Wait completes) WaitAll would
+			// silently store a zero-value ExternalAgentResult and
+			// callers would treat it as a real successful run.
+			r, ok := <-s.Result
+			if !ok {
+				r = ExternalAgentResult{
+					Role: role, ExitCode: -1,
+					Error: fmt.Errorf("agent %s closed without result", role),
+				}
+			}
 			mu.Lock()
 			results[role] = r
 			mu.Unlock()
