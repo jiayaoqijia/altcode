@@ -19,10 +19,26 @@ type filePopup struct {
 
 // extractAtQuery finds the last @-mention in text and returns the
 // query portion after it. Returns ("", false) when no active mention.
+//
+// Skips @ characters that look like they're inside an email address
+// (preceded by an alphanumeric or '.'). Otherwise typing
+// "ping user@example.com about" pops the file completer up because
+// the LAST @ matches `user@example.com`. Real file mentions are
+// preceded by whitespace or are at the start of the input.
 func extractAtQuery(text string) (string, bool) {
 	idx := strings.LastIndex(text, "@")
 	if idx < 0 {
 		return "", false
+	}
+	// Reject email-like @: previous byte is a word char or '.'.
+	if idx > 0 {
+		prev := text[idx-1]
+		if prev == '.' ||
+			(prev >= 'a' && prev <= 'z') ||
+			(prev >= 'A' && prev <= 'Z') ||
+			(prev >= '0' && prev <= '9') {
+			return "", false
+		}
 	}
 	// @ at end of string means user just typed it.
 	after := text[idx+1:]

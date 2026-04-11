@@ -222,17 +222,37 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	case "ctrl+c":
 		return a.handleCtrlCKey()
 	case "a", "1":
-		if strings.TrimSpace(a.startupPrompt) != "" {
+		// Only intercept the keystroke when the user has NO existing
+		// input AND no messages have been exchanged. Otherwise the
+		// first letter of any prompt that starts with 'a' (or any '1')
+		// would be silently swallowed by the API-key setup. Without
+		// this guard, typing 'add a function' opened the anthropic
+		// setup wizard instead of writing to the input box.
+		if a.startupPromptActive() && a.input.Value() == "" {
 			a.beginSetup("anthropic")
 			return a, nil, true
 		}
 	case "o", "2":
-		if strings.TrimSpace(a.startupPrompt) != "" {
+		if a.startupPromptActive() && a.input.Value() == "" {
 			a.beginSetup("openai")
 			return a, nil, true
 		}
 	}
 	return a, nil, false
+}
+
+// startupPromptActive reports whether the API-key prompt is in
+// effect — i.e. there's a startup prompt set AND the conversation
+// hasn't begun. Used to gate the single-key setup shortcuts so they
+// don't hijack the user's first keystroke after auth is configured.
+func (a *App) startupPromptActive() bool {
+	if strings.TrimSpace(a.startupPrompt) == "" {
+		return false
+	}
+	if len(a.messages) > 0 {
+		return false
+	}
+	return true
 }
 
 // handleEscKey implements the multi-step Esc behavior.
