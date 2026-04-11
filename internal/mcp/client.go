@@ -20,13 +20,14 @@ type callResult struct {
 
 // Client communicates with an MCP server via JSON-RPC 2.0 over stdio.
 type Client struct {
-	cmd     *exec.Cmd
-	stdin   io.WriteCloser
-	scanner *bufio.Scanner
-	nextID  atomic.Int64
-	pending map[int64]chan callResult
-	mu      sync.Mutex
-	done    chan struct{}
+	cmd      *exec.Cmd
+	stdin    io.WriteCloser
+	stdinMu  sync.Mutex // serializes JSON-RPC line writes
+	scanner  *bufio.Scanner
+	nextID   atomic.Int64
+	pending  map[int64]chan callResult
+	mu       sync.Mutex
+	done     chan struct{}
 }
 
 type jsonRPCRequest struct {
@@ -68,10 +69,16 @@ func Connect(ctx context.Context, command string, args []string, env []string) (
 		return nil, fmt.Errorf("mcp: start %q: %w", command, err)
 	}
 
+	// Default scanner buffer is 64KiB which silently truncates large
+	// MCP responses (e.g., grep results, file lists, screenshot blobs).
+	// Bump to 4 MiB so realistic tool replies don't drop the stream.
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 4*1024*1024)
+
 	c := &Client{
 		cmd:     cmd,
 		stdin:   stdin,
-		scanner: bufio.NewScanner(stdout),
+		scanner: scanner,
 		pending: make(map[int64]chan callResult),
 		done:    make(chan struct{}),
 	}
@@ -98,7 +105,13 @@ func (c *Client) readLoop() {
 		}
 		c.mu.Unlock()
 		if ok {
-			ch <- callResult{Result: resp.Result, Error: resp.Error}
+			// Non-blocking send: if the original Call() already
+			// returned (ctx cancel, timeout) the buffered slot may
+			// be full or unattended. Don't deadlock the read loop.
+			select {
+			case ch <- callResult{Result: resp.Result, Error: resp.Error}:
+			default:
+			}
 		}
 	}
 }
@@ -125,8 +138,23 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 	c.pending[id] = ch
 	c.mu.Unlock()
 
-	if _, err := c.stdin.Write(data); err != nil {
-		return nil, fmt.Errorf("mcp: write: %w", err)
+	// Always remove the pending entry on the way out so a write failure,
+	// ctx cancel, or unexpected return path doesn't leak the channel
+	// + map slot. Without this, late responses pile up in readLoop.
+	cleanup := func() {
+		c.mu.Lock()
+		delete(c.pending, id)
+		c.mu.Unlock()
+	}
+
+	// Serialize stdin writes — concurrent Calls would otherwise
+	// interleave JSON-RPC lines mid-message and corrupt the stream.
+	c.stdinMu.Lock()
+	_, werr := c.stdin.Write(data)
+	c.stdinMu.Unlock()
+	if werr != nil {
+		cleanup()
+		return nil, fmt.Errorf("mcp: write: %w", werr)
 	}
 
 	select {
@@ -137,8 +165,10 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 		}
 		return cr.Result, nil
 	case <-ctx.Done():
+		cleanup()
 		return nil, ctx.Err()
 	case <-c.done:
+		cleanup()
 		return nil, fmt.Errorf("mcp: connection closed")
 	}
 }
