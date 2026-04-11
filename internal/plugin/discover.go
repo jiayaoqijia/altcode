@@ -40,9 +40,42 @@ func Discover(dirs ...string) ([]*Plugin, error) {
 }
 
 func discoverInDir(dir string) ([]*Plugin, error) {
+	return walkPluginDir(dir, 0)
+}
+
+// maxPluginDepth caps how deep we descend looking for plugin manifests.
+// Claude Code's marketplace layout is cache/<owner>/<repo>/.claude-plugin/,
+// so depth 3 covers it with margin. Without a cap, a symlink loop or a
+// huge tree could spin forever.
+const maxPluginDepth = 3
+
+// walkPluginDir descends into dir looking for plugin manifests. A directory
+// IS a plugin if it contains .altcode-plugin/plugin.json or
+// .claude-plugin/plugin.json — in that case we add it and stop descending.
+// Otherwise we recurse one level deeper, up to maxPluginDepth, to handle
+// nested layouts like ~/.claude/plugins/cache/<owner>/<repo>/.
+//
+// Directories without a manifest are silently skipped — Claude Code's
+// `cache`, `data`, and `marketplaces` siblings used to surface as warnings
+// and frighten users into thinking their plugins were broken.
+func walkPluginDir(dir string, depth int) ([]*Plugin, error) {
+	if depth > maxPluginDepth {
+		return nil, nil
+	}
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		return nil, nil
 	}
+
+	// If THIS directory itself has a manifest, treat it as the plugin.
+	if hasPluginManifest(dir) {
+		p, err := Load(dir)
+		if err != nil {
+			warn("plugin: load %s failed: %v", dir, err)
+			return nil, nil
+		}
+		return []*Plugin{p}, nil
+	}
+
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return nil, err
@@ -52,15 +85,29 @@ func discoverInDir(dir string) ([]*Plugin, error) {
 		if !e.IsDir() {
 			continue
 		}
-		path := filepath.Join(dir, e.Name())
-		p, err := Load(path)
-		if err != nil {
-			warn("plugin: load %s failed: %v", path, err)
+		// Skip dotfiles — .git, .DS_Store-like dirs, .claude-plugin
+		// itself shouldn't be re-walked.
+		if strings.HasPrefix(e.Name(), ".") {
 			continue
 		}
-		plugins = append(plugins, p)
+		child := filepath.Join(dir, e.Name())
+		nested, err := walkPluginDir(child, depth+1)
+		if err != nil {
+			warn("plugin: scan %s failed: %v", child, err)
+			continue
+		}
+		plugins = append(plugins, nested...)
 	}
 	return plugins, nil
+}
+
+func hasPluginManifest(dir string) bool {
+	for _, name := range []string{".altcode-plugin", ".claude-plugin"} {
+		if _, err := os.Stat(filepath.Join(dir, name, "plugin.json")); err == nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Load reads a single plugin from a directory.
@@ -107,6 +154,25 @@ func safeJoin(base, sub string) (string, error) {
 }
 
 func loadCommands(pluginDir string, m *Manifest) ([]*command.Command, error) {
+	// Marketplace format: explicit list of relative file paths
+	// (e.g. ["./commands/setup.md", "./commands/configure.md"]).
+	if len(m.CommandFiles) > 0 {
+		var out []*command.Command
+		for _, rel := range m.CommandFiles {
+			full, err := safeJoin(pluginDir, rel)
+			if err != nil {
+				return nil, fmt.Errorf("plugin command file %q: %w", rel, err)
+			}
+			cmd, err := command.ParseFile(full)
+			if err != nil {
+				return nil, fmt.Errorf("plugin command file %q: %w", rel, err)
+			}
+			out = append(out, cmd)
+		}
+		return out, nil
+	}
+
+	// Native format: directory of .md files.
 	sub := "commands"
 	if m.Commands != "" {
 		sub = m.Commands
@@ -119,6 +185,21 @@ func loadCommands(pluginDir string, m *Manifest) ([]*command.Command, error) {
 }
 
 func loadAgents(pluginDir string, m *Manifest) ([]*agent.Agent, error) {
+	if len(m.AgentFiles) > 0 {
+		var out []*agent.Agent
+		for _, rel := range m.AgentFiles {
+			full, err := safeJoin(pluginDir, rel)
+			if err != nil {
+				return nil, fmt.Errorf("plugin agent file %q: %w", rel, err)
+			}
+			ag, err := agent.ParseFile(full)
+			if err != nil {
+				return nil, fmt.Errorf("plugin agent file %q: %w", rel, err)
+			}
+			out = append(out, ag)
+		}
+		return out, nil
+	}
 	sub := "agents"
 	if m.Agents != "" {
 		sub = m.Agents
@@ -133,7 +214,15 @@ func loadAgents(pluginDir string, m *Manifest) ([]*agent.Agent, error) {
 func loadHooks(pluginDir string, m *Manifest, out map[string][]config.HookMatcherConfig) {
 	hookFile := filepath.Join(pluginDir, "hooks", "hooks.json")
 	if m.Hooks != "" {
-		hookFile = filepath.Join(pluginDir, m.Hooks)
+		// Validate the manifest-supplied path stays inside the plugin
+		// directory. Without safeJoin, a malicious plugin could set
+		// "hooks": "../../../etc/passwd" and we'd happily read it.
+		joined, err := safeJoin(pluginDir, m.Hooks)
+		if err != nil {
+			warn("plugin %s: hooks path: %v", pluginDir, err)
+			return
+		}
+		hookFile = joined
 	}
 
 	data, err := os.ReadFile(hookFile)
