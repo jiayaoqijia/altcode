@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"regexp"
 	"strings"
@@ -98,7 +99,9 @@ func Default() *Config {
 }
 
 // LoadFile reads a JSONC config file, strips comments, expands env vars,
-// and merges the result on top of the defaults.
+// and merges the result on top of the defaults. Validates simple
+// constraints (positive numbers) so a typo doesn't silently fall
+// back to a default value.
 func LoadFile(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -112,17 +115,35 @@ func LoadFile(path string) (*Config, error) {
 	if err := json.Unmarshal([]byte(expanded), cfg); err != nil {
 		return nil, err
 	}
+
+	// Reject obviously-bad values up front. Negative limits silently
+	// turning into 'use default' is the wrong default — the user
+	// should know they wrote 0 or -1.
+	if cfg.ContextWindow < 0 {
+		return nil, fmt.Errorf("config %s: context_window must be >= 0 (got %d)", path, cfg.ContextWindow)
+	}
+	if cfg.CompactThreshold < 0 {
+		return nil, fmt.Errorf("config %s: compact_threshold must be >= 0 (got %d)", path, cfg.CompactThreshold)
+	}
 	return cfg, nil
 }
 
 // ExpandEnv replaces $VAR_NAME patterns with values from the environment.
-// Variables that are not set are left as an empty string.
+// Unset variables warn to stderr (because the alternative is silently
+// turning required-but-templated fields like API keys into empty
+// strings, then loading 'successfully' with broken auth) and still
+// expand to "" so the JSON remains valid.
 func ExpandEnv(s string) string {
 	re := regexp.MustCompile(`\$([A-Z_][A-Z0-9_]*)`)
+	warned := map[string]bool{}
 	return re.ReplaceAllStringFunc(s, func(match string) string {
 		name := match[1:] // strip leading '$'
 		if val, ok := os.LookupEnv(name); ok {
 			return val
+		}
+		if !warned[name] {
+			fmt.Fprintf(os.Stderr, "altcode: env var $%s referenced in config but not set; expanding to empty\n", name)
+			warned[name] = true
 		}
 		return ""
 	})
