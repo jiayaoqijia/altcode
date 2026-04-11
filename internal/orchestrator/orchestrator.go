@@ -144,19 +144,35 @@ func (s *Session) RunParallel(ctx context.Context, prompt string) ([]Finding, er
 				return
 			}
 
-			var text string
+			var text, errMsg string
 			for ev := range eng.Run(ctx, fullPrompt) {
-				if ev.Type == event.TextDelta {
+				switch ev.Type {
+				case event.TextDelta:
 					text += ev.Text
+				case event.ErrorEvent:
+					errMsg = ev.Error
 				}
 			}
 
 			mu.Lock()
-			findings = append(findings, Finding{
-				Model: assignment.Model, Role: assignment.Role,
-				Type: classifyResponse(text), Content: text,
-				Confidence: 0.8,
-			})
+			if errMsg != "" {
+				// Surface model errors as actual error findings instead
+				// of letting an empty `text` get classified as
+				// "suggestion" by the verdict synthesizer. The previous
+				// loop only captured TextDelta and silently scored
+				// failed turns as if they had agreed.
+				findings = append(findings, Finding{
+					Model: assignment.Model, Role: assignment.Role,
+					Type: "error", Content: errMsg,
+					Confidence: 0.0,
+				})
+			} else {
+				findings = append(findings, Finding{
+					Model: assignment.Model, Role: assignment.Role,
+					Type: classifyResponse(text), Content: text,
+					Confidence: 0.8,
+				})
+			}
 			mu.Unlock()
 		}(a)
 	}

@@ -29,7 +29,15 @@ func InjectWorkspaceContext(
 	filename := targetFile(provider)
 	path := filepath.Join(workDir, filename)
 
-	existing, _ := os.ReadFile(path)
+	// Distinguish "missing" from "unreadable" — if CLAUDE.md exists
+	// but is unreadable (permissions, busy fd, encrypted volume),
+	// the previous _ = err blanket made us write a fresh file and
+	// CLOBBER the user's existing content. Now: missing → empty
+	// merge base, real read errors → bail.
+	existing, err := os.ReadFile(path)
+	if err != nil && !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", path, err)
+	}
 	// Strip any prior "# Workspace Context" block we wrote ourselves
 	// before appending the new one. The previous code appended
 	// unconditionally so every Inject call grew CLAUDE.md / AGENTS.md

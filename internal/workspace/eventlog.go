@@ -70,18 +70,30 @@ func (l *EventLog) Emit(ev Event) error {
 	if err != nil {
 		return fmt.Errorf("open event log: %w", err)
 	}
-	defer func() {
-		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
-		f.Close()
-	}()
 	if err := syscall.Flock(
 		int(f.Fd()), syscall.LOCK_EX,
 	); err != nil {
+		f.Close()
 		return fmt.Errorf("flock event log: %w", err)
 	}
-	_, err = f.WriteString(line)
-	if err != nil {
+	if _, err := f.WriteString(line); err != nil {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+		f.Close()
 		return fmt.Errorf("write event: %w", err)
+	}
+	// Sync + Close errors must be checked on the write path. The
+	// previous defer-and-discard pattern returned nil even when the
+	// fsync failed (NFS, FUSE, quota exceeded), so callers thought
+	// the event was durable when it had silently been lost. Sync
+	// before unlocking so concurrent readers see consistent state.
+	if err := f.Sync(); err != nil {
+		syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+		f.Close()
+		return fmt.Errorf("sync event log: %w", err)
+	}
+	syscall.Flock(int(f.Fd()), syscall.LOCK_UN) //nolint:errcheck
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("close event log: %w", err)
 	}
 	return nil
 }

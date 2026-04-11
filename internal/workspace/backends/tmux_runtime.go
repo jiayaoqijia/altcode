@@ -125,6 +125,7 @@ func (t *TmuxRuntime) Attach(
 	go func() {
 		defer close(ch)
 		var lastLen int
+		var transientErrs int
 		ticker := time.NewTicker(500 * time.Millisecond)
 		defer ticker.Stop()
 		for {
@@ -148,8 +149,24 @@ func (t *TmuxRuntime) Attach(
 					"-p", "-S", "-",
 				)
 				if err != nil {
-					return
+					// Surface the failure on the channel so the user
+					// sees WHY the pane went dark instead of staring at
+					// a frozen view. The previous silent return left
+					// users unable to tell whether the agent died,
+					// stuck, or the stream just broke. Tolerate a few
+					// transient errors before giving up — tmux race
+					// during resize/kill is common.
+					transientErrs++
+					select {
+					case ch <- fmt.Sprintf("[stream error: %v]", err):
+					default:
+					}
+					if transientErrs >= 3 {
+						return
+					}
+					continue
 				}
+				transientErrs = 0
 				lines := strings.Split(out, "\n")
 				if len(lines) < lastLen {
 					lastLen = 0 // scrollback reset

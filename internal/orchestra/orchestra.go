@@ -163,7 +163,18 @@ func runPhase(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, priorOutp
 	}
 
 	for _, ag := range phase.Agents {
-		InjectContext(p.WorkDir, ag.Backend, ag.Role, p.Task, priorOutputs)
+		// Surface InjectContext failures via a phase event so the
+		// user knows the agent is launching with stale or missing
+		// CLAUDE.md/AGENTS.md context. Previously the error was
+		// silently dropped and agents produced confidently wrong
+		// work with no indication anything was off.
+		if err := InjectContext(p.WorkDir, ag.Backend, ag.Role, p.Task, priorOutputs); err != nil {
+			trySendEventCtx(ctx, p.Events, PhaseEvent{
+				Phase: phase.Name, Role: ag.Role,
+				Type: KindError,
+				Text: fmt.Sprintf("context injection failed: %v", err),
+			})
+		}
 
 		prompt := expandPrompt(ag.Prompt, p.Task, priorOutputs)
 
@@ -215,7 +226,15 @@ func runPhaseParallel(ctx context.Context, p RunParams, phase *wfdef.PhaseDef, p
 	// Inject context sequentially BEFORE launching goroutines to avoid file races
 	prompts := make(map[string]string, len(phase.Agents))
 	for _, ag := range phase.Agents {
-		InjectContext(p.WorkDir, ag.Backend, ag.Role, p.Task, priorOutputs)
+		// Same surfacing as the sequential path: don't silently
+		// launch agents with stale context.
+		if err := InjectContext(p.WorkDir, ag.Backend, ag.Role, p.Task, priorOutputs); err != nil {
+			trySendEventCtx(ctx, p.Events, PhaseEvent{
+				Phase: phase.Name, Role: ag.Role,
+				Type: KindError,
+				Text: fmt.Sprintf("context injection failed: %v", err),
+			})
+		}
 		prompts[ag.Role] = expandPrompt(ag.Prompt, p.Task, priorOutputs)
 	}
 

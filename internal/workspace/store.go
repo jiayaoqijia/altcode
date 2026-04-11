@@ -159,16 +159,26 @@ func (s *Store) SendMessage(ctx context.Context, sessionID, role, message string
 	if !ok {
 		return fmt.Errorf("SendMessage: no agent with role %q in session %s", role, sessionID)
 	}
-	// Append to context.md so it's visible on next spawn
+	// Append to context.md so it's visible on next spawn. This is a
+	// durability-critical write — operator instructions like
+	// "stop, don't delete that file" must reach the agent on its
+	// next turn. Sync + check Close errors so a failed flush isn't
+	// silently swallowed by a defer.
 	ctxPath := filepath.Join(s.root, sessionID, "context.md")
 	f, err := os.OpenFile(ctxPath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
 	if err != nil {
 		return fmt.Errorf("SendMessage: open context.md: %w", err)
 	}
-	defer f.Close()
-	_, err = fmt.Fprintf(f, "\n## Operator Message to %s\n\n%s\n", role, message)
-	if err != nil {
+	if _, err := fmt.Fprintf(f, "\n## Operator Message to %s\n\n%s\n", role, message); err != nil {
+		f.Close()
 		return fmt.Errorf("SendMessage: write context.md: %w", err)
+	}
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return fmt.Errorf("SendMessage: sync context.md: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("SendMessage: close context.md: %w", err)
 	}
 	// Log to activity JSONL
 	return s.AppendActivity(sessionID, map[string]any{

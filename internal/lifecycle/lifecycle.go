@@ -64,8 +64,17 @@ func (m *Manager) Run(
 		select {
 		case <-ctx.Done():
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			if err := advanceCleanup(cleanupCtx, sess, m.plugins); err != nil {
-				m.log.Error("cleanup on cancel", "err", err, "id", sess.ID)
+			// Take sess.mu around the cleanup mutation just like the
+			// normal Advance path does. The previous cleanup-on-cancel
+			// path I added earlier mutated rec.WorktreePath /
+			// sess.Status without the lock, racing with concurrent
+			// SaveSession and wsctl readers. go test -race would catch
+			// it under SIGINT mid-session.
+			sess.Lock()
+			cleanupErr := advanceCleanup(cleanupCtx, sess, m.plugins)
+			sess.Unlock()
+			if cleanupErr != nil {
+				m.log.Error("cleanup on cancel", "err", cleanupErr, "id", sess.ID)
 			}
 			if err := m.store.SaveSession(sess); err != nil {
 				m.log.Error("save on cancel", "err", err, "id", sess.ID)
