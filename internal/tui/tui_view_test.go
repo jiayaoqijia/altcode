@@ -863,6 +863,38 @@ func TestSlashCommandNames_CoversAllBuiltins(t *testing.T) {
 	}
 }
 
+// The Ctrl+K palette and slash-completer must list the same set of
+// builtin commands so 'docter' filter in the palette finds /doctor.
+// Discovered hands-on when /doctor was reachable via direct typing
+// but invisible in the palette because overlay.go's buildPaletteCommands
+// hadn't been kept in sync with handleBuiltinCommand.
+func TestPaletteBuiltins_MatchSlashCommandNames(t *testing.T) {
+	app := New(nil, DefaultTheme, "test", "")
+	slash := make(map[string]bool, 64)
+	for _, n := range app.slashCommandNames() {
+		slash[n] = true
+	}
+	paletteBuiltins := buildPaletteCommands(nil)
+	have := make(map[string]bool, len(paletteBuiltins))
+	for _, p := range paletteBuiltins {
+		have[p.Name] = true
+	}
+	// Every slashCommandNames entry should appear in the palette,
+	// EXCEPT a tiny set of internal aliases that wouldn't make sense
+	// as a discoverable picker entry.
+	skip := map[string]bool{
+		"/exit": true, // alias for /quit
+	}
+	for name := range slash {
+		if skip[name] {
+			continue
+		}
+		if !have[name] {
+			t.Errorf("palette buildPaletteCommands missing %q — Ctrl+K filter won't find it", name)
+		}
+	}
+}
+
 // Regression guard for the "a lot of timeout" user complaint: running
 // tools must NOT render the word "timeout" in their elapsed label. Users
 // read "⟳ grep Running… (4s · timeout 2m)" on every concurrent tool and
