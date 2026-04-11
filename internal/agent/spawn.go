@@ -74,6 +74,12 @@ func SpawnWithOptions(
 		messages = append(messages, provider.TextMessage("user",
 			"You are a newly spawned agent. The prior conversation was forked from your parent. Treat the next message as your new task."))
 	case ForkLastNTurns:
+		// A negative or zero ForkTurns previously caused make(slice, neg)
+		// to panic ("makeslice: len out of range") on the engine
+		// goroutine, killing the whole session. Treat <=0 as "no fork".
+		if opts.ForkTurns <= 0 {
+			break
+		}
 		src := parent.Messages()
 		n := opts.ForkTurns * 2 // approximate: each turn = user + assistant
 		if n > len(src) {
