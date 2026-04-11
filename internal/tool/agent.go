@@ -110,6 +110,13 @@ func (t *agentTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 	defer cancel()
 
 	cmd := exec.CommandContext(timeoutCtx, argv[0], argv[1:]...)
+	// Subagents (claude, codex, altcode) commonly fork their own
+	// children — shell wrappers, MCP servers, LSPs. Without a process
+	// group, exec.CommandContext only kills the direct child on
+	// timeout, leaking the grandchildren. Reuse the same helper as
+	// internal/tool/bash.go.
+	configureProcessGroup(cmd)
+	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
