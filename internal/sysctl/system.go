@@ -1,6 +1,7 @@
 package sysctl
 
 import (
+	"sort"
 	"strings"
 
 	"github.com/altcode-ai/altcode/internal/config"
@@ -101,15 +102,27 @@ type SkillInfo struct {
 }
 
 // SkillsSection builds a compact system prompt section listing available skills.
-// Only includes name and file path — the model reads SKILL.md on demand.
-// This keeps the system prompt small for faster first-token latency.
+// Includes name, description (so the model can pick the right one without
+// reading every SKILL.md first), and file path. Sorted by name so the
+// rendered prompt is byte-stable across runs — without this, map-iteration
+// order in skill discovery makes prompt diffs noisy and breaks caching.
 func SkillsSection(skills []SkillInfo) string {
-	var sb strings.Builder
-	sb.WriteString("# Skills\n\nTo use a skill: read its SKILL.md with the read tool, then follow its instructions.\n\n")
+	sorted := make([]SkillInfo, len(skills))
+	copy(sorted, skills)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		return sorted[i].Name < sorted[j].Name
+	})
 
-	for _, s := range skills {
+	var sb strings.Builder
+	sb.WriteString("# Skills\n\nTo use a skill: read its file at the listed path with the read tool, then follow its instructions.\n\n")
+
+	for _, s := range sorted {
 		sb.WriteString("- ")
 		sb.WriteString(s.Name)
+		if s.Description != "" {
+			sb.WriteString(" — ")
+			sb.WriteString(s.Description)
+		}
 		if s.Path != "" {
 			sb.WriteString(" → ")
 			sb.WriteString(s.Path)
