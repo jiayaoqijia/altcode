@@ -24,8 +24,12 @@ type TurnCheckpoint struct {
 }
 
 // WriteCheckpoint writes a checkpoint file to {dir}/turn-{NNN}.json.
+//
+// Checkpoints contain session/worktree metadata — tighten permissions
+// to 0o700 for the directory and 0o600 for individual files so other
+// local users can't snoop on in-progress session state.
 func WriteCheckpoint(dir string, cp TurnCheckpoint) error {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir checkpoints: %w", err)
 	}
 	name := fmt.Sprintf("turn-%03d.json", cp.Turn)
@@ -36,11 +40,15 @@ func WriteCheckpoint(dir string, cp TurnCheckpoint) error {
 	}
 	// Atomic write: tmp + rename (consistent with store.SaveSession)
 	tmp := p + ".tmp"
-	if err := os.WriteFile(tmp, data, 0o644); err != nil {
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return fmt.Errorf("write checkpoint tmp: %w", err)
 	}
 	if err := os.Rename(tmp, p); err != nil {
-		os.Remove(tmp)
+		// Cleanup tmp best-effort. If removal fails, wrap both errors
+		// so operators can see what actually happened on disk.
+		if rmErr := os.Remove(tmp); rmErr != nil {
+			return fmt.Errorf("rename checkpoint: %w (also failed to remove temp %s: %v)", err, tmp, rmErr)
+		}
 		return fmt.Errorf("rename checkpoint: %w", err)
 	}
 	return nil
