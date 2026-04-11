@@ -80,18 +80,24 @@ func (c *Client) readLoop() {
 }
 
 // dispatch routes an incoming message to the right handler.
+//
+// Notification vs response is determined by ID PRESENCE (msg.ID == nil),
+// not by ID value. JSON-RPC 2.0 allows id=0 as a valid request id;
+// the previous code conflated id=0 with "no id" and dropped any
+// server-originated request that happened to use id 0.
 func (c *Client) dispatch(msg *rpcMessage) {
 	// Notification from server (has method, no id).
-	if msg.Method != "" && msg.ID == 0 {
+	if msg.Method != "" && msg.ID == nil {
 		c.handleNotification(msg)
 		return
 	}
 	// Response to our request (has id, no method).
-	if msg.ID != 0 && msg.Method == "" {
+	if msg.ID != nil && msg.Method == "" {
+		id := *msg.ID
 		c.mu.Lock()
-		ch, ok := c.pending[msg.ID]
+		ch, ok := c.pending[id]
 		if ok {
-			delete(c.pending, msg.ID)
+			delete(c.pending, id)
 		}
 		c.mu.Unlock()
 		if ok {
@@ -100,8 +106,8 @@ func (c *Client) dispatch(msg *rpcMessage) {
 		return
 	}
 	// Server request (has both) -- respond with empty success.
-	if msg.Method != "" && msg.ID != 0 {
-		c.respondEmpty(msg.ID)
+	if msg.Method != "" && msg.ID != nil {
+		c.respondEmpty(*msg.ID)
 	}
 }
 
@@ -126,7 +132,7 @@ func (c *Client) handleNotification(msg *rpcMessage) {
 func (c *Client) respondEmpty(id int64) {
 	resp := &rpcMessage{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      &id,
 		Result:  json.RawMessage("null"),
 	}
 	_ = writeMessage(c.stdin, resp)
@@ -193,7 +199,7 @@ func newRequest(id int64, method string, params any) (*rpcMessage, error) {
 	}
 	return &rpcMessage{
 		JSONRPC: "2.0",
-		ID:      id,
+		ID:      &id,
 		Method:  method,
 		Params:  raw,
 	}, nil

@@ -58,13 +58,30 @@ type Client struct {
 }
 
 // rpcMessage is the JSON-RPC 2.0 wire format used by LSP.
+//
+// ID is a pointer so we can distinguish "id field absent" (notification)
+// from "id field present and zero" (a valid request/response). The
+// previous int64+omitempty form treated id=0 as "no id" and routed
+// any server-originated request with id 0 as a notification, dropping
+// it. Client requests start their ids at 1 via nextID.Add so the
+// client side is unaffected.
 type rpcMessage struct {
 	JSONRPC string          `json:"jsonrpc"`
-	ID      int64           `json:"id,omitempty"`
+	ID      *int64          `json:"id,omitempty"`
 	Method  string          `json:"method,omitempty"`
 	Params  json.RawMessage `json:"params,omitempty"`
 	Result  json.RawMessage `json:"result,omitempty"`
 	Error   *rpcError       `json:"error,omitempty"`
+}
+
+// idValue safely dereferences msg.ID, returning 0 when nil. Use this
+// only when you've already established the message has an id (e.g.
+// inside the response branch of dispatch).
+func (m *rpcMessage) idValue() int64 {
+	if m == nil || m.ID == nil {
+		return 0
+	}
+	return *m.ID
 }
 
 // rpcError is a JSON-RPC 2.0 error object.

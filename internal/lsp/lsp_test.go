@@ -10,9 +10,10 @@ import (
 )
 
 func TestWriteMessageFraming(t *testing.T) {
+	id := int64(1)
 	msg := &rpcMessage{
 		JSONRPC: "2.0",
-		ID:      1,
+		ID:      &id,
 		Method:  "initialize",
 	}
 	var buf bytes.Buffer
@@ -59,9 +60,10 @@ func TestReadContentLengthMissing(t *testing.T) {
 }
 
 func TestRoundtripMessage(t *testing.T) {
+	id := int64(7)
 	original := &rpcMessage{
 		JSONRPC: "2.0",
-		ID:      7,
+		ID:      &id,
 		Method:  "textDocument/hover",
 		Params:  json.RawMessage(`{"textDocument":{"uri":"file:///test.go"}}`),
 	}
@@ -74,8 +76,8 @@ func TestRoundtripMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("readMessage: %v", err)
 	}
-	if got.ID != original.ID {
-		t.Errorf("id = %d, want %d", got.ID, original.ID)
+	if got.idValue() != original.idValue() {
+		t.Errorf("id = %d, want %d", got.idValue(), original.idValue())
 	}
 	if got.Method != original.Method {
 		t.Errorf("method = %q, want %q", got.Method, original.Method)
@@ -90,8 +92,8 @@ func TestNewRequest(t *testing.T) {
 	if msg.JSONRPC != "2.0" {
 		t.Errorf("jsonrpc = %q, want 2.0", msg.JSONRPC)
 	}
-	if msg.ID != 3 {
-		t.Errorf("id = %d, want 3", msg.ID)
+	if msg.idValue() != 3 {
+		t.Errorf("id = %d, want 3", msg.idValue())
 	}
 	if msg.Method != "test/method" {
 		t.Errorf("method = %q", msg.Method)
@@ -103,8 +105,10 @@ func TestNewNotification(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newNotification: %v", err)
 	}
-	if msg.ID != 0 {
-		t.Errorf("notification should have id 0, got %d", msg.ID)
+	// Notifications are now identified by ID == nil (absent), not
+	// id == 0 — id 0 is a legitimate request id per JSON-RPC 2.0.
+	if msg.ID != nil {
+		t.Errorf("notification should have nil id, got %d", *msg.ID)
 	}
 	if msg.Method != "initialized" {
 		t.Errorf("method = %q", msg.Method)
@@ -335,13 +339,14 @@ func TestDispatchResponse(t *testing.T) {
 	ch := make(chan *rpcMessage, 1)
 	c.pending[5] = ch
 
-	resp := &rpcMessage{JSONRPC: "2.0", ID: 5, Result: json.RawMessage(`null`)}
+	id := int64(5)
+	resp := &rpcMessage{JSONRPC: "2.0", ID: &id, Result: json.RawMessage(`null`)}
 	c.dispatch(resp)
 
 	select {
 	case got := <-ch:
-		if got.ID != 5 {
-			t.Errorf("id = %d, want 5", got.ID)
+		if got.idValue() != 5 {
+			t.Errorf("id = %d, want 5", got.idValue())
 		}
 	default:
 		t.Error("expected response on channel")
