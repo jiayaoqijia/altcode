@@ -196,6 +196,10 @@ func (a *App) switchToSession(sessionID string) {
 func buildPaletteCommands(
 	cmds map[string]*command.Command,
 ) []PaletteCommand {
+	// Keep this list in sync with handleBuiltinCommand. Missing
+	// entries here mean Ctrl+K palette can't find commands that
+	// otherwise work via direct typing — discovered hands-on when
+	// 'doctor' filter returned no matches despite /doctor working.
 	builtins := []PaletteCommand{
 		{Name: "/help", Description: "show help"},
 		{Name: "/status", Description: "model, session, tokens"},
@@ -222,6 +226,16 @@ func buildPaletteCommands(
 		{Name: "/backends", Description: "detect coding backends"},
 		{Name: "/undo", Description: "git-backed undo (stash)"},
 		{Name: "/redo", Description: "restore last undo"},
+		{Name: "/doctor", Description: "check environment health"},
+		{Name: "/init", Description: "generate CLAUDE.md from codebase"},
+		{Name: "/compare", Description: "A/B test prompt across models"},
+		{Name: "/workspace", Description: "start multi-agent workspace"},
+		{Name: "/spawn", Description: "add agent to active workspace"},
+		{Name: "/send", Description: "annotate agent pane (operator note)"},
+		{Name: "/rollback", Description: "rollback to turn N"},
+		{Name: "/search", Description: "search messages in conversation"},
+		{Name: "/workflow", Description: "run phased workflow"},
+		{Name: "/quit", Description: "quit altcode"},
 	}
 	// Assign actions that return the command name (submitted by the app).
 	for i := range builtins {
