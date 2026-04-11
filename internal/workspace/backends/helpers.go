@@ -156,7 +156,13 @@ func jsonlFallbackState(
 // installPathWrappers writes git and gh wrapper scripts into
 // ~/.altcode/bin/ that capture metadata before calling the real binary.
 func installPathWrappers(workspacePath string) error {
-	binDir := filepath.Join(os.Getenv("HOME"), ".altcode", "bin")
+	// os.UserHomeDir is platform-aware (USERPROFILE on Windows) and falls
+	// back gracefully when HOME is unset (e.g. system services).
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return fmt.Errorf("resolve home dir: %w", err)
+	}
+	binDir := filepath.Join(home, ".altcode", "bin")
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
 		return err
 	}
