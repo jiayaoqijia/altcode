@@ -164,7 +164,16 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 		// because external agents emit long JSON blobs and stack traces
 		// that overflow the 1 MiB default. Surface scanner errors as
 		// events so they don't disappear silently.
+		//
+		// Synchronize with the parent goroutine via stderrDone so the
+		// outer 'defer close(events)' can't fire while this drain is
+		// still trying to send. The race used to look like 'send on
+		// closed channel' under -race when stderr produced a final
+		// line after stdout EOF. Use sync/atomic so trySend never
+		// races with the close.
+		var stderrDone = make(chan struct{})
 		go func() {
+			defer close(stderrDone)
 			sc := bufio.NewScanner(stderr)
 			sc.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
 			for sc.Scan() {
@@ -203,6 +212,12 @@ func SpawnExternal(ctx context.Context, cfg ExternalAgentConfig, task string) *E
 		if err := scanner.Err(); err != nil {
 			trySend(events, AgentEvent{Type: EventError, Content: "stdout scan error: " + err.Error()})
 		}
+
+		// Wait for the stderr drain to finish BEFORE the outer
+		// defers close(events) — otherwise the drain goroutine could
+		// trySend on a closed channel and panic. trySend's non-
+		// blocking select still panics on a closed channel.
+		<-stderrDone
 
 		exitCode := 0
 		waitErr := cmd.Wait()
