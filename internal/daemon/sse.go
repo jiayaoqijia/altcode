@@ -60,7 +60,9 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 			}
 
 			// Heartbeat to detect dead connections.
-			fmt.Fprintf(w, ": heartbeat\n\n")
+			if _, err := fmt.Fprintf(w, ": heartbeat\n\n"); err != nil {
+				return // client disconnected
+			}
 			flusher.Flush()
 
 			// Stop streaming when task reaches a terminal status.
