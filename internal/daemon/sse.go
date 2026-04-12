@@ -31,7 +31,11 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 	// Replay from Last-Event-ID if provided.
 	var lastID int64
 	if idStr := r.Header.Get("Last-Event-ID"); idStr != "" {
-		lastID, _ = strconv.ParseInt(idStr, 10, 64)
+		if parsed, err := strconv.ParseInt(idStr, 10, 64); err != nil {
+			s.logger.Warn("invalid Last-Event-ID", "value", idStr, "err", err)
+		} else {
+			lastID = parsed
+		}
 	}
 
 	ticker := time.NewTicker(2 * time.Second)
