@@ -1,0 +1,149 @@
+package daemon
+
+import (
+	"context"
+	"fmt"
+	"io"
+	"os"
+	"os/exec"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+)
+
+// AgentConfig describes how to spawn an agent subprocess.
+type AgentConfig struct {
+	Binary string   // "codex", "claude", "altcode", or any binary
+	Args   []string // command-line arguments
+	Dir    string   // working directory (worktree path)
+	Env    []string // extra environment variables
+	Role   string   // "lead", "implementer", "reviewer", "tester"
+}
+
+// AgentProcess wraps a running agent subprocess.
+type AgentProcess struct {
+	Cmd       *exec.Cmd
+	Stdin     io.WriteCloser
+	Stdout    io.ReadCloser
+	Stderr    io.ReadCloser
+	exitErr   error
+	closeOnce sync.Once
+	closed    chan struct{} // closed when process exits
+}
+
+// SpawnAgent starts an agent binary as a child process with its
+// own process group (Setpgid) so Kill() can tear down the entire
+// tree. The process inherits the daemon's env plus any extras
+// from cfg.Env.
+func SpawnAgent(ctx context.Context, cfg AgentConfig) (
+	*AgentProcess, error,
+) {
+	cmd := exec.CommandContext(ctx, cfg.Binary, cfg.Args...)
+	cmd.Dir = cfg.Dir
+	cmd.Env = append(os.Environ(), cfg.Env...)
+
+	// Own process group so Kill(-pgid) tears down grandchildren.
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+
+	// Cancel handler: kill the entire process group on ctx cancel.
+	cmd.Cancel = func() error {
+		if cmd.Process == nil {
+			return nil
+		}
+		pgid, err := syscall.Getpgid(cmd.Process.Pid)
+		if err != nil {
+			return cmd.Process.Kill()
+		}
+		return syscall.Kill(-pgid, syscall.SIGTERM)
+	}
+	cmd.WaitDelay = 5 * time.Second
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdin pipe: %w", err)
+	}
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stdout pipe: %w", err)
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return nil, fmt.Errorf("stderr pipe: %w", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return nil, fmt.Errorf("start %s: %w", cfg.Binary, err)
+	}
+
+	proc := &AgentProcess{
+		Cmd:    cmd,
+		Stdin:  stdin,
+		Stdout: stdout,
+		Stderr: stderr,
+		closed: make(chan struct{}),
+	}
+	go func() {
+		proc.exitErr = cmd.Wait()
+		proc.closeOnce.Do(func() { close(proc.closed) })
+	}()
+	return proc, nil
+}
+
+// ReadAll reads all stdout to completion. Blocks until the process
+// closes its stdout (usually on exit).
+func (p *AgentProcess) ReadAll() (string, error) {
+	data, err := io.ReadAll(p.Stdout)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(data)), nil
+}
+
+// SendMessage writes a line to the agent's stdin.
+func (p *AgentProcess) SendMessage(msg string) error {
+	if !strings.HasSuffix(msg, "\n") {
+		msg += "\n"
+	}
+	_, err := io.WriteString(p.Stdin, msg)
+	return err
+}
+
+// Wait blocks until the process exits and returns the exit error.
+func (p *AgentProcess) Wait() error {
+	<-p.closed
+	return p.exitErr
+}
+
+// Kill sends SIGTERM to the process group, then SIGKILL after 5s.
+func (p *AgentProcess) Kill() error {
+	if p.Cmd.Process == nil {
+		return nil
+	}
+	pgid, err := syscall.Getpgid(p.Cmd.Process.Pid)
+	if err != nil {
+		return p.Cmd.Process.Kill()
+	}
+	// SIGTERM first for graceful shutdown.
+	_ = syscall.Kill(-pgid, syscall.SIGTERM)
+
+	// Wait up to 5s, then SIGKILL.
+	select {
+	case <-p.closed:
+		return nil
+	case <-time.After(5 * time.Second):
+		_ = syscall.Kill(-pgid, syscall.SIGKILL)
+		<-p.closed
+		return nil
+	}
+}
+
+// IsRunning reports whether the process is still alive.
+func (p *AgentProcess) IsRunning() bool {
+	select {
+	case <-p.closed:
+		return false
+	default:
+		return true
+	}
+}
