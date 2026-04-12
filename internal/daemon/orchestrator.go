@@ -51,11 +51,15 @@ type PlanStep struct {
 
 // RunTask executes the full orchestration loop for a task.
 func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
-	o.store.MarkStarted(task.ID)
+	if err := o.store.MarkStarted(task.ID); err != nil {
+		return fmt.Errorf("mark started: %w", err)
+	}
 
 	// Phase 1: Plan
 	o.emitPhase(task.ID, "plan", "started")
-	o.store.UpdateStatus(task.ID, "planning")
+	if err := o.store.UpdateStatus(task.ID, "planning"); err != nil {
+		o.logger.Warn("update status", "err", err)
+	}
 
 	planOutput, err := o.cfg.SpawnFunc(ctx, AgentConfig{
 		Binary: "echo",
@@ -63,7 +67,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 		Role:   "lead",
 	})
 	if err != nil {
-		o.store.MarkFailed(task.ID, fmt.Sprintf("plan failed: %v", err))
+		if ferr := o.store.MarkFailed(task.ID, fmt.Sprintf("plan failed: %v", err)); ferr != nil {
+			o.logger.Warn("mark failed", "err", ferr)
+		}
 		return fmt.Errorf("plan phase: %w", err)
 	}
 	o.emitPhase(task.ID, "plan", "completed")
@@ -81,7 +87,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 
 	// Phase 2: Implement (per step with retry loop)
 	o.emitPhase(task.ID, "implement", "started")
-	o.store.UpdateStatus(task.ID, "implementing")
+	if err := o.store.UpdateStatus(task.ID, "implementing"); err != nil {
+		o.logger.Warn("update status", "err", err)
+	}
 
 	for i, step := range plan.Steps {
 		var lastErr error
@@ -102,7 +110,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 		if lastErr != nil {
 			msg := fmt.Sprintf("step %d failed after %d attempts: %v",
 				i, o.cfg.MaxFixRetry, lastErr)
-			o.store.MarkFailed(task.ID, msg)
+			if ferr := o.store.MarkFailed(task.ID, msg); ferr != nil {
+				o.logger.Warn("mark failed", "err", ferr)
+			}
 			return fmt.Errorf("implement phase: %s", msg)
 		}
 	}
@@ -110,7 +120,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 
 	// Phase 3: Review
 	o.emitPhase(task.ID, "review", "started")
-	o.store.UpdateStatus(task.ID, "reviewing")
+	if err := o.store.UpdateStatus(task.ID, "reviewing"); err != nil {
+		o.logger.Warn("update status", "err", err)
+	}
 
 	_, err = o.cfg.SpawnFunc(ctx, AgentConfig{Role: "reviewer"})
 	if err != nil {
@@ -120,7 +132,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 
 	// Phase 4: Finalize
 	o.emitPhase(task.ID, "finalize", "started")
-	o.store.MarkCompleted(task.ID)
+	if err := o.store.MarkCompleted(task.ID); err != nil {
+		return fmt.Errorf("mark completed: %w", err)
+	}
 	o.emitPhase(task.ID, "finalize", "completed")
 
 	return nil
