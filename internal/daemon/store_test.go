@@ -311,6 +311,150 @@ func TestStore_DeliveryIDDedup(t *testing.T) {
 	}
 }
 
+func TestStore_UpdateStatus_NonexistentID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.UpdateStatus("nonexistent-id", "implementing")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestStore_MarkFailed_NonexistentID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.MarkFailed("nonexistent-id", "some error")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestStore_MarkCompleted_NonexistentID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.MarkCompleted("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestStore_MarkStarted_NonexistentID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	err = s.MarkStarted("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestStore_GetTask_NonexistentID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.GetTask("nonexistent-id")
+	if err == nil {
+		t.Fatal("expected error for nonexistent ID")
+	}
+}
+
+func TestStore_GetTask_EmptyID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	_, err = s.GetTask("")
+	if err == nil {
+		t.Fatal("expected error for empty ID")
+	}
+}
+
+func TestStore_ListEvents_NonexistentTaskID(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	events, err := s.ListEvents("nonexistent-task", 0)
+	if err != nil {
+		t.Fatalf("ListEvents should not error: %v", err)
+	}
+	if len(events) != 0 {
+		t.Errorf("expected 0 events, got %d", len(events))
+	}
+}
+
+func TestStore_CreateTask_EmptyOptionalFields(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/t/r",
+		TaskDescription: "minimal task",
+		Status:          "pending",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatalf("CreateTask with empty optionals: %v", err)
+	}
+	if task.ID == "" {
+		t.Error("expected non-empty ID")
+	}
+
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.AgentConfig != "" {
+		t.Errorf("expected empty AgentConfig, got %q", got.AgentConfig)
+	}
+	if got.BranchName != "" {
+		t.Errorf("expected empty BranchName, got %q", got.BranchName)
+	}
+	if got.Complexity != "" {
+		t.Errorf("expected empty Complexity, got %q", got.Complexity)
+	}
+	if got.DeliveryID != "" {
+		t.Errorf("expected empty DeliveryID, got %q", got.DeliveryID)
+	}
+	if got.PRNumber != 0 {
+		t.Errorf("expected 0 PRNumber, got %d", got.PRNumber)
+	}
+	if got.IssueNumber != 0 {
+		t.Errorf("expected 0 IssueNumber, got %d", got.IssueNumber)
+	}
+}
+
+func TestStore_NewStore_InvalidPath(t *testing.T) {
+	_, err := NewStore("/nonexistent/path/db.sqlite")
+	if err == nil {
+		t.Fatal("expected error for invalid path")
+	}
+}
+
 func TestStore_ConcurrentCreate(t *testing.T) {
 	s, err := NewStore(":memory:")
 	if err != nil {
