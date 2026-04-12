@@ -12,7 +12,7 @@
 | 6 — hooks + ALTCODE_HOOK_DEPTH | **shipped** | (this commit) | `hooks.Runner.AddMatcher` + env-var recursion guard; nested altcode invocations refuse hook registration when depth > 3 |
 | 7 — save-* artifacts + --commit | **shipped** | (this commit) | Scoped staging via porcelain delta; `context.Background` for commit atomicity; `--save-transcript` errors out pending Phase 12 |
 | 8 — MaxTurns + CostBudget | **shipped** | (this commit) | `engine.CostBudget` atomic int64 micro-cents; subagent propagation; `BudgetExceeded` event |
-| 9 — batch runner | pending | | |
+| 9 — batch runner | **shipped** | (this commit) | `exec.RunBatch` with parallel workers, retry w/ exp backoff, bail-on-first; `{{input}}` templating |
 | 10 — inspection flags | **shipped** | (this commit) | `--print-config` deep-redacts Provider/MCP/Team secrets; both reviewers caught leaks in round 1 |
 | **11 — SIGTERM** | **shipped** | 4fcc3d1 | Folded into Phase 1 |
 | 12 — --print-tree ASCII renderer | **shipped** | (this commit) | Event accumulator + tee goroutine; also implements --save-transcript which was a Phase 7 placeholder |

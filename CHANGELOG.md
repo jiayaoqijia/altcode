@@ -12,6 +12,31 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 9: batch runner — --prompt-each + --parallel + --retry + --bail)
+
+- `--prompt-each <file>` reads prompts line-by-line (skipping blanks
+  and `#` comments) and dispatches each line as a separate run.
+  The positional prompt acts as a template; `{{input}}` is
+  substituted per line. Empty template uses each line verbatim.
+- `--parallel <n>` runs N workers concurrently. Each worker gets
+  its own fresh exec.Params clone (no session alias), a fresh
+  engine, and its own pre-run dirty-tree snapshot. Default 1 = serial.
+- `--retry <n>` retries a failed prompt up to N times with
+  exponential backoff capped at 30 seconds.
+- `--bail` stops the batch on the first failure (default: continue
+  and report all failures at the end).
+- `--run-workflow <name>` reserved for named workflow-def lookup
+  from `.altcode/workflows/<name>.yaml`. Flag is registered but
+  workflow dispatch routes through the existing workflow
+  subcommand for now — future phase will add the headless bridge.
+- Batch workers share stdin/stdout carefully: output lines are
+  serialized through a mutex so parallel runs don't interleave
+  mid-line. Each worker's banner is suppressed (Quiet=true) so
+  the user sees a clean "[batch i/N attempt k]" progress line.
+- RunBatch returns a single error summarizing the failure count,
+  e.g. `batch: 3 of 10 prompts failed`. Individual failures are
+  logged to stderr with the truncated prompt + the underlying error.
+
 ### Added (Phase 6: --hook + --mcp + --skill + ALTCODE_HOOK_DEPTH guard)
 
 - `--hook <event>:<command>` registers an ad-hoc hook for the run

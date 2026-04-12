@@ -93,6 +93,13 @@ type cliFlags struct {
 	cliHooks []string // --hook event:command (repeatable)
 	cliMCP   []string // --mcp name:command (repeatable)
 	cliSkill []string // --skill name (repeatable)
+
+	// Phase 9: workflow + batch
+	runWorkflow string // --run-workflow <name> from .altcode/workflows/
+	promptEach  string // --prompt-each <file>
+	parallel    int    // --parallel <n>
+	retry       int    // --retry <n>
+	bail        bool   // --bail
 }
 
 func main() {
@@ -209,6 +216,21 @@ func main() {
 			"Format: name:command, e.g. --mcp 'fs:npx -y foo-mcp'.")
 	root.Flags().StringArrayVar(&flags.cliSkill, "skill", nil,
 		"Preload a skill into the system prompt (repeatable)")
+
+	// --- Phase 9: workflow + batch ---
+	root.Flags().StringVar(&flags.runWorkflow, "run-workflow", "",
+		"Run a named workflow def from .altcode/workflows/<name>.yaml "+
+			"(renamed from --workflow to avoid collision with the workflow subcommand)")
+	root.Flags().StringVar(&flags.promptEach, "prompt-each", "",
+		"Batch mode: read prompts from a file, one per line. "+
+			"Use {{input}} in the positional prompt as a template, "+
+			"or leave prompt empty to use each line verbatim.")
+	root.Flags().IntVar(&flags.parallel, "parallel", 0,
+		"Batch mode: number of concurrent workers (default 1 = serial)")
+	root.Flags().IntVar(&flags.retry, "retry", 0,
+		"Batch mode: retry count on failure per prompt (exponential backoff)")
+	root.Flags().BoolVar(&flags.bail, "bail", false,
+		"Batch mode: stop on first failure (default: continue through all)")
 
 	// --- Phase 10: inspection (print-and-exit) ---
 	root.Flags().BoolVar(&flags.printConfig, "print-config", false,
@@ -628,6 +650,11 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			Hooks:          flags.cliHooks,
 			MCPServers:     flags.cliMCP,
 			Skills:         flags.cliSkill,
+			RunWorkflow:    flags.runWorkflow,
+			PromptEach:     flags.promptEach,
+			Parallel:       flags.parallel,
+			Retry:          flags.retry,
+			Bail:           flags.bail,
 		}
 		if err := ep.Validate(); err != nil {
 			return err
@@ -645,7 +672,23 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		if err := ep.PrepareInputs(os.Stdin); err != nil {
 			return err
 		}
+		// Phase 9: batch mode dispatches to RunBatch which iterates
+		// over --prompt-each lines and spawns fresh engine runs per
+		// iteration. Sequential runExec is the default.
+		if ep.PromptEach != "" {
+			ctx, stop := signal.NotifyContext(context.Background(),
+				os.Interrupt, syscall.SIGTERM)
+			defer stop()
+			return exec.RunBatch(ctx, ep)
+		}
 		return runExec(ep)
+	}
+	// TUI mode: --prompt-each is nonsensical without a prompt
+	// dispatch mechanism; error instead of silently ignoring.
+	if flags.promptEach != "" {
+		return exec.NewUsageError(
+			"--prompt-each requires a positional prompt template " +
+				"(or an empty prompt to use lines verbatim); TUI mode not supported")
 	}
 	return runTUI(params)
 }

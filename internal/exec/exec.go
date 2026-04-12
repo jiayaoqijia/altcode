@@ -190,6 +190,31 @@ type Params struct {
 	// system prompt for this run. Match against discovered
 	// skills by name; unknown names fail at validation time.
 	Skills []string
+
+	// --- Phase 9: workflow + batch ---
+	// RunWorkflow names a workflow def from .altcode/workflows/
+	// to execute in place of the normal prompt. Mutually
+	// exclusive with a positional prompt arg.
+	RunWorkflow string
+
+	// PromptEach is a file path whose lines are substituted
+	// into {{input}} in the prompt template and dispatched as
+	// a batch. Mutually exclusive with --continue / --session.
+	PromptEach string
+
+	// Parallel is the number of concurrent workers for the
+	// --prompt-each batch. 0 or 1 = sequential. Each worker
+	// gets its own session unless ShareSession is set.
+	Parallel int
+
+	// Retry is the per-line retry count on failure for batch
+	// mode. 0 = no retry. Uses exponential backoff.
+	Retry int
+
+	// Bail stops the batch on the first failure. Default is
+	// to continue through all lines and report the failures
+	// at the end.
+	Bail bool
 }
 
 // Permission mode constants. Match the permission.Mode enum at
@@ -294,6 +319,18 @@ func (p *Params) Validate() error {
 		if _, _, err := parseMCPSpec(m); err != nil {
 			return NewUsageError("invalid --mcp %q: %v", m, err)
 		}
+	}
+	// Phase 9: batch mode checks.
+	if p.Parallel < 0 {
+		return NewUsageError("--parallel must be >= 0 (got %d)", p.Parallel)
+	}
+	if p.Retry < 0 {
+		return NewUsageError("--retry must be >= 0 (got %d)", p.Retry)
+	}
+	if p.PromptEach != "" && p.Prompt != "" {
+		return NewUsageError(
+			"--prompt-each and positional prompt are mutually exclusive " +
+				"(batch mode reads prompts from the file)")
 	}
 	// --allow-tool / --deny-tool format check: each entry must be
 	// "name" or "name:pattern". Empty name is an error.
