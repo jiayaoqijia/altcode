@@ -28,7 +28,10 @@ func TestNewStore_CreatesSchema(t *testing.T) {
 }
 
 func TestStore_GetTask(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
@@ -36,7 +39,9 @@ func TestStore_GetTask(t *testing.T) {
 		TaskDescription: "fix",
 		Status:          "pending",
 	}
-	s.CreateTask(task)
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
 
 	got, err := s.GetTask(task.ID)
 	if err != nil {
@@ -48,15 +53,22 @@ func TestStore_GetTask(t *testing.T) {
 }
 
 func TestStore_ListTasks(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
-	s.CreateTask(&Task{
+	if err := s.CreateTask(&Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pending",
-	})
-	s.CreateTask(&Task{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&Task{
 		RepoURL: "r", TaskDescription: "b", Status: "pending",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	tasks, err := s.ListTasks()
 	if err != nil {
@@ -68,18 +80,27 @@ func TestStore_ListTasks(t *testing.T) {
 }
 
 func TestStore_ListTasksByStatus(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
-	s.CreateTask(&Task{
+	if err := s.CreateTask(&Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pending",
-	})
-	s.CreateTask(&Task{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&Task{
 		RepoURL: "r", TaskDescription: "b", Status: "implementing",
-	})
-	s.CreateTask(&Task{
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.CreateTask(&Task{
 		RepoURL: "r", TaskDescription: "c", Status: "pending",
-	})
+	}); err != nil {
+		t.Fatal(err)
+	}
 
 	pending, err := s.ListTasksByStatus("pending")
 	if err != nil {
@@ -107,32 +128,52 @@ func TestStore_ListTasksByStatus(t *testing.T) {
 }
 
 func TestStore_UpdateStatus(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pending",
 	}
-	s.CreateTask(task)
-	s.UpdateStatus(task.ID, "implementing")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.UpdateStatus(task.ID, "implementing"); err != nil {
+		t.Fatal(err)
+	}
 
-	got, _ := s.GetTask(task.ID)
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != "implementing" {
 		t.Errorf("status = %q, want implementing", got.Status)
 	}
 }
 
 func TestStore_MarkFailed(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
 		RepoURL: "r", TaskDescription: "a", Status: "implementing",
 	}
-	s.CreateTask(task)
-	s.MarkFailed(task.ID, "timeout")
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkFailed(task.ID, "timeout"); err != nil {
+		t.Fatal(err)
+	}
 
-	got, _ := s.GetTask(task.ID)
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != "failed" {
 		t.Errorf("status = %q, want failed", got.Status)
 	}
@@ -145,16 +186,26 @@ func TestStore_MarkFailed(t *testing.T) {
 }
 
 func TestStore_MarkCompleted(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pr_open",
 	}
-	s.CreateTask(task)
-	s.MarkCompleted(task.ID)
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.MarkCompleted(task.ID); err != nil {
+		t.Fatal(err)
+	}
 
-	got, _ := s.GetTask(task.ID)
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.Status != "merged" {
 		t.Errorf("status = %q, want merged", got.Status)
 	}
@@ -164,37 +215,56 @@ func TestStore_MarkCompleted(t *testing.T) {
 }
 
 func TestStore_MarkStarted(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pending",
 	}
-	s.CreateTask(task)
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
 
 	if task.StartedAt != nil {
 		t.Error("expected started_at to be nil before MarkStarted")
 	}
 
-	s.MarkStarted(task.ID)
+	if err := s.MarkStarted(task.ID); err != nil {
+		t.Fatal(err)
+	}
 
-	got, _ := s.GetTask(task.ID)
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if got.StartedAt == nil {
 		t.Error("expected started_at to be set after MarkStarted")
 	}
 }
 
 func TestStore_AppendAndListEvents(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	task := &Task{
 		RepoURL: "r", TaskDescription: "a", Status: "pending",
 	}
-	s.CreateTask(task)
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
 
-	s.AppendEvent(task.ID, "phase_started", `{"phase":"plan"}`)
-	s.AppendEvent(task.ID, "phase_completed", `{"phase":"plan"}`)
+	if err := s.AppendEvent(task.ID, "phase_started", `{"phase":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.AppendEvent(task.ID, "phase_completed", `{"phase":"plan"}`); err != nil {
+		t.Fatal(err)
+	}
 
 	events, err := s.ListEvents(task.ID, 0)
 	if err != nil {
@@ -208,14 +278,20 @@ func TestStore_AppendAndListEvents(t *testing.T) {
 	}
 
 	// Test afterID filtering.
-	events2, _ := s.ListEvents(task.ID, events[0].ID)
+	events2, err := s.ListEvents(task.ID, events[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(events2) != 1 {
 		t.Errorf("filtered events: got %d, want 1", len(events2))
 	}
 }
 
 func TestStore_DeliveryIDDedup(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	t1 := &Task{
@@ -229,17 +305,21 @@ func TestStore_DeliveryIDDedup(t *testing.T) {
 		RepoURL: "r", TaskDescription: "b",
 		Status: "pending", DeliveryID: "gh-abc",
 	}
-	err := s.CreateTask(t2)
+	err = s.CreateTask(t2)
 	if err == nil {
 		t.Error("expected duplicate delivery_id to fail")
 	}
 }
 
 func TestStore_ConcurrentCreate(t *testing.T) {
-	s, _ := NewStore(":memory:")
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 
 	var wg sync.WaitGroup
+	errCh := make(chan error, 10)
 	for i := 0; i < 10; i++ {
 		wg.Add(1)
 		go func(n int) {
@@ -249,12 +329,22 @@ func TestStore_ConcurrentCreate(t *testing.T) {
 				TaskDescription: fmt.Sprintf("task-%d", n),
 				Status:          "pending",
 			}
-			s.CreateTask(tk)
+			if err := s.CreateTask(tk); err != nil {
+				errCh <- fmt.Errorf("task-%d: %w", n, err)
+			}
 		}(i)
 	}
 	wg.Wait()
+	close(errCh)
 
-	tasks, _ := s.ListTasks()
+	for err := range errCh {
+		t.Errorf("concurrent create error: %v", err)
+	}
+
+	tasks, err := s.ListTasks()
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(tasks) != 10 {
 		t.Errorf("got %d tasks, want 10", len(tasks))
 	}

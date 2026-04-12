@@ -120,7 +120,9 @@ func (s *Store) createSchema() error {
 
 func newID() string {
 	b := make([]byte, 16)
-	rand.Read(b)
+	if _, err := rand.Read(b); err != nil {
+		panic(fmt.Sprintf("crypto/rand.Read: %v", err))
+	}
 	return hex.EncodeToString(b)
 }
 
@@ -205,39 +207,63 @@ func (s *Store) ListTasksByStatus(status string) ([]*Task, error) {
 // UpdateStatus sets the task status and updates updated_at.
 func (s *Store) UpdateStatus(id, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
 		status, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task %q not found", id)
+	}
+	return nil
 }
 
 // MarkFailed sets status to failed with an error message.
 func (s *Store) MarkFailed(id, errMsg string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`UPDATE tasks SET status = 'failed', error_message = ?,
 		 completed_at = ?, updated_at = ? WHERE id = ?`,
 		errMsg, now, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task %q not found", id)
+	}
+	return nil
 }
 
 // MarkCompleted sets status to merged and records completion time.
 func (s *Store) MarkCompleted(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`UPDATE tasks SET status = 'merged', completed_at = ?,
 		 updated_at = ? WHERE id = ?`,
 		now, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task %q not found", id)
+	}
+	return nil
 }
 
 // MarkStarted records the started_at timestamp for a task.
 func (s *Store) MarkStarted(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err := s.db.Exec(
+	res, err := s.db.Exec(
 		`UPDATE tasks SET started_at = ?, updated_at = ? WHERE id = ?`,
 		now, now, id)
-	return err
+	if err != nil {
+		return err
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("task %q not found", id)
+	}
+	return nil
 }
 
 // AppendEvent records a progress event for a task.
@@ -263,13 +289,13 @@ func (s *Store) ListEvents(taskID string, afterID int64) ([]*TaskEvent, error) {
 	var events []*TaskEvent
 	for rows.Next() {
 		var e TaskEvent
-		var createdAt string
+		var createdAt sql.NullString
 		if err := rows.Scan(
 			&e.ID, &e.TaskID, &e.EventType, &e.Data, &createdAt,
 		); err != nil {
 			return nil, err
 		}
-		e.CreatedAt, _ = time.Parse(time.RFC3339, createdAt)
+		e.CreatedAt = parseTime(createdAt)
 		events = append(events, &e)
 	}
 	return events, rows.Err()
@@ -277,6 +303,20 @@ func (s *Store) ListEvents(taskID string, afterID int64) ([]*TaskEvent, error) {
 
 type scanner interface {
 	Scan(dest ...any) error
+}
+
+// parseTime handles both RFC3339 and SQLite datetime format.
+func parseTime(s sql.NullString) time.Time {
+	if !s.Valid || s.String == "" {
+		return time.Time{}
+	}
+	if t, err := time.Parse(time.RFC3339, s.String); err == nil {
+		return t
+	}
+	if t, err := time.Parse("2006-01-02 15:04:05", s.String); err == nil {
+		return t.UTC()
+	}
+	return time.Time{}
 }
 
 func scanTask(s scanner) (*Task, error) {
@@ -292,19 +332,13 @@ func scanTask(s scanner) (*Task, error) {
 	if err != nil {
 		return nil, err
 	}
-	if startedAt.Valid {
-		parsed, _ := time.Parse(time.RFC3339, startedAt.String)
+	if parsed := parseTime(startedAt); !parsed.IsZero() {
 		t.StartedAt = &parsed
 	}
-	if completedAt.Valid {
-		parsed, _ := time.Parse(time.RFC3339, completedAt.String)
+	if parsed := parseTime(completedAt); !parsed.IsZero() {
 		t.CompletedAt = &parsed
 	}
-	if createdAt.Valid {
-		t.CreatedAt, _ = time.Parse(time.RFC3339, createdAt.String)
-	}
-	if updatedAt.Valid {
-		t.UpdatedAt, _ = time.Parse(time.RFC3339, updatedAt.String)
-	}
+	t.CreatedAt = parseTime(createdAt)
+	t.UpdatedAt = parseTime(updatedAt)
 	return &t, nil
 }
