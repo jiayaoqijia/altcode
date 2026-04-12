@@ -157,12 +157,13 @@ func (g *GitOps) GetDefaultBranch(
 	// Output: "refs/remotes/origin/main\n"
 	ref := strings.TrimSpace(string(out))
 	parts := strings.Split(ref, "/")
-	if len(parts) == 0 {
+	branch := parts[len(parts)-1]
+	if branch == "" {
 		return "", fmt.Errorf(
 			"unexpected symbolic-ref output: %q", ref,
 		)
 	}
-	return parts[len(parts)-1], nil
+	return branch, nil
 }
 
 func (g *GitOps) gitCommit(
