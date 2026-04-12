@@ -72,26 +72,38 @@ func (r *TaskRunner) Run(ctx context.Context) {
 		if rec := recover(); rec != nil {
 			r.logger.Error("task panicked",
 				"task", r.task.ID, "panic", rec)
-			r.store.MarkFailed(r.task.ID,
-				fmt.Sprintf("panic: %v", rec))
+			if err := r.store.MarkFailed(r.task.ID,
+				fmt.Sprintf("panic: %v", rec)); err != nil {
+				r.logger.Warn("mark panic failed", "task", r.task.ID, "err", err)
+			}
 		}
 	}()
 
-	r.store.MarkStarted(r.task.ID)
+	if err := r.store.MarkStarted(r.task.ID); err != nil {
+		r.logger.Warn("mark started", "task", r.task.ID, "err", err)
+	}
 
 	err := r.orch.RunTask(ctx, r.task)
 
 	// Check stop flag first — user cancellation takes priority.
 	if r.stopped.Load() {
-		r.store.UpdateStatus(r.task.ID, "cancelled")
-		r.store.AppendEvent(r.task.ID, "cancelled_by_user", "")
+		if err := r.store.UpdateStatus(r.task.ID, "cancelled"); err != nil {
+			r.logger.Warn("update cancelled status", "task", r.task.ID, "err", err)
+		}
+		if err := r.store.AppendEvent(r.task.ID, "cancelled_by_user", ""); err != nil {
+			r.logger.Warn("append cancel event", "task", r.task.ID, "err", err)
+		}
 		return
 	}
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
-			r.store.MarkFailed(r.task.ID,
-				"wall-clock timeout exceeded")
-			r.store.AppendEvent(r.task.ID, "timeout", "")
+			if err := r.store.MarkFailed(r.task.ID,
+				"wall-clock timeout exceeded"); err != nil {
+				r.logger.Warn("mark timeout failed", "task", r.task.ID, "err", err)
+			}
+			if err := r.store.AppendEvent(r.task.ID, "timeout", ""); err != nil {
+				r.logger.Warn("append timeout event", "task", r.task.ID, "err", err)
+			}
 		}
 		return
 	}
