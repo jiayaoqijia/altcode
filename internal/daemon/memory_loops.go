@@ -50,9 +50,23 @@ func (m *MemoryManager) PostTaskReview(
 	m.mu.Unlock()
 
 	if count%m.nudgeEvery == 0 {
-		go m.backgroundReviewNudge(task, events)
+		go func() {
+			defer func() {
+				if r := recover(); r != nil {
+					m.logger.Error("panic in review nudge", "task", task.ID, "panic", r)
+				}
+			}()
+			m.backgroundReviewNudge(task, events)
+		}()
 	}
-	go m.maybeCreateSkill(task, events)
+	go func() {
+		defer func() {
+			if r := recover(); r != nil {
+				m.logger.Error("panic in skill creation", "task", task.ID, "panic", r)
+			}
+		}()
+		m.maybeCreateSkill(task, events)
+	}()
 }
 
 // TaskCount returns the current task count (thread-safe).
