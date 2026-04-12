@@ -1601,5 +1601,15 @@ func parseModel(model string) (providerName, modelName string) {
 			return model[:i], model[i+1:]
 		}
 	}
+	// Infer provider from model name prefix for known providers.
+	lower := strings.ToLower(model)
+	for _, prefix := range []string{
+		"altllm", "deepseek", "moonshot", "kimi", "minimax",
+		"zhipu", "glm", "qwen", "ollama",
+	} {
+		if strings.HasPrefix(lower, prefix) {
+			return prefix, model
+		}
+	}
 	return "anthropic", model
 }
