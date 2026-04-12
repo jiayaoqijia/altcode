@@ -285,3 +285,151 @@ func TestOrchestrator_MalformedPlanJSON(t *testing.T) {
 			implCalls[0], task.TaskDescription)
 	}
 }
+
+func TestOrchestrator_ContextCancellation(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "cancel me",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(c context.Context, cfg AgentConfig) (string, error) {
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s1","prompt":"do"}]}`, nil
+			}
+			// Cancel context when implementer is called.
+			cancel()
+			return "", c.Err()
+		},
+	})
+
+	err = o.RunTask(ctx, task)
+	if err == nil {
+		t.Fatal("RunTask should fail on cancelled context")
+	}
+
+	got, gErr := store.GetTask(task.ID)
+	if gErr != nil {
+		t.Fatal(gErr)
+	}
+	if got.Status != "failed" {
+		t.Errorf("status = %q, want %q", got.Status, "failed")
+	}
+}
+
+func TestOrchestrator_EmptyPlan(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "empty plan",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	var roles []string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			roles = append(roles, cfg.Role)
+			if cfg.Role == "lead" {
+				// Valid JSON but empty steps array.
+				return `{"steps":[]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	got, err := store.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "merged" {
+		t.Errorf("status = %q, want %q", got.Status, "merged")
+	}
+
+	// Empty steps triggers fallback single-step plan, so
+	// implementer should still be called once.
+	implCount := 0
+	for _, r := range roles {
+		if r == "implementer" {
+			implCount++
+		}
+	}
+	if implCount != 1 {
+		t.Errorf("implementer calls = %d, want 1 (fallback)", implCount)
+	}
+}
+
+func TestOrchestrator_ValidJSONNoSteps(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "json no steps",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	var roles []string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			roles = append(roles, cfg.Role)
+			if cfg.Role == "lead" {
+				// Valid JSON object but missing "steps" key entirely.
+				return `{"analysis":"looks good"}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	got, err := store.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "merged" {
+		t.Errorf("status = %q, want %q", got.Status, "merged")
+	}
+
+	// Missing steps field => Plan.Steps is nil (len 0) => fallback.
+	implCount := 0
+	for _, r := range roles {
+		if r == "implementer" {
+			implCount++
+		}
+	}
+	if implCount != 1 {
+		t.Errorf("implementer calls = %d, want 1 (fallback)", implCount)
+	}
+}
