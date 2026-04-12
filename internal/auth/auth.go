@@ -146,11 +146,30 @@ func loadCodexAuth(cfg *config.Config) {
 	}
 }
 
-// parseCodexBaseURL extracts base_url from the top level of codex
-// config.toml. Skips values inside [section] headers — without this,
-// a base_url under [profile.foo] would override the user's actual
-// active config.
+// parseCodexBaseURL extracts base_url from Codex's config.toml.
+// Checks (in order):
+//  1. The `[model_providers.<ModelProvider>]` section, where
+//     ModelProvider comes from the top-level `model_provider`
+//     field. This is how the current (2026+) Codex CLI writes
+//     custom provider endpoints.
+//  2. The top-level `base_url` key (legacy layout).
+//
+// Skips any value inside unrelated sections. Before the Phase 13
+// bug hunt caught this, altcode only looked at the top level and
+// silently ignored the current `[model_providers.OpenAI]` layout,
+// so Codex users with a custom base_url (e.g. a self-hosted
+// Codex proxy) had their key loaded but their endpoint silently
+// reset to api.openai.com.
 func parseCodexBaseURL(path string) string {
+	// Preferred: look up via the active model_provider.
+	providerName := parseCodexTOMLTop(path, "model_provider")
+	if providerName != "" {
+		section := "[model_providers." + providerName + "]"
+		if v := parseCodexTOMLSection(path, section, "base_url"); v != "" {
+			return v
+		}
+	}
+	// Legacy fallback: top-level base_url (pre-2026 Codex configs).
 	return parseCodexTOMLTop(path, "base_url")
 }
 
@@ -159,6 +178,35 @@ func parseCodexBaseURL(path string) string {
 // model used to silently win.
 func parseCodexModel(path string) string {
 	return parseCodexTOMLTop(path, "model")
+}
+
+// parseCodexTOMLSection returns the value of `key` within `section`
+// (the `[header]` line including brackets). Returns empty string
+// on any read or parse failure so callers can fall through to
+// alternative sources.
+func parseCodexTOMLSection(path, section, key string) string {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return ""
+	}
+	inTarget := false
+	for _, raw := range splitLines(string(data)) {
+		line := strings.TrimSpace(raw)
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			inTarget = (line == section)
+			continue
+		}
+		if !inTarget {
+			continue
+		}
+		if k, v := parseTOMLKV(line); k == key {
+			return v
+		}
+	}
+	return ""
 }
 
 // parseCodexTOMLTop returns the value of `key` if it appears at the

@@ -51,6 +51,83 @@ func TestLoadCodexAuth(t *testing.T) {
 	}
 }
 
+// TestLoadCodexAuth_SectionedBaseURL is the regression test for the
+// Phase 13 bug hunt finding: Codex config.toml puts base_url inside
+// [model_providers.OpenAI], not at the top level. The previous
+// parseCodexBaseURL only read the top level and silently dropped
+// the custom endpoint, so altcode users with a Codex proxy had
+// their key loaded but their endpoint reset to api.openai.com.
+func TestLoadCodexAuth_SectionedBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	codexDir := filepath.Join(dir, ".codex")
+	if err := os.MkdirAll(codexDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modern Codex auth.json: apikey mode.
+	authJSON := []byte(`{
+		"auth_mode": "apikey",
+		"OPENAI_API_KEY": "sk-test-key-12345"
+	}`)
+	if err := os.WriteFile(filepath.Join(codexDir, "auth.json"), authJSON, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// Modern Codex config.toml: base_url inside a section header.
+	tomlContent := `model_provider = "OpenAI"
+model = "gpt-5.4"
+
+[model_providers.OpenAI]
+name = "OpenAI"
+base_url = "https://proxy.example.com"
+wire_api = "responses"
+`
+	if err := os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(tomlContent), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg := config.Default()
+	auth.LoadFromCLIs(cfg)
+
+	p, ok := cfg.Provider["openai"]
+	if !ok || p.APIKey == "" {
+		t.Fatal("expected openai provider key from Codex auth.json")
+	}
+	if p.BaseURL != "https://proxy.example.com" {
+		t.Errorf("BaseURL = %q, want https://proxy.example.com "+
+			"(regression: section-qualified base_url should be loaded)",
+			p.BaseURL)
+	}
+}
+
+// TestLoadCodexAuth_LegacyTopLevelBaseURL verifies the legacy
+// fallback for older Codex configs that put base_url at the top
+// level still works.
+func TestLoadCodexAuth_LegacyTopLevelBaseURL(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	codexDir := filepath.Join(dir, ".codex")
+	_ = os.MkdirAll(codexDir, 0o755)
+	authJSON := []byte(`{"auth_mode":"apikey","OPENAI_API_KEY":"sk-legacy"}`)
+	_ = os.WriteFile(filepath.Join(codexDir, "auth.json"), authJSON, 0o600)
+
+	tomlContent := `base_url = "https://legacy.example.com"
+model = "gpt-4"
+`
+	_ = os.WriteFile(filepath.Join(codexDir, "config.toml"), []byte(tomlContent), 0o644)
+
+	cfg := config.Default()
+	auth.LoadFromCLIs(cfg)
+
+	if cfg.Provider["openai"].BaseURL != "https://legacy.example.com" {
+		t.Errorf("legacy top-level base_url not loaded: got %q",
+			cfg.Provider["openai"].BaseURL)
+	}
+}
+
 func TestLoadBothProviders(t *testing.T) {
 	home, _ := os.UserHomeDir()
 	hasClaude := false
