@@ -312,6 +312,25 @@ Common CI failures and how to avoid them:
 This is a hard rule — not optional. Two AI systems catch more bugs, produce better
 designs, and prevent blind spots from single-model reasoning.
 
+#### 4-Stage Review Pipeline (HARD RULE)
+
+Every implementation task MUST go through 4 stages before marking complete:
+
+```
+Implementer → Spec Reviewer → Code Quality Reviewer → Test Verifier
+```
+
+1. **Implementer** — writes code + tests, commits. Reports DONE / DONE_WITH_CONCERNS / NEEDS_CONTEXT / BLOCKED.
+2. **Spec Reviewer** — compares implementation against the plan/spec. Checks: all requirements met, nothing over-built, types/signatures match. Reports ✅ or ❌ with specific gaps.
+3. **Code Quality Reviewer** — checks error handling, SQL injection, resource leaks, thread safety, naming, test quality. Reports Approved or Issues (with fixes needed).
+4. **Test Verifier** — runs tests with `-race`, checks coverage, identifies missing edge-case tests (nonexistent IDs, empty inputs, concurrent access, error paths), writes them if missing.
+
+**Do NOT skip stages.** Do NOT proceed to the next task until all 4 stages pass.
+If any reviewer finds issues, the implementer fixes them and the reviewer re-reviews.
+
+When using subagents: dispatch a fresh subagent for each stage so context stays
+clean. The implementer subagent is reused for fixes; reviewers get fresh context.
+
 #### Review depth (HARD RULE)
 
 When asking ANY AI (Claude Code, Codex, GPT, subagents) to review code, ALWAYS

@@ -23,6 +23,27 @@ GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s
 If any step fails, **fix before committing**. Do not push and rely on CI.
 Benchmark tests generate files in the working directory — always clean first.
 
+### 4-Stage Review Pipeline — NEVER skip
+
+Every implementation task goes through 4 stages before completion:
+
+```
+Implementer → Spec Reviewer → Code Quality Reviewer → Test Verifier
+```
+
+| Stage | Role | Checks |
+|-------|------|--------|
+| **1. Implementer** | Write code + tests, commit | TDD, self-review, report DONE/BLOCKED |
+| **2. Spec Reviewer** | Compare impl vs plan/spec | All requirements met, nothing over-built, signatures match |
+| **3. Code Quality** | Review production readiness | Error handling, injection, leaks, races, naming, test quality |
+| **4. Test Verifier** | Run + extend test suite | Coverage, edge cases, missing tests (nil, empty, concurrent, error paths) |
+
+Do NOT skip stages. Do NOT proceed to the next task until all 4 pass.
+If a reviewer finds issues, the implementer fixes and the reviewer re-reviews.
+
+Each stage should be a **fresh subagent** so context stays clean and focused.
+The implementer subagent is reused for fixes; reviewers always get fresh context.
+
 ### Secrets — zero tolerance
 - **Never commit, log, or output secrets.** API keys, private keys, tokens, passwords,
   connection strings, service account JSON — none in code, config, logs, or comments.
