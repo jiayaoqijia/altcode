@@ -100,6 +100,13 @@ was reviewed across 7 rounds between CC and Codex before starting.
   budget. Each engine pushes its own per-turn USD delta so
   parent+child don't double-count. Mid-turn cost abort deferred
   (needs provider-side usage checkpoints).
+- **Phase 7**: `--commit`, `--commit-dirty`, `--save-cost`,
+  `--save-diff`. `--commit` does SCOPED staging (agent-touched
+  paths only, not `git add -A`) based on delta between pre-run
+  and post-run `git status --porcelain`. Fresh `context.Background`
+  for the commit sub-commands so cancellation between `git add`
+  and `git commit` can't wedge the index. `--save-transcript`
+  errors out pointing to the stream-json workaround (needs Phase 12).
 - **Phase 11**: `SIGTERM` folded into exec mode signal handling.
 
 **Hard rule when extending `exec.Params`:**

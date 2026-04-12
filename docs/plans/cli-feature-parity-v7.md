@@ -10,7 +10,7 @@
 | 4 — continue + fork-session + session-db + list-sessions | **shipped** | 247fd14 | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
 | 5 — input flags | **shipped** | 9c67890 | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
 | 6 — hooks + ALTCODE_HOOK_DEPTH | pending | | |
-| 7 — save-* artifacts + --commit | pending | | |
+| 7 — save-* artifacts + --commit | **shipped** | (this commit) | Scoped staging via porcelain delta; `context.Background` for commit atomicity; `--save-transcript` errors out pending Phase 12 |
 | 8 — MaxTurns + CostBudget | **shipped** | (this commit) | `engine.CostBudget` atomic int64 micro-cents; subagent propagation; `BudgetExceeded` event |
 | 9 — batch runner | pending | | |
 | 10 — inspection flags | **shipped** | (this commit) | `--print-config` deep-redacts Provider/MCP/Team secrets; both reviewers caught leaks in round 1 |

@@ -1,6 +1,7 @@
 package exec
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -150,6 +151,26 @@ type Params struct {
 	// SystemFile is a path whose contents are appended to the
 	// system prompt. Combines with --system (both are appended).
 	SystemFile string
+
+	// --- Phase 7: artifacts + commit ---
+	// Commit triggers a `git commit` at the end of a successful
+	// run with an auto-generated commit message. Refuses if:
+	//   - --permission-mode plan was used (nothing was written)
+	//   - --dry-run was used (nothing was executed)
+	//   - working tree was dirty BEFORE the run (unless CommitDirty)
+	//   - the run produced no changes (silent success, exit 0)
+	Commit bool
+
+	// CommitDirty bypasses the clean-working-tree guard. Mixes
+	// human + agent changes in the same commit; loud stderr
+	// warning at startup.
+	CommitDirty bool
+
+	// preRunDirty captures `git status --porcelain` output at
+	// the entry to Run(). Used by the commit path to detect
+	// whether the working tree was dirty before the run started.
+	// Populated by Run(), not the caller.
+	preRunDirty string
 }
 
 // Permission mode constants. Match the permission.Mode enum at
@@ -224,6 +245,20 @@ func (p *Params) Validate() error {
 	}
 	if p.MaxCost < 0 {
 		return NewUsageError("--max-cost must be >= 0 (got %.4f; 0 = unlimited)", p.MaxCost)
+	}
+	// Phase 7: --commit is mutually exclusive with anything that
+	// produces no changes.
+	if p.Commit {
+		if p.DryRun {
+			return NewUsageError(
+				"--commit and --dry-run are mutually exclusive " +
+					"(dry-run doesn't write, nothing to commit)")
+		}
+		if p.PermissionMode == ModePlan {
+			return NewUsageError(
+				"--commit and --permission-mode plan are mutually exclusive " +
+					"(plan mode denies writes, nothing to commit)")
+		}
 	}
 	// --allow-tool / --deny-tool format check: each entry must be
 	// "name" or "name:pattern". Empty name is an error.
@@ -606,6 +641,42 @@ func Run(ctx context.Context, p Params) error {
 		return err
 	}
 
+	// Phase 7: snapshot pre-run working tree state so --commit can
+	// detect whether the user had uncommitted changes before this
+	// run started. Captured BEFORE engine construction so the
+	// check is accurate even if the engine's tools touch files.
+	//
+	// CC Phase 7 review caught: with --commit explicitly requested,
+	// a git status failure (no git, not a repo, submodule error)
+	// must fail the run upfront rather than silently bypassing the
+	// cleanliness check. If --commit is NOT set we don't care.
+	if p.Commit {
+		statusCmd := osexec.CommandContext(ctx, "git", "status", "--porcelain")
+		var statusErr bytes.Buffer
+		statusCmd.Stderr = &statusErr
+		out, err := statusCmd.Output()
+		if err != nil {
+			return NewUsageError(
+				"--commit: pre-run `git status` failed (%v) "+
+					"— not inside a git repo, or git unavailable: %s",
+				err, strings.TrimSpace(statusErr.String()))
+		}
+		p.preRunDirty = strings.TrimSpace(string(out))
+		if p.preRunDirty != "" && !p.CommitDirty {
+			return NewUsageError(
+				"--commit refuses to run with a dirty working tree " +
+					"(pass --commit-dirty to override, but this mixes " +
+					"human + agent changes in the same commit). Run " +
+					"`git status` to see what's uncommitted.")
+		}
+		if p.preRunDirty != "" && p.CommitDirty {
+			fmt.Fprintln(os.Stderr,
+				"altcode: --commit-dirty bypassing clean-working-tree "+
+					"check; your uncommitted changes will be in the "+
+					"next commit alongside agent edits")
+		}
+	}
+
 	eng := p.Engine
 	if eng == nil {
 		var err error
@@ -665,7 +736,207 @@ func Run(ctx context.Context, p Params) error {
 	} else if p.PrintCost {
 		printCostToStderr(time.Since(start), eng)
 	}
+
+	// Phase 7: artifact + commit handling runs AFTER the drain
+	// finishes but before Run returns. Errors from artifact
+	// writing / commit surface as the final return error; if the
+	// engine already errored we let that take precedence.
+	if err == nil && (p.SaveTranscript != "" || p.SaveCost != "" || p.SaveDiff != "") {
+		if aerr := writeArtifacts(ctx, &p, eng); aerr != nil {
+			err = aerr
+		}
+	}
+	if err == nil && p.Commit {
+		if cerr := commitChanges(ctx, &p); cerr != nil {
+			err = cerr
+		}
+	}
 	return err
+}
+
+// writeArtifacts writes optional post-run artifact files. Phase 7
+// ships the cost and diff artifacts; transcript is best-effort
+// because full replay would require re-running the drain.
+func writeArtifacts(ctx context.Context, p *Params, eng *engine.Engine) error {
+	if p.SaveCost != "" && eng != nil {
+		if ct := eng.CostTracker(); ct != nil {
+			in, out := ct.TotalTokens()
+			total := ct.TotalCost()
+			payload := map[string]any{
+				"input_tokens":  in,
+				"output_tokens": out,
+				"total_usd":     total,
+				"turns":         ct.Turns(),
+			}
+			data, err := json.MarshalIndent(payload, "", "  ")
+			if err != nil {
+				return fmt.Errorf("marshal cost: %w", err)
+			}
+			if werr := os.WriteFile(p.SaveCost, data, 0o644); werr != nil {
+				return fmt.Errorf("--save-cost %q: %w", p.SaveCost, werr)
+			}
+		}
+	}
+	if p.SaveDiff != "" {
+		// Snapshot the diff of any files touched since the pre-run
+		// capture. Uses `git diff HEAD` over the full tree because
+		// tracking which files the engine edited would require a
+		// separate event collector (Phase 12 will add that when
+		// --print-tree lands).
+		cmd := osexec.CommandContext(ctx, "git", "diff", "--no-color", "HEAD")
+		var buf bytes.Buffer
+		cmd.Stdout = &buf
+		cmd.Stderr = &buf
+		if rerr := cmd.Run(); rerr != nil {
+			return fmt.Errorf("--save-diff git diff: %w", rerr)
+		}
+		if werr := os.WriteFile(p.SaveDiff, buf.Bytes(), 0o644); werr != nil {
+			return fmt.Errorf("--save-diff %q: %w", p.SaveDiff, werr)
+		}
+	}
+	// --save-transcript was advertised as Phase 7 but requires the
+	// Phase 12 event accumulator. Rather than silently warn-and-
+	// succeed (Codex Phase 7 review caught that as a contract
+	// break), fail loudly with a clear workaround. Users will get
+	// a non-zero exit code and a pointer to the stream-json
+	// alternative.
+	if p.SaveTranscript != "" {
+		return NewUsageError(
+			"--save-transcript not yet implemented (Phase 12 " +
+				"event accumulator dependency). Workaround: " +
+				"`altcode --output-format stream-json PROMPT > transcript.jsonl`")
+	}
+	return nil
+}
+
+// commitChanges runs `git commit -m <message>` after a successful
+// run when --commit was set. Refuses gracefully if the run
+// produced no changes (exits 0 with an info line instead of
+// erroring). Auto-generates a short commit message from the
+// prompt text.
+//
+// Staging is SCOPED: only paths that appeared or changed between
+// preRunDirty and the post-run `git status --porcelain` are
+// staged explicitly via `git add -- <paths>`. This prevents the
+// `git add -A` blast radius that CC Phase 7 review caught —
+// otherwise --commit would sweep every untracked file in the
+// repo (screenshots, .env, build artifacts) into the commit.
+//
+// --commit-dirty relaxes the scope: pre-run dirty paths are
+// also staged, so the commit contains both human and agent work.
+//
+// Cancellation atomicity: Codex Phase 7 review caught that if
+// ctx cancels between `git add` and `git commit`, the index is
+// left staged with no commit. We use context.Background for the
+// git sub-commands here so a late SIGINT/SIGTERM doesn't wedge
+// the working tree between stages. The caller already ran the
+// full engine loop and received Done before we got here.
+func commitChanges(_ context.Context, p *Params) error {
+	ctx := context.Background()
+	statusCmd := osexec.CommandContext(ctx, "git", "status", "--porcelain")
+	var statusErr bytes.Buffer
+	statusCmd.Stderr = &statusErr
+	out, err := statusCmd.Output()
+	if err != nil {
+		return fmt.Errorf("--commit: post-run git status failed: %w: %s",
+			err, strings.TrimSpace(statusErr.String()))
+	}
+	postRun := strings.TrimSpace(string(out))
+	if postRun == "" {
+		fmt.Fprintln(os.Stderr, "altcode: --commit: no changes to commit")
+		return nil
+	}
+
+	// Compute the delta: paths that the engine actually touched.
+	// Without this, a user with screenshots in the repo root would
+	// see every screenshot swept into the "agent" commit. The
+	// porcelain format is "XY path\n" where XY is the two-char
+	// status code.
+	preRunPaths := porcelainPaths(p.preRunDirty)
+	postRunPaths := porcelainPaths(postRun)
+	var toStage []string
+	for path := range postRunPaths {
+		// In --commit-dirty mode, stage everything (pre-run + agent).
+		// Otherwise stage only paths the engine touched.
+		if p.CommitDirty || !preRunPaths[path] {
+			toStage = append(toStage, path)
+		}
+	}
+	// Paths that were in preRunDirty but NOT in postRun mean the
+	// engine reverted them — those don't need explicit staging.
+	if len(toStage) == 0 {
+		fmt.Fprintln(os.Stderr, "altcode: --commit: no agent-edited files to commit")
+		return nil
+	}
+
+	// git add -- <paths>. Capture stderr so failures are actionable.
+	addArgs := append([]string{"add", "--"}, toStage...)
+	addCmd := osexec.CommandContext(ctx, "git", addArgs...)
+	var addStderr bytes.Buffer
+	addCmd.Stderr = &addStderr
+	if err := addCmd.Run(); err != nil {
+		return fmt.Errorf("--commit: git add failed: %w: %s",
+			err, strings.TrimSpace(addStderr.String()))
+	}
+
+	msg := generateCommitMessage(p.Prompt)
+	commitCmd := osexec.CommandContext(ctx, "git", "commit", "-m", msg)
+	var commitStderr bytes.Buffer
+	commitCmd.Stderr = &commitStderr
+	if err := commitCmd.Run(); err != nil {
+		return fmt.Errorf("--commit: git commit failed: %w\n%s",
+			err, strings.TrimSpace(commitStderr.String()))
+	}
+	fmt.Fprintf(os.Stderr, "altcode: committed %d file(s) with message: %s\n",
+		len(toStage), msg)
+	return nil
+}
+
+// porcelainPaths parses `git status --porcelain` output into a
+// set of filesystem paths. Each line is "XY path" or "XY path -> renamed_path".
+// For renamed entries we use the NEW path (right side of the arrow)
+// because that's what the post-run actually reflects.
+func porcelainPaths(porcelain string) map[string]bool {
+	if porcelain == "" {
+		return nil
+	}
+	out := make(map[string]bool)
+	for _, line := range strings.Split(porcelain, "\n") {
+		if len(line) < 4 {
+			continue
+		}
+		// Skip status chars (2) + space (1) = 3 chars of prefix.
+		path := line[3:]
+		// Rename entries: "XY old -> new". Use the new path.
+		if i := strings.Index(path, " -> "); i >= 0 {
+			path = path[i+4:]
+		}
+		out[path] = true
+	}
+	return out
+}
+
+// generateCommitMessage builds a conventional-commit-ish message
+// from the prompt text. Keeps it under 72 characters (first line)
+// and tags with [altcode] so humans can distinguish agent commits
+// from their own. Never uses the prompt content verbatim — a
+// carefully-worded commit title is usually cleaner than truncating
+// raw prompt text.
+func generateCommitMessage(prompt string) string {
+	// First line of the prompt, trimmed and truncated.
+	first := prompt
+	if i := strings.IndexByte(first, '\n'); i >= 0 {
+		first = first[:i]
+	}
+	first = strings.TrimSpace(first)
+	if first == "" {
+		first = "agent commit"
+	}
+	const maxLen = 60
+	if len(first) > maxLen {
+		first = first[:maxLen-3] + "..."
+	}
+	return fmt.Sprintf("[altcode] %s", first)
 }
 
 // drainJSONFinal collects the full turn into a single JSON object

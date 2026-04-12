@@ -12,6 +12,37 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 7: artifacts + commit)
+
+- `--commit` runs a `git commit` at end of a successful run with an
+  auto-generated `[altcode] <prompt-first-line>` message. Refuses if
+  `--dry-run` or `--permission-mode plan` were used (nothing to
+  commit), or if the pre-run working tree was dirty (unless
+  `--commit-dirty`).
+- **Scoped staging**: `--commit` stages only paths that differ
+  between the pre-run and post-run `git status --porcelain`
+  snapshots, via `git add -- <paths>`. Previous `git add -A`
+  approach would sweep every untracked file in the repo
+  (screenshots, `.env`, build artifacts) into the commit — CC
+  Phase 7 review caught this as a BLOCKER.
+- `--commit-dirty` bypasses the clean-working-tree guard. Mixes
+  pre-run human changes with agent changes in the same commit.
+  Loud stderr warning at startup.
+- `--save-cost <path>` writes a JSON cost report (total tokens,
+  USD, per-turn entries from the engine's cost tracker).
+- `--save-diff <path>` writes `git diff HEAD` (staged + unstaged,
+  pre-commit) to a file. Useful for `altcode --commit --save-diff
+  patch.diff` flows that want both the commit AND the patch.
+- `--save-transcript` is registered but errors on use — it needs
+  the Phase 12 event accumulator. Workaround: `--output-format
+  stream-json PROMPT > transcript.jsonl`.
+- Cancellation atomicity: the final `git add` + `git commit`
+  sequence runs under a fresh `context.Background()` so a late
+  SIGINT/SIGTERM can't wedge the working tree with a staged but
+  uncommitted index (Codex Phase 7 review catch).
+- Pre-run `git status` failure now fails `--commit` fast instead
+  of silently bypassing the cleanliness guard (CC Phase 7 BLOCKER).
+
 ### Added (Phase 8: budgets)
 
 - `--max-turns <n>` overrides the default agent-loop iteration cap

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"reflect"
 	"strings"
@@ -779,6 +780,221 @@ func TestPrepareInputs_CRLFPromptFile(t *testing.T) {
 	}
 	if p.Prompt != "hello" {
 		t.Errorf("CRLF not trimmed: got %q", p.Prompt)
+	}
+}
+
+// --- Phase 7: artifact + commit --------------------------------------
+
+func TestValidate_CommitWithDryRun(t *testing.T) {
+	p := &Params{Commit: true, DryRun: true}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected --commit + --dry-run error")
+	}
+}
+
+func TestValidate_CommitWithPlanMode(t *testing.T) {
+	p := &Params{Commit: true, PermissionMode: "plan"}
+	if err := p.Validate(); err == nil {
+		t.Fatal("expected --commit + --permission-mode plan error")
+	}
+}
+
+func TestValidate_CommitAloneOK(t *testing.T) {
+	p := &Params{Commit: true}
+	if err := p.Validate(); err != nil {
+		t.Errorf("--commit alone should be valid, got %v", err)
+	}
+}
+
+// TestCommitChanges_NoOp verifies the "no changes to commit" path.
+// Spins up a temp git repo, runs commitChanges with no edits, and
+// checks that no commit is created and no error is returned.
+func TestCommitChanges_NoOp(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	// Init a fresh repo with one committed file so HEAD exists.
+	// Failure here means git isn't on PATH — skip the test rather
+	// than red it in environments without git.
+	if err := exec.Command("git", "init", "-q").Run(); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	_ = exec.Command("git", "config", "user.email", "t@t").Run()
+	_ = exec.Command("git", "config", "user.name", "test").Run()
+	_ = os.WriteFile("README.md", []byte("hi"), 0o644)
+	_ = exec.Command("git", "add", "README.md").Run()
+	_ = exec.Command("git", "commit", "-q", "-m", "init").Run()
+
+	p := &Params{Commit: true, Prompt: "no-op"}
+	if err := commitChanges(context.Background(), p); err != nil {
+		t.Errorf("no-op commit should not error, got: %v", err)
+	}
+}
+
+// TestPorcelainPaths verifies the status parser used by
+// commitChanges to compute the pre/post-run delta. CC Phase 7
+// review caught that the old `git add -A` approach would sweep
+// in any untracked file; scoped staging depends on this parse
+// being correct.
+func TestPorcelainPaths(t *testing.T) {
+	cases := []struct {
+		name     string
+		input    string
+		wantKeys []string
+	}{
+		{"empty", "", nil},
+		{
+			"one modified",
+			" M foo.go",
+			[]string{"foo.go"},
+		},
+		{
+			"mixed",
+			" M foo.go\n?? new.txt\nA  staged.py",
+			[]string{"foo.go", "new.txt", "staged.py"},
+		},
+		{
+			"rename",
+			"R  old.go -> new.go",
+			[]string{"new.go"},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := porcelainPaths(tc.input)
+			if len(got) != len(tc.wantKeys) {
+				t.Errorf("got %d paths, want %d: %v",
+					len(got), len(tc.wantKeys), got)
+			}
+			for _, k := range tc.wantKeys {
+				if !got[k] {
+					t.Errorf("missing path %q in %v", k, got)
+				}
+			}
+		})
+	}
+}
+
+// TestCommitChanges_ScopedStaging verifies the fix for the CC
+// Phase 7 BLOCKER: only agent-edited files get staged, not the
+// entire working tree. Creates a temp repo with an unrelated
+// untracked file (e.g. a screenshot), then runs commitChanges
+// after writing an agent-style edit.
+func TestCommitChanges_ScopedStaging(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "init", "-q").Run(); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	_ = exec.Command("git", "config", "user.email", "t@t").Run()
+	_ = exec.Command("git", "config", "user.name", "test").Run()
+	_ = os.WriteFile("README.md", []byte("hi"), 0o644)
+	_ = exec.Command("git", "add", "README.md").Run()
+	_ = exec.Command("git", "commit", "-q", "-m", "init").Run()
+
+	// An unrelated untracked file (e.g. a screenshot the user
+	// dropped in the repo). Without the scoped-staging fix,
+	// `git add -A` would pull this into the commit.
+	_ = os.WriteFile("unrelated.png", []byte("fake"), 0o644)
+
+	// Simulate an agent edit AFTER the pre-run snapshot. The
+	// pre-run snapshot captured unrelated.png as ?? unrelated.png,
+	// so only agent.go is "new" in the delta.
+	preRun, _ := exec.Command("git", "status", "--porcelain").Output()
+	_ = os.WriteFile("agent.go", []byte("package x\n"), 0o644)
+
+	// Real-world flow: preRunDirty captures the ?? unrelated.png
+	// line, the agent adds agent.go, and commitChanges should
+	// stage ONLY the delta (agent.go), not unrelated.png.
+	// Validate() would normally reject the run because preRunDirty
+	// is non-empty without --commit-dirty, but we're calling
+	// commitChanges directly to isolate the scoping logic.
+	p := &Params{
+		Prompt:      "add agent.go",
+		preRunDirty: strings.TrimSpace(string(preRun)),
+	}
+	if err := commitChanges(context.Background(), p); err != nil {
+		t.Fatalf("commitChanges: %v", err)
+	}
+
+	// Verify the commit contains ONLY agent.go, NOT unrelated.png.
+	out, _ := exec.Command("git", "show", "--name-only", "--pretty=").Output()
+	files := strings.Fields(string(out))
+	var hasAgent, hasUnrelated bool
+	for _, f := range files {
+		if f == "agent.go" {
+			hasAgent = true
+		}
+		if f == "unrelated.png" {
+			hasUnrelated = true
+		}
+	}
+	if !hasAgent {
+		t.Errorf("expected agent.go in commit, got: %v", files)
+	}
+	if hasUnrelated {
+		t.Errorf("unrelated.png should NOT be in commit (scoped staging), got: %v", files)
+	}
+}
+
+// TestCommitChanges_WithEdit verifies the happy commit path.
+func TestCommitChanges_WithEdit(t *testing.T) {
+	dir := t.TempDir()
+	wd, _ := os.Getwd()
+	defer os.Chdir(wd)
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	if err := exec.Command("git", "init", "-q").Run(); err != nil {
+		t.Skipf("git not available: %v", err)
+	}
+	_ = exec.Command("git", "config", "user.email", "t@t").Run()
+	_ = exec.Command("git", "config", "user.name", "test").Run()
+	_ = os.WriteFile("README.md", []byte("hi"), 0o644)
+	_ = exec.Command("git", "add", "README.md").Run()
+	_ = exec.Command("git", "commit", "-q", "-m", "init").Run()
+
+	// Simulate an agent edit after the pre-run snapshot was empty.
+	_ = os.WriteFile("new.go", []byte("package x\n"), 0o644)
+
+	p := &Params{Commit: true, Prompt: "add hello", preRunDirty: ""}
+	if err := commitChanges(context.Background(), p); err != nil {
+		t.Fatalf("commit with changes should succeed, got: %v", err)
+	}
+	// Verify a commit exists with the expected subject.
+	out, _ := exec.Command("git", "log", "--pretty=%s", "-1").Output()
+	subj := strings.TrimSpace(string(out))
+	if subj != "[altcode] add hello" {
+		t.Errorf("commit subject = %q, want '[altcode] add hello'", subj)
+	}
+}
+
+func TestGenerateCommitMessage(t *testing.T) {
+	cases := []struct {
+		prompt string
+		want   string
+	}{
+		{"fix the failing tests", "[altcode] fix the failing tests"},
+		{"", "[altcode] agent commit"},
+		{
+			"this is a very long prompt text that should be truncated at sixty characters total",
+			"[altcode] this is a very long prompt text that should be truncated ...",
+		},
+		{"multi\nline\nprompt", "[altcode] multi"},
+	}
+	for _, tc := range cases {
+		got := generateCommitMessage(tc.prompt)
+		if got != tc.want {
+			t.Errorf("generateCommitMessage(%q): got %q, want %q",
+				tc.prompt, got, tc.want)
+		}
 	}
 }
 

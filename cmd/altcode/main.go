@@ -84,6 +84,10 @@ type cliFlags struct {
 	// Phase 8: budgets
 	maxTurns int     // --max-turns (>0) agent loop cap
 	maxCost  float64 // --max-cost (>0) post-turn USD cap
+
+	// Phase 7: artifact + commit
+	commit      bool // --commit after successful run
+	commitDirty bool // --commit-dirty bypass clean-tree guard
 }
 
 func main() {
@@ -155,7 +159,8 @@ func main() {
 	root.Flags().BoolVar(&flags.showSystem, "show-system", false,
 		"Print the system prompt to stderr at start (debugging aid)")
 	root.Flags().StringVar(&flags.saveTranscript, "save-transcript", "",
-		"Write full JSONL transcript to file (Phase 7)")
+		"Write full JSONL transcript to file — NOT YET IMPLEMENTED. "+
+			"Workaround: --output-format stream-json PROMPT > transcript.jsonl")
 	root.Flags().StringVar(&flags.saveCost, "save-cost", "",
 		"Write cost report (JSON) to file (Phase 7)")
 	root.Flags().StringVar(&flags.saveDiff, "save-diff", "",
@@ -178,6 +183,13 @@ func main() {
 	root.Flags().Float64Var(&flags.maxCost, "max-cost", 0,
 		"Post-turn USD budget cap. Engine stops between turns when "+
 			"accumulated cost exceeds this limit. 0 = unlimited.")
+
+	// --- Phase 7: artifact + commit ---
+	root.Flags().BoolVar(&flags.commit, "commit", false,
+		"Run `git commit` at end of run with auto-generated message")
+	root.Flags().BoolVar(&flags.commitDirty, "commit-dirty", false,
+		"Allow --commit even when the pre-run working tree was dirty "+
+			"(mixes human + agent changes in the commit)")
 
 	// --- Phase 10: inspection (print-and-exit) ---
 	root.Flags().BoolVar(&flags.printConfig, "print-config", false,
@@ -567,6 +579,8 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			SystemFile:     flags.systemFile,
 			MaxTurns:       flags.maxTurns,
 			MaxCost:        flags.maxCost,
+			Commit:         flags.commit,
+			CommitDirty:    flags.commitDirty,
 		}
 		if err := ep.Validate(); err != nil {
 			return err
