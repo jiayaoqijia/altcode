@@ -6,7 +6,7 @@
 |-------|--------|--------|-------|
 | 1 — output format + observability | **shipped** | 4fcc3d1 | 15 unit tests; both CC+Codex PASS on round 2 |
 | 2 — permission mode + allow/deny tools | **shipped** | 2aadd77 | 9 unit tests; documented config-deny-shadowing limitation |
-| 3 — permission-prompt-tool | pending | | Unblocked by Phase 2 |
+| 3 — permission-prompt-tool | **shipped** | (this commit) | Routes through existing `tool.Registry`; unconditional MCP startup when flag set; post-connect validation; fail-closed on every error path |
 | 4 — continue + fork-session + session-db + list-sessions | **shipped** | 247fd14 | Renamed from --session-dir; `store.DB.ForkSession` added with transactional copy + `ErrSessionNotFound` sentinel |
 | 5 — input flags | **shipped** | 9c67890 | Anthropic-only multimodal via `EngineParams.PendingInputParts`; strict provider gate required |
 | 6 — hooks + ALTCODE_HOOK_DEPTH | **shipped** | (this commit) | `hooks.Runner.AddMatcher` + env-var recursion guard; nested altcode invocations refuse hook registration when depth > 3 |

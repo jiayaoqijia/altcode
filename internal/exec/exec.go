@@ -18,6 +18,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/altcode-ai/altcode/internal/tool"
 )
 
 // Output format constants. Empty string = text (default).
@@ -215,6 +216,24 @@ type Params struct {
 	// to continue through all lines and report the failures
 	// at the end.
 	Bail bool
+
+	// --- Phase 3: permission prompt tool ---
+	// PermissionPromptTool is the name of an MCP tool that should
+	// answer permission requests in headless mode. Must be a
+	// fully-qualified MCP tool name with the `mcp__<server>__`
+	// prefix (validated at flag parse time). When set, the exec
+	// drain routes each PermissionRequest event through the
+	// registered tool and uses the response as the allow/deny
+	// decision. Without this, --permission-mode default fails
+	// fast in headless mode instead of blocking forever on a
+	// prompt that has no responder.
+	PermissionPromptTool string
+
+	// Registry is populated by runExec after the engine is
+	// constructed. The permission drain handler looks up the
+	// prompt tool here instead of talking to MCP directly.
+	// Not a user-facing field; internal plumbing.
+	Registry *tool.Registry
 }
 
 // Permission mode constants. Match the permission.Mode enum at
@@ -331,6 +350,20 @@ func (p *Params) Validate() error {
 		return NewUsageError(
 			"--prompt-each and positional prompt are mutually exclusive " +
 				"(batch mode reads prompts from the file)")
+	}
+	// Phase 3: --permission-prompt-tool must have the MCP prefix
+	// so the registry lookup can find it. Bareword names won't
+	// match because MCP tools are registered as mcp__<server>__<tool>.
+	if err := validatePromptToolName(p.PermissionPromptTool); err != nil {
+		return NewUsageError("%v", err)
+	}
+	// --permission-mode bypass + --permission-prompt-tool is
+	// nonsensical because bypass skips permission checks entirely.
+	if p.PermissionMode == ModeBypass && p.PermissionPromptTool != "" {
+		return NewUsageError(
+			"--permission-mode bypass + --permission-prompt-tool are " +
+				"mutually exclusive (bypass allows everything; the " +
+				"prompt tool would never be asked)")
 	}
 	// --allow-tool / --deny-tool format check: each entry must be
 	// "name" or "name:pattern". Empty name is an error.
@@ -1250,21 +1283,24 @@ func drainJSONFinal(ctx context.Context, ch <-chan event.Event, w io.Writer, p *
 				result.Errors = append(result.Errors, ev.Error)
 			}
 		case event.PermissionRequest:
-			// Phase 3 will wire --permission-prompt-tool. In Phase 1
-			// we have no responder, so auto-deny to unblock the engine
-			// AND record the denial so callers can see what was blocked.
+			// Phase 3: route the request through
+			// --permission-prompt-tool (or the fail-closed
+			// deny fallback if unset). The decision is async
+			// so we can't know it from inside this synchronous
+			// loop — record the REQUEST with action "pending"
+			// and rely on the handler's stderr diagnostic for
+			// the decision detail.
 			if ev.Permission != nil {
+				action := "prompted"
+				if p.PermissionPromptTool == "" {
+					action = "auto-deny"
+				}
 				result.Permissions = append(result.Permissions, permissionRecord{
 					Tool:    ev.Permission.ToolName,
 					Pattern: ev.Permission.Pattern,
-					Action:  "auto-deny",
+					Action:  action,
 				})
-				if ev.Permission.Response != nil {
-					select {
-					case ev.Permission.Response <- event.PermResponse{Action: event.Deny}:
-					case <-ctx.Done():
-					}
-				}
+				handlePermissionRequest(ctx, ev, p.PermissionPromptTool, p.Registry)
 			}
 		}
 	}
@@ -1327,12 +1363,9 @@ func drainDiff(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 				lastErrs = append(lastErrs, ev.Error)
 			}
 		case event.PermissionRequest:
-			if ev.Permission != nil && ev.Permission.Response != nil {
-				select {
-				case ev.Permission.Response <- event.PermResponse{Action: event.Deny}:
-				case <-ctx.Done():
-				}
-			}
+			// Phase 3: route through the prompt-tool handler
+			// (fail-closed deny if unset).
+			handlePermissionRequest(ctx, ev, p.PermissionPromptTool, p.Registry)
 		}
 	}
 
@@ -1538,19 +1571,9 @@ func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 				fmt.Fprintf(os.Stderr, "%s%s%s\n", dim, ev.Info, reset)
 			}
 		case event.PermissionRequest:
-			// Phase 1 has no --permission-prompt-tool wiring yet.
-			// Auto-deny so the engine doesn't block forever. Phase 3
-			// replaces this with a proper MCP-routed responder.
-			if ev.Permission != nil && ev.Permission.Response != nil {
-				select {
-				case ev.Permission.Response <- event.PermResponse{Action: event.Deny}:
-				case <-ctx.Done():
-				}
-				fmt.Fprintf(os.Stderr,
-					"%saltcode: permission request for %s auto-denied "+
-						"(Phase 3 will add --permission-prompt-tool)%s\n",
-					dim, ev.Permission.ToolName, reset)
-			}
+			// Phase 3: route through --permission-prompt-tool
+			// (defaults to fail-closed deny when unset).
+			handlePermissionRequest(ctx, ev, p.PermissionPromptTool, p.Registry)
 		case event.BudgetExceeded:
 			// Phase 8: print the budget-exceeded reason to stderr so
 			// headless users can tell "ran out of turns" or "hit the
@@ -1588,11 +1611,8 @@ func drainJSON(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 		// sending the deny response — engine.askPermission blocks on
 		// <-respCh forever. The answer path is independent from the
 		// stdout path; keep them decoupled.
-		if ev.Type == event.PermissionRequest && ev.Permission != nil && ev.Permission.Response != nil {
-			select {
-			case ev.Permission.Response <- event.PermResponse{Action: event.Deny}:
-			case <-ctx.Done():
-			}
+		if ev.Type == event.PermissionRequest {
+			handlePermissionRequest(ctx, ev, p.PermissionPromptTool, p.Registry)
 		}
 
 		// On encode error (broken pipe, disk full, etc.) stop writing

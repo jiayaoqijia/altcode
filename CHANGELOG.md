@@ -12,6 +12,42 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 3: --permission-prompt-tool — headless permission routing)
+
+Completes the headless CLI permission story. Previously `altcode
+--permission-mode default` in headless mode would hang indefinitely
+(no responder) or auto-deny everything (Phase 1 stopgap). Now an
+MCP tool can answer the prompts.
+
+- `--permission-prompt-tool mcp__<server>__<tool>` routes permission
+  requests through the named MCP tool. The drain handler spawns a
+  goroutine per request, invokes the tool with
+  `{"tool_name":"bash","pattern":"ls"}`, parses the response for
+  `{"allow": bool, "reason": "..."}`, and feeds the decision back
+  into the engine's response channel.
+- **Fail-closed everywhere**: missing prompt-tool flag, tool not in
+  registry, exec error, unparseable JSON, or response timeout all
+  return `event.Deny`. A buggy or unreachable tool must never
+  accidentally allow a dangerous operation.
+- **Strict prefix validation**: `--permission-prompt-tool` must
+  start with `mcp__` — bareword tool names are rejected at flag
+  parse because MCP tools are always registered under their
+  server prefix.
+- **Unconditional MCP startup**: when `--permission-prompt-tool`
+  is set, MCP servers start regardless of whether the prompt
+  matches any MCP keywords. Phase 1 only started them when the
+  prompt contained keywords like `playwright` or `mcp__`.
+- **Post-connect registry validation**: `runExec` checks the
+  prompt tool is actually registered BEFORE the engine's first
+  turn, so typos and misconfigured servers fail fast with
+  exit code 64 instead of failing mid-run.
+- **Mutual exclusion**: `--permission-mode bypass +
+  --permission-prompt-tool` is a value-dependent rule enforced
+  in `Params.Validate()` (bypass skips the permission check
+  entirely, so the prompt tool would never be asked).
+- Per-request timeout capped at 30 seconds so a stuck prompt
+  tool can't wedge a run.
+
 ### Added (Phase 9: batch runner — --prompt-each + --parallel + --retry + --bail)
 
 - `--prompt-each <file>` reads prompts line-by-line (skipping blanks

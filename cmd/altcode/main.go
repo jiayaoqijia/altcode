@@ -89,6 +89,9 @@ type cliFlags struct {
 	commit      bool // --commit after successful run
 	commitDirty bool // --commit-dirty bypass clean-tree guard
 
+	// Phase 3: permission-prompt-tool
+	permPromptTool string // --permission-prompt-tool mcp__<server>__<tool>
+
 	// Phase 6: hooks + extensions
 	cliHooks []string // --hook event:command (repeatable)
 	cliMCP   []string // --mcp name:command (repeatable)
@@ -186,6 +189,12 @@ func main() {
 		"Deny a tool [name] or [name:pattern] for this session (repeatable)")
 	root.Flags().BoolVar(&flags.dryRun, "dry-run", false,
 		"Alias for --permission-mode plan (read-only, no writes)")
+
+	// --- Phase 3: permission prompt tool ---
+	root.Flags().StringVar(&flags.permPromptTool, "permission-prompt-tool", "",
+		"MCP tool name (mcp__<server>__<tool>) to answer permission "+
+			"requests in headless mode. Without this, --permission-mode "+
+			"default fails fast instead of blocking on permission prompts.")
 
 	// --- Phase 8: budgets ---
 	root.Flags().IntVar(&flags.maxTurns, "max-turns", 0,
@@ -634,10 +643,11 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			SaveTranscript: flags.saveTranscript,
 			SaveCost:       flags.saveCost,
 			SaveDiff:       flags.saveDiff,
-			PermissionMode: flags.permissionMode,
-			AllowTools:     flags.allowTools,
-			DenyTools:      flags.denyTools,
-			DryRun:         flags.dryRun,
+			PermissionMode:       flags.permissionMode,
+			PermissionPromptTool: flags.permPromptTool,
+			AllowTools:           flags.allowTools,
+			DenyTools:            flags.denyTools,
+			DryRun:               flags.dryRun,
 			Images:         flags.images,
 			Files:          flags.files,
 			PromptFile:     flags.promptFile,
@@ -747,22 +757,40 @@ func runExec(ep exec.Params) error {
 		return fmt.Errorf("create engine: %w", err)
 	}
 	ep.Engine = eng
+	// Phase 3: expose the engine's tool registry to the drain
+	// handler so --permission-prompt-tool can look up the configured
+	// MCP tool without reaching into engine internals.
+	ep.Registry = eng.Registry()
 
-	// Only start MCP servers if prompt likely needs them.
-	// MCP startup adds 1-5s of blocking latency per server.
-	// Use the signal-cancellable ctx so SIGTERM tears down servers
-	// instead of leaking them with context.Background().
-	//
-	// Phase 3 will add: `|| ep.PermissionPromptTool != ""` so that
-	// headless permission-prompt-tool works even when the prompt
-	// doesn't happen to mention MCP. For Phase 1 we keep the current
-	// keyword-only gating.
+	// Phase 3: unconditional MCP startup when --permission-prompt-tool
+	// is set, in addition to the prompt-keyword gating. Without
+	// this, a user requesting --permission-prompt-tool mcp__auth__ask
+	// but writing a prompt that doesn't match any MCP keywords would
+	// get a "tool not found in registry" error because MCP servers
+	// never started.
 	var mcpCleanup func()
-	if needsMCP(ep.Prompt) {
+	if needsMCP(ep.Prompt) || ep.PermissionPromptTool != "" {
 		mcpCleanup = connectMCPWithCtx(ctx, ep.EngineParams.Config, eng)
 	}
 	if mcpCleanup != nil {
 		defer mcpCleanup()
+	}
+
+	// Phase 3: after MCP connection completes, validate that the
+	// requested prompt tool actually registered. This catches
+	// typos and misconfigured MCP servers upfront with a clear
+	// EX_USAGE error instead of letting the first permission
+	// request fail with a confusing "tool not found" mid-run.
+	if ep.PermissionPromptTool != "" {
+		if _, ok := eng.Registry().Get(ep.PermissionPromptTool); !ok {
+			return &exec.UsageError{
+				Msg: fmt.Sprintf(
+					"--permission-prompt-tool %q not found in registry "+
+						"(check MCP server config or run `altcode --print-mcp`)",
+					ep.PermissionPromptTool),
+				ExitCode: 64,
+			}
+		}
 	}
 
 	// Banner fields on exec.Params were previously populated from
