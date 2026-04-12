@@ -12,6 +12,27 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 13: cross-phase integration tests)
+
+- New `internal/exec/validate_test.go` with a 34-case table-driven
+  `TestValidate_Matrix` covering every mutual-exclusion rule from
+  Phases 1-9. Asserts both happy-path (rule satisfied) AND
+  unhappy-path (rule triggered) combinations plus the typed
+  `*UsageError` exit code 64 contract.
+- New `cmd/altcode/cli_smoke_test.go` with binary-level end-to-end
+  tests: builds the altcode binary to a temp path, invokes it
+  with Phases 1-12 flag combinations, and asserts on stderr
+  patterns + exit codes.
+  - `TestCLI_HelpListsAllFlags` verifies every Phase 0-12 flag
+    appears in `--help` — catches regressions where a cliFlags
+    field is added but never registered on root.
+  - `TestCLI_ValidationErrorExitsUsage` runs 8 bad-flag combos
+    and asserts exit 64 + expected stderr substring.
+  - `TestCLI_InspectionFlagsExitZero` runs all 5 --print-* flags
+    and asserts they exit cleanly with non-empty output.
+  - `TestCLI_PrintConfigRedactsSecrets` smoke check that --print-config
+    doesn't leak credential patterns.
+
 ### Added (Phase 3: --permission-prompt-tool — headless permission routing)
 
 Completes the headless CLI permission story. Previously `altcode
