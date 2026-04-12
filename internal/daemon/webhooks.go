@@ -65,6 +65,7 @@ func (wh *WebhookHandler) HandleWebhook(
 		handleErr = wh.handlePRCommentEvent(body, deliveryID)
 	default:
 		// Unhandled event type -- acknowledge silently.
+		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(200)
 		fmt.Fprintf(w, `{"status":"ignored","event":%q}`, eventType)
 		return
@@ -72,6 +73,7 @@ func (wh *WebhookHandler) HandleWebhook(
 
 	if handleErr != nil {
 		if isDuplicateDelivery(handleErr) {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(409)
 			fmt.Fprintf(w, `{"error":"duplicate delivery"}`)
 			return
@@ -85,6 +87,7 @@ func (wh *WebhookHandler) HandleWebhook(
 		return
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(200)
 	fmt.Fprintf(w, `{"status":"ok"}`)
 }
