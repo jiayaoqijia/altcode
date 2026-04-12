@@ -75,6 +75,32 @@ Key files: store.go (SQLite), subprocess.go (process groups), orchestrator.go
 sse.go (streaming), github.go (PR lifecycle), webhooks.go (triggers),
 budget.go (stall detection), modes.go (Solo/Pair/Team routing).
 
+**Running the daemon:**
+```bash
+altcode daemon --port 9100 --auth-token $TOKEN --data-dir ~/.altcode/daemon
+```
+
+**Creating tasks:**
+```bash
+curl -X POST http://localhost:9100/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_url":"https://github.com/you/repo","task":"fix tests","model":"altllm-basic"}'
+```
+
+**Model routing:** Models auto-detect provider by prefix (`altllm-basic` → altllm,
+`deepseek-v3` → deepseek). No `provider/` slash needed for known providers.
+
+**E2E verified pipeline (4 roles, real backends):**
+- Lead (altcode + altllm-basic) — architecture planning
+- Implementer (codex + gpt-5.4) — code generation
+- Reviewer (claude code) — code review
+- Tester (codex + gpt-5.4) — test generation
+
+**Edge cases handled:** whitespace-only fields → 400, duplicate delivery_id → 409,
+stop/steer nonexistent task → 404, stop/steer completed task → 409,
+BudgetController thread-safe (sync.Mutex), subprocess stdout buffered (no pipe race).
+
 ### CLI Feature Parity (implemented)
 
 Spec: `docs/plans/cli-feature-parity-v7.md` — 13 phases bringing the

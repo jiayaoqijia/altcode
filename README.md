@@ -91,26 +91,171 @@ All validation errors exit with code 64 (EX_USAGE). Design spec reviewed across 
 
 ## AltFix Daemon (`altcode daemon`)
 
-HTTP daemon for the AltFix coding agent platform. Spawns codex/claude as subprocesses, orchestrates the Lead→Implement→Review→Test loop, persists to SQLite, streams progress via SSE.
+HTTP daemon for autonomous coding agents. Spawns codex/claude/altcode as subprocesses, orchestrates the **Lead → Implement → Review → Test** pipeline, persists to SQLite, streams progress via SSE.
+
+### Starting the daemon
 
 ```bash
+# Start with auth token (required for all endpoints except /health)
 altcode daemon --port 9100 --auth-token $TOKEN --data-dir ~/.altcode/daemon
+
+# Or use environment variables
+export ALTCODE_DAEMON_PORT=9100
+export ALTCODE_DAEMON_AUTH_TOKEN=$(openssl rand -hex 16)
+altcode daemon
 ```
 
-**Endpoints:**
+### REST API
+
+All endpoints require `Authorization: Bearer $TOKEN` (except `/health`).
+
 ```
-POST /tasks              Create a coding task
+POST /tasks              Create a coding task (201 / 400 / 409)
 GET  /tasks              List all tasks
-GET  /tasks/:id          Get task status + queue position
-GET  /tasks/:id/sse      SSE progress streaming (Last-Event-ID replay)
+GET  /tasks/:id          Get task + queue position
+GET  /tasks/:id/sse      SSE event stream (Last-Event-ID replay)
 GET  /tasks/:id/checkpoints  Named phase snapshots
-POST /tasks/:id/steer    Inject message mid-execution
-POST /tasks/:id/stop     Cancel a running task
-POST /webhooks/github    Label/comment trigger (@altfix)
-GET  /health             Liveness probe
+POST /tasks/:id/steer    Inject guidance mid-execution (202)
+POST /tasks/:id/stop     Cancel a running task (202 / 404 / 409)
+POST /webhooks/github    GitHub webhook trigger (@altfix label/comment)
+GET  /health             Liveness probe (no auth)
 ```
 
-**23 source files, 230 tests**, zero CLI/TUI impact. Design reviewed across 5 rounds by CC + Codex as 30-year agent experts (17 blockers found + fixed before implementation). See `docs/superpowers/specs/2026-04-12-altfix-daemon-design.md`.
+### Creating tasks
+
+```bash
+# Simple task
+curl -X POST http://localhost:9100/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"repo_url":"https://github.com/you/repo","task":"fix the failing tests"}'
+
+# With model routing — agents use altllm-basic for implementation
+curl -X POST http://localhost:9100/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/you/repo",
+    "task": "add rate limiting to the API",
+    "model": "altllm-basic",
+    "branch": "fix/rate-limit",
+    "max_cost_usd": 2.00,
+    "max_turns": 30
+  }'
+
+# Webhook-triggered (GitHub delivery dedup via delivery_id)
+curl -X POST http://localhost:9100/tasks \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "repo_url": "https://github.com/you/repo",
+    "task": "fix issue #42",
+    "delivery_id": "gh-webhook-abc123",
+    "issue_number": 42,
+    "repo_owner": "you",
+    "repo_name": "repo"
+  }'
+```
+
+### Model routing
+
+The daemon supports flexible model routing per role. Models are auto-detected by prefix — no separate `--provider` flag needed:
+
+| Model | Auto-detected provider |
+|-------|----------------------|
+| `altllm-basic` | altllm (api.altllm.ai) |
+| `altllm-standard` | altllm |
+| `deepseek-v3` | DeepSeek |
+| `moonshot-v1-8k` | Kimi |
+| `minimax-01` | MiniMax |
+| `qwen-turbo` | Qwen |
+| `claude-3-opus` | Anthropic |
+| `openai/gpt-5.4` | OpenAI |
+
+**4-role pipeline (E2E verified):**
+
+| Role | Recommended model | Purpose |
+|------|------------------|---------|
+| Lead | altllm-basic | Architecture planning, task decomposition |
+| Implementer | codex / altllm-basic | Code generation |
+| Reviewer | claude / altllm-standard | Code review, bug finding |
+| Tester | codex / altllm-basic | Test generation, verification |
+
+### Monitoring tasks
+
+```bash
+# Get task status + queue position
+curl http://localhost:9100/tasks/$TASK_ID \
+  -H "Authorization: Bearer $TOKEN"
+
+# Stream progress via SSE (supports Last-Event-ID replay)
+curl -N http://localhost:9100/tasks/$TASK_ID/sse \
+  -H "Authorization: Bearer $TOKEN"
+
+# Steer a running task
+curl -X POST http://localhost:9100/tasks/$TASK_ID/steer \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"message":"focus on error handling, skip the UI changes"}'
+
+# Stop a task
+curl -X POST http://localhost:9100/tasks/$TASK_ID/stop \
+  -H "Authorization: Bearer $TOKEN"
+```
+
+### GitHub webhook integration
+
+Add a webhook to your GitHub repo pointing at `/webhooks/github` with HMAC-SHA256 verification:
+
+```bash
+# Trigger via @altfix label on an issue
+# Trigger via @altfix mention in a comment
+# Duplicate deliveries are rejected (409) via delivery_id dedup
+```
+
+### Edge-case behavior
+
+| Scenario | Response |
+|----------|----------|
+| Whitespace-only `repo_url` or `task` | 400 Bad Request |
+| Duplicate `delivery_id` | 409 Conflict |
+| Stop nonexistent task | 404 Not Found |
+| Stop already-completed task | 409 Conflict |
+| Steer completed task | 409 Conflict |
+| SSE for nonexistent task | 404 Not Found |
+| Invalid JSON body | 400 Bad Request |
+| Missing auth token | 401 Unauthorized |
+
+### Architecture
+
+**23 source files, 230 tests**, zero CLI/TUI imports. The daemon is fully isolated — agents are spawned as subprocesses via `os/exec` with process-group teardown (`Setpgid` + `SIGTERM` → `SIGKILL`).
+
+```
+internal/daemon/
+├── server.go          HTTP server, auth middleware, graceful shutdown
+├── handlers.go        REST endpoints (create, get, list, stop, steer)
+├── sse.go             SSE streaming with Last-Event-ID replay
+├── store.go           SQLite persistence (tasks, events, WAL mode)
+├── subprocess.go      Agent process spawning with process groups
+├── orchestrator.go    Lead→Implement→Review→Test phase loop
+├── lifecycle.go       Orphan recovery, timeout, panic guard
+├── github.go          PR creation, CI status, comments, reactions
+├── git_safety.go      Rebase, branch protection, hook retry
+├── webhooks.go        GitHub webhook handler (HMAC verify, dedup)
+├── budget.go          Cost/turn limits, stall detection
+├── modes.go           Solo/Pair/Team routing, complexity estimation
+├── prompts.go         Agent prompt templates per phase
+├── task_state.go      Versioned state with checksum verification
+├── checkpoints.go     Named phase snapshots + restore
+├── concurrency.go     Semaphore-based task concurrency
+├── memory_loops.go    Post-task review, skill extraction
+├── repo_intel.go      Language/test/lint detection
+├── security_scan.go   Trufflehog + semgrep integration
+├── sanitize.go        Instruction sanitization, prompt injection guard
+└── web_tools.go       Rate-limited web search per task
+```
+
+Design reviewed across 5 rounds by CC + Codex as 30-year agent experts (17 blockers found + fixed). See `docs/superpowers/specs/2026-04-12-altfix-daemon-design.md`.
 
 ## Multi-Provider Agent Orchestration
 
@@ -430,9 +575,16 @@ AI-generated code decays fast. The harness fights entropy:
 | Any OpenAI-compat | any prefix | Falls back to configured `openai` provider |
 
 ```bash
+# Explicit prefix (provider/model)
 altcode --model deepseek/deepseek-chat "fix this"
 altcode --model altllm/altllm-basic "add tests"
 altcode --model ollama/llama3 "explain this error"
+
+# Auto-detected prefix — no slash needed for known providers
+altcode --model altllm-basic "add tests"       # → altllm provider
+altcode --model deepseek-v3 "fix this"         # → deepseek provider
+altcode --model moonshot-v1-8k "review code"   # → moonshot provider
+altcode --model qwen-turbo "explain this"      # → qwen provider
 ```
 
 ### Coding plans (MiniMax / GLM / Kimi)
