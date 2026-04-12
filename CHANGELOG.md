@@ -12,6 +12,26 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 12: --print-tree + --save-transcript)
+
+- `--print-tree` renders an ASCII tool tree to stderr at end of run.
+  Flat layout with ✓/✗ status icons, ├─/└─ glyphs, and per-tool
+  elapsed times. Tool input summaries pull the most informative
+  field (file_path, command, pattern, url, query, prompt, old_string).
+- `--save-transcript <path>` now actually writes a JSONL transcript
+  (the Phase 7 placeholder that previously errored out). Every
+  event the engine emits lands in the file, one per line, with an
+  ISO timestamp.
+- New internal `eventAccumulator` in `internal/exec/tree.go`:
+  tee goroutine forwards engine events to both the drain AND the
+  accumulator so neither path blocks the other. Accumulator is
+  only instantiated when `--print-tree` or `--save-transcript`
+  is set, so the common path stays zero-cost.
+- Tool Start/Result pairing is ID-keyed — interleaved parallel
+  tool calls don't mis-attribute results to the wrong tree entry.
+  Out-of-order Start-after-Result (backpressure) upgrades the
+  synthesized record in place instead of creating a duplicate.
+
 ### Added (Phase 7: artifacts + commit)
 
 - `--commit` runs a `git commit` at end of a successful run with an

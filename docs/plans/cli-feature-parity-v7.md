@@ -15,7 +15,7 @@
 | 9 — batch runner | pending | | |
 | 10 — inspection flags | **shipped** | (this commit) | `--print-config` deep-redacts Provider/MCP/Team secrets; both reviewers caught leaks in round 1 |
 | **11 — SIGTERM** | **shipped** | 4fcc3d1 | Folded into Phase 1 |
-| 12 — --print-tree ASCII renderer | pending | | |
+| 12 — --print-tree ASCII renderer | **shipped** | (this commit) | Event accumulator + tee goroutine; also implements --save-transcript which was a Phase 7 placeholder |
 | 13 — integration tests | pending | | Partially grown per-phase alongside each implementation |
 
 ### Deviations from the design doc (tracked here to keep git history clean)

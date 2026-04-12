@@ -159,8 +159,7 @@ func main() {
 	root.Flags().BoolVar(&flags.showSystem, "show-system", false,
 		"Print the system prompt to stderr at start (debugging aid)")
 	root.Flags().StringVar(&flags.saveTranscript, "save-transcript", "",
-		"Write full JSONL transcript to file — NOT YET IMPLEMENTED. "+
-			"Workaround: --output-format stream-json PROMPT > transcript.jsonl")
+		"Write full JSONL event transcript to file (Phase 12)")
 	root.Flags().StringVar(&flags.saveCost, "save-cost", "",
 		"Write cost report (JSON) to file (Phase 7)")
 	root.Flags().StringVar(&flags.saveDiff, "save-diff", "",

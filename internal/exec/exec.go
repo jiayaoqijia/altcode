@@ -715,6 +715,26 @@ func Run(ctx context.Context, p Params) error {
 	start := time.Now()
 	ch := eng.Run(ctx, p.Prompt)
 
+	// Phase 12: event accumulator for --print-tree and --save-transcript.
+	// Nil when neither flag is set so we don't pay the buffer cost
+	// on the common path.
+	acc := newEventAccumulator(&p)
+	if acc != nil {
+		// Wrap the channel in a tee so every event reaches both the
+		// drain and the accumulator. We drain the tee here in the
+		// main goroutine so the accumulator stays single-writer
+		// and we don't need a mutex.
+		teed := make(chan event.Event, 64)
+		go func() {
+			defer close(teed)
+			for ev := range ch {
+				acc.observe(ev)
+				teed <- ev
+			}
+		}()
+		ch = teed
+	}
+
 	var err error
 	switch format {
 	case FormatStreamJSON:
@@ -725,6 +745,21 @@ func Run(ctx context.Context, p Params) error {
 		err = drainDiff(ctx, ch, w, &p)
 	default: // FormatText
 		err = drainText(ctx, ch, w, &p)
+	}
+
+	// Phase 12: render tool tree + write transcript after drain
+	// finishes. These run regardless of err because the user asked
+	// for diagnostics and suppressing them on failure would hide
+	// the very information they need.
+	if acc != nil {
+		if p.PrintTree {
+			acc.renderTree(os.Stderr)
+		}
+		if p.SaveTranscript != "" {
+			if terr := acc.writeTranscript(p.SaveTranscript); terr != nil && err == nil {
+				err = fmt.Errorf("--save-transcript: %w", terr)
+			}
+		}
 	}
 
 	// Footer (cost + timing) shows when:
@@ -794,18 +829,10 @@ func writeArtifacts(ctx context.Context, p *Params, eng *engine.Engine) error {
 			return fmt.Errorf("--save-diff %q: %w", p.SaveDiff, werr)
 		}
 	}
-	// --save-transcript was advertised as Phase 7 but requires the
-	// Phase 12 event accumulator. Rather than silently warn-and-
-	// succeed (Codex Phase 7 review caught that as a contract
-	// break), fail loudly with a clear workaround. Users will get
-	// a non-zero exit code and a pointer to the stream-json
-	// alternative.
-	if p.SaveTranscript != "" {
-		return NewUsageError(
-			"--save-transcript not yet implemented (Phase 12 " +
-				"event accumulator dependency). Workaround: " +
-				"`altcode --output-format stream-json PROMPT > transcript.jsonl`")
-	}
+	// --save-transcript is handled by the Phase 12 event
+	// accumulator in Run() itself, not here. writeArtifacts only
+	// covers cost + diff; transcript writing happens after
+	// acc.observe() has captured every event.
 	return nil
 }
 
