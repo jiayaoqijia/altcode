@@ -16,10 +16,11 @@ import (
 
 // ServerConfig holds daemon startup parameters.
 type ServerConfig struct {
-	Port      int
-	DataDir   string
-	AuthToken string
-	MaxTasks  int
+	Port           int
+	DataDir        string
+	AuthToken      string
+	MaxTasks       int
+	WebhookSecret  string
 }
 
 // Server is the HTTP daemon.
@@ -54,6 +55,14 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		logger: logger,
 	}
 	s.registerRoutes()
+
+	if cfg.WebhookSecret != "" {
+		wh := NewWebhookHandler(store, cfg.WebhookSecret, logger)
+		s.mux.HandleFunc(
+			"POST /webhooks/github", wh.HandleWebhook,
+		)
+	}
+
 	return s, nil
 }
 
@@ -116,8 +125,11 @@ func (s *Server) middleware() http.Handler {
 func authMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health and metrics bypass auth.
-			if r.URL.Path == "/health" || r.URL.Path == "/metrics" {
+			// Health, metrics, and webhooks bypass auth.
+			// Webhooks use HMAC signature verification instead.
+			if r.URL.Path == "/health" ||
+				r.URL.Path == "/metrics" ||
+				strings.HasPrefix(r.URL.Path, "/webhooks/") {
 				next.ServeHTTP(w, r)
 				return
 			}
