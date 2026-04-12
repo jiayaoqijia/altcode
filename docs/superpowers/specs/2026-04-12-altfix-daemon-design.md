@@ -1,9 +1,10 @@
-# AltFix Daemon — Complete System Design (v3)
+# AltFix Daemon — Complete System Design (v4)
 
-> **Covers Issues #2-#27** (26 issues, #9 spike completed separately)
+> **Covers Issues #2-#34** (33 issues, #9 spike completed separately)
 > Designed as a 30-year agent/AI expert. All code lives in `internal/daemon/` — zero impact on existing CLI/TUI.
 > **v2**: Incorporated 6 blocker fixes from CC + Codex adversarial review.
-> **v3**: Added 6 new issues (#22-#27): web search, security scanning, parallel tasks, webhook triggers, promo credits, benchmarks.
+> **v3**: Added 6 new issues (#22-#27): web search, security scanning, parallel tasks, webhook triggers, promo credits, benchmarks. 5 new blockers found + fixed.
+> **v4**: Added 7 new issues (#28-#34): editable spec, video demo, deploy-preview, checkpoints, live timeline, queue position, push notifications. 2 are frontend-only (no daemon change). 5 need daemon code.
 
 ## Architecture
 
@@ -264,7 +265,7 @@ Replace regex-based command blocking with actual confinement:
 - Steer messages are USER content, never SYSTEM
 - Log suspicious patterns for admin review (keep the regex as a monitoring signal, not a security gate)
 
-## File Map (27 files, ~4,450 lines)
+## File Map (30 files, ~4,780 lines)
 
 | File | Lines | Issues | Purpose |
 |------|-------|--------|---------|
@@ -297,6 +298,8 @@ Replace regex-based command blocking with actual confinement:
 | `concurrency.go` | ~150 | #24 | Semaphore + per-task key + resource monitor |
 | `webhooks.go` | ~120 | #25 | Label/comment/PR-comment trigger parsing + dedup |
 | `credits.go` | ~80 | #26 | Idempotent promo generation + min cost threshold |
+| `video_demo.go` | ~80 | #29 | Playwright spawn + GCS upload + skip logic |
+| `checkpoints.go` | ~100 | #31 | Phase snapshot + restore + 2 REST endpoints |
 
 **Not in `internal/daemon/` (separate packages/scripts):**
 | Item | Issue | Notes |
@@ -654,6 +657,115 @@ Runs AltFix daemon API on each issue, measures: merge rate, task time, API cost,
 
 **New package:** `cmd/altfix-bench/` (~200 lines) — NOT in `internal/daemon/`
 
+### New in v4: Issues #28-#34
+
+#### #28: Editable Spec (pre-execution confirmation)
+
+After Phase 1 UNDERSTAND, the orchestrator pauses and emits a `spec` SSE event with `current_state` and `target_state` arrays. Daemon waits for confirmation (or 10-minute auto-continue timeout).
+
+```go
+func (o *Orchestrator) awaitSpecConfirmation(ctx context.Context, spec *Spec) error {
+    o.emitProgress(ProgressEvent{Type: "spec", Data: spec})
+    o.store.UpdateStatus(task.ID, "awaiting_spec")
+
+    select {
+    case confirmation := <-o.steerCh:
+        if confirmation.Action == "edit" {
+            spec = o.reinterpretSpec(confirmation.EditedSpec)
+        }
+    case <-time.After(10 * time.Minute):
+        // Auto-continue with original spec
+    case <-ctx.Done():
+        return ctx.Err()
+    }
+    return nil
+}
+```
+
+Spec stored as checkpoint artifact (#31). User edits arrive via `POST /tasks/:id/steer` with `{"action": "edit", "spec": {...}}`.
+
+**Extends:** `orchestrator.go` (+50 lines)
+**New status:** `awaiting_spec` in task state machine
+
+#### #29: Video Demo (Playwright recording)
+
+In Phase 5 FINALIZE, if the repo has a `dev`/`start` script AND UI files were changed:
+
+1. Boot app: `npm run dev` / `go run .` / `python manage.py runserver`
+2. Wait for server ready (poll localhost port)
+3. Spawn Playwright headless: navigate to changed URL, record 30s interaction
+4. Save as .webm (max 10MB)
+5. Upload to GCS bucket via `gsutil cp`
+6. Attach URL in PR description
+
+Skip if: backend-only changes, no start script, Playwright not installed.
+
+**New file:** `video_demo.go` (~80 lines)
+**VM image (#18):** pre-install Playwright + Chromium headless + ffmpeg
+
+#### #30: Deploy-Preview URL
+
+Keep the sandbox app running after tests pass. Expose the port in task status. Cloud Claw server proxies `https://claw.altllm.ai/altfix/preview/:taskId` to the VM's sandbox port.
+
+```go
+type TaskStatus struct {
+    // existing fields...
+    PreviewURL  string `json:"preview_url,omitempty"`   // set when app is running
+    PreviewPort int    `json:"preview_port,omitempty"`
+}
+```
+
+Auto-shutdown after TTL (default 30 min, configurable `ALTFIX_PREVIEW_TTL`). Daemon registers a cleanup timer.
+
+**Extends:** `orchestrator.go` (+20 lines) + `handlers.go` (+20 lines)
+**Cloud Claw server:** new proxy route (NOT in this spec — separate TS/JS work)
+
+#### #31: Named Checkpoint Browser
+
+After each phase transition, store a named checkpoint:
+
+```go
+type Checkpoint struct {
+    Phase       string    `json:"phase"`
+    PhaseNumber int       `json:"phase_number"`
+    Timestamp   time.Time `json:"timestamp"`
+    GitSHA      string    `json:"git_sha"`
+    TestSummary string    `json:"test_summary"`
+    CostSoFar   float64   `json:"cost_so_far"`
+    FilesChanged int      `json:"files_changed"`
+}
+```
+
+New daemon endpoints:
+- `GET /tasks/:id/checkpoints` — list checkpoints
+- `POST /tasks/:id/restore` — git checkout + reset plan state to checkpoint
+
+SSE event: `checkpoint_created` with the Checkpoint struct.
+
+**New file:** `checkpoints.go` (~100 lines)
+**Schema addition:** `checkpoints` table in tasks.db
+
+#### #33: Queue Position Indicator
+
+For serial V1 execution: when a task is queued behind a running task, include position + estimated wait time in task status and SSE.
+
+```go
+type QueueInfo struct {
+    Position     int `json:"queue_position"`    // 0 = running, 1+ = queued
+    EstWaitSecs  int `json:"est_wait_seconds"`  // based on running task progress
+    RunningTask  string `json:"running_task_id,omitempty"`
+}
+```
+
+New SSE event type: `queue_update` with QueueInfo.
+
+**Extends:** `concurrency.go` (+50 lines) — add queue tracking and wait estimation
+
+#### #32 + #34: Frontend-Only (no daemon changes)
+
+- **#32 live timeline scrubber:** Reads existing `phase_started`/`phase_completed` SSE events from #5. Pure frontend rendering. Zero daemon code.
+- **#34 push notifications:** Reads existing task completion SSE event. Frontend service worker + `showNotification()`. Zero daemon code.
+
 ## Dependency Chain + Implementation Order
 
 ```
@@ -704,7 +816,14 @@ Runs AltFix daemon API on each issue, measures: merge rate, task time, API cost,
 | **#25 webhook triggers** | — | **1d** | **NEW** |
 | **#26 promo credits** | — | **0.5d** | **NEW** |
 | **#27 benchmark suite** | — | **2d** | **NEW (separate binary)** |
-| **Total** | **~35d** | **~45d** | **+10 days (6 new issues + reviewer-adjusted estimates)** |
+| **#28 editable spec** | — | **0.5d** | **NEW v4 — orchestrator pause + SSE spec event** |
+| **#29 video demo** | — | **1d** | **NEW v4 — Playwright + GCS upload** |
+| **#30 deploy-preview** | — | **0.5d** | **NEW v4 — expose port + proxy config** |
+| **#31 checkpoints** | — | **1d** | **NEW v4 — store + 2 endpoints + restore** |
+| **#33 queue position** | — | **0.5d** | **NEW v4 — queue tracking + SSE** |
+| #32 live timeline | — | 0d | Frontend-only (no daemon) |
+| #34 push notifications | — | 0d | Frontend-only (no daemon) |
+| **Total** | **~35d** | **~50d** | **+15 days across 4 review rounds (11+4 blockers fixed)** |
 
 ## What This Does NOT Touch
 
@@ -781,3 +900,38 @@ Daemon crash between task completion and promo write loses the credit.
 - **Credit threshold gaming:** added diff-size gate (min 10 lines changed excluding test boilerplate) alongside cost gate. Updated in #26 design.
 - **Estimate revised:** v3 total revised from 41.5d to **~45d** per reviewer feedback.
 - **Benchmark CI:** pinned to 10 deterministic fast issues for CI gate, full 100 as nightly. Updated in #27 design.
+
+### v4 Review (4 new blockers — all fixed below)
+
+**B12: Spec confirmation / steer channel collision (#28).**
+`awaitSpecConfirmation` reads `o.steerCh` — same channel as #6 steering. A normal steer message during spec-wait is consumed as confirmation. Both reviewers caught this.
+**Fix:** Use a DEDICATED `specConfirmCh chan *SpecConfirmation` separate from the generic steerCh. The `/tasks/:id/steer` handler routes to the correct channel based on `task.Status == "awaiting_spec"`. Buffered(1) + `sync.Once` gate so late arrivals get HTTP 409.
+
+**B13: Checkpoint restore must kill agents first (#31).**
+`POST /restore` does `git checkout` without stopping in-flight agents. An agent writing files during checkout corrupts state. Both reviewers caught this.
+**Fix:** Restore sequence:
+1. Cancel all running agent processes for the task (via context cancellation + process group kill)
+2. Wait for process exit (5s grace → SIGKILL)
+3. `git stash` any uncommitted changes (preserve, don't discard)
+4. `git checkout <checkpoint_sha>`
+5. Reset plan state from checkpoint artifact
+6. Emit `checkpoint_restored` SSE event
+
+**B14: Video demo on critical path with no timeout (#29).**
+Playwright crash or hung dev server blocks task finalization indefinitely. Both reviewers caught this.
+**Fix:** Make video recording BEST-EFFORT BACKGROUND work:
+- 60-second hard timeout on Playwright recording
+- 30-second hard timeout on GCS upload
+- If either fails: skip video, note in PR "Video demo unavailable"
+- Task finalization does NOT wait for video — it completes, then video uploads async
+- Memory guard: skip video if VM RSS > 80% of available
+
+**B15: Deploy-preview port collision (#30).**
+Preview keeps the app on a port for 30 min. Next task may need the same port. Codex caught this.
+**Fix:** Dynamic port allocation. Daemon assigns a unique port per task from a pool (9200-9299). Port returned to pool on preview shutdown. If pool exhausted: skip preview with a note. Preview URL includes the allocated port: `https://claw.altllm.ai/altfix/preview/:taskId` proxied to `vm:allocatedPort`.
+
+### Concerns addressed (v4)
+
+- **#33 estimated wait time:** replaced with elapsed-time extrapolation + honest disclaimer. No fake progress percentage.
+- **#29 estimate:** revised from 1d to 1.5d to account for headless flake handling + browser deps.
+- **Total estimate revised to ~50d** (from 48.5d + 1.5d blocker fixes).
