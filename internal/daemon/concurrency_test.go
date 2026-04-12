@@ -106,6 +106,31 @@ func TestConcurrencyManager_Cancel(t *testing.T) {
 	cm.Release("t1")
 }
 
+func TestConcurrencyManager_CancelReleasesSlot(t *testing.T) {
+	cm := NewConcurrencyManager(1, testLogger())
+
+	_, cancel1 := context.WithCancel(context.Background())
+	if !cm.TryAcquire("task-1", cancel1) {
+		t.Fatal("TryAcquire should succeed for task-1")
+	}
+
+	cm.Cancel("task-1")
+
+	if cm.ActiveCount() != 0 {
+		t.Errorf("active after cancel = %d, want 0",
+			cm.ActiveCount())
+	}
+
+	// The cancelled slot must be freed: a new task should acquire.
+	_, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	if !cm.TryAcquire("task-2", cancel2) {
+		t.Fatal("TryAcquire should succeed for task-2 " +
+			"after task-1 was cancelled")
+	}
+	cm.Release("task-2")
+}
+
 func TestConcurrencyManager_ActiveCount(t *testing.T) {
 	cm := NewConcurrencyManager(5, testLogger())
 

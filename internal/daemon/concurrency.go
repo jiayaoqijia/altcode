@@ -66,6 +66,8 @@ func (cm *ConcurrencyManager) Cancel(taskID string) {
 	cm.mu.Lock()
 	if cancel, ok := cm.active[taskID]; ok {
 		cancel()
+		delete(cm.active, taskID)
+		<-cm.sem
 	}
 	cm.mu.Unlock()
 }
