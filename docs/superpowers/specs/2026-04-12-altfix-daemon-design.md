@@ -1,10 +1,11 @@
-# AltFix Daemon — Complete System Design (v4)
+# AltFix Daemon — Complete System Design (v5)
 
-> **Covers Issues #2-#34** (33 issues, #9 spike completed separately)
+> **Covers Issues #2-#35** (31 open issues; #9 spike done, #26/#30/#34 closed)
 > Designed as a 30-year agent/AI expert. All code lives in `internal/daemon/` — zero impact on existing CLI/TUI.
 > **v2**: Incorporated 6 blocker fixes from CC + Codex adversarial review.
-> **v3**: Added 6 new issues (#22-#27): web search, security scanning, parallel tasks, webhook triggers, promo credits, benchmarks. 5 new blockers found + fixed.
-> **v4**: Added 7 new issues (#28-#34): editable spec, video demo, deploy-preview, checkpoints, live timeline, queue position, push notifications. 2 are frontend-only (no daemon change). 5 need daemon code.
+> **v3**: Added 6 new issues (#22-#27). 5 new blockers found + fixed.
+> **v4**: Added 7 new issues (#28-#34). 4 new blockers found + fixed. 3 issues closed (#26/#30/#34).
+> **v5**: Added #35 (WebSocket bidirectional channel). Consolidates SSE+POST steer into multiplexed WS. SSE kept as read-only fallback. Simplifies B12 (spec/steer collision) by using typed WS commands.
 
 ## Architecture
 
@@ -265,7 +266,7 @@ Replace regex-based command blocking with actual confinement:
 - Steer messages are USER content, never SYSTEM
 - Log suspicious patterns for admin review (keep the regex as a monitoring signal, not a security gate)
 
-## File Map (30 files, ~4,780 lines)
+## File Map (31 files, ~4,930 lines)
 
 | File | Lines | Issues | Purpose |
 |------|-------|--------|---------|
@@ -300,6 +301,7 @@ Replace regex-based command blocking with actual confinement:
 | `credits.go` | ~80 | #26 | Idempotent promo generation + min cost threshold |
 | `video_demo.go` | ~80 | #29 | Playwright spawn + GCS upload + skip logic |
 | `checkpoints.go` | ~100 | #31 | Phase snapshot + restore + 2 REST endpoints |
+| `websocket.go` | ~150 | #35 | WS upgrade, event fan-out, command router |
 
 **Not in `internal/daemon/` (separate packages/scripts):**
 | Item | Issue | Notes |
@@ -761,10 +763,58 @@ New SSE event type: `queue_update` with QueueInfo.
 
 **Extends:** `concurrency.go` (+50 lines) — add queue tracking and wait estimation
 
-#### #32 + #34: Frontend-Only (no daemon changes)
+#### #32: Frontend-Only (no daemon changes)
 
-- **#32 live timeline scrubber:** Reads existing `phase_started`/`phase_completed` SSE events from #5. Pure frontend rendering. Zero daemon code.
-- **#34 push notifications:** Reads existing task completion SSE event. Frontend service worker + `showNotification()`. Zero daemon code.
+- **#32 live timeline scrubber:** Reads existing `phase_started`/`phase_completed` events (now via WS or SSE fallback). Pure frontend rendering. Zero daemon code.
+
+#### Issues #26, #30, #34: Closed
+
+- **#26 promo credits:** closed (moved to Cloud Claw server-side billing, not daemon)
+- **#30 deploy-preview:** closed (deferred to V2 — requires Cloud Claw proxy changes)
+- **#34 push notifications:** closed (frontend service worker, no daemon component)
+
+### New in v5: Issue #35
+
+#### #35: WebSocket Bidirectional Channel
+
+Replaces the SSE + separate POST pattern for interactive control with a single multiplexed WebSocket connection. This is the modern consensus (Devin, Cursor, Replit all use WS for interactive agent control).
+
+**Endpoint:** `/ws/:taskId` — WebSocket upgrade on the daemon HTTP server.
+
+**Server→Client events** (same payload shape as SSE, now over WS frames):
+```json
+{"type": "phase", "data": {"phase": "implement", "timestamp": "..."}}
+{"type": "file", "data": {"path": "auth.ts", "action": "editing"}}
+{"type": "agent", "data": {"role": "coder", "message": "Implementing..."}}
+{"type": "checkpoint", "data": {"phase": "implement", "git_sha": "abc"}}
+{"type": "cost", "data": {"total_usd": 2.15}}
+{"type": "spec", "data": {"current_state": [...], "target_state": [...]}}
+{"type": "complete", "data": {"pr_url": "...", "cost": 4.30}}
+```
+
+**Client→Server commands:**
+```json
+{"cmd": "steer", "message": "also add tests for edge cases"}
+{"cmd": "approve-spec", "edited_spec": {...}}
+{"cmd": "approve-plan"}
+{"cmd": "pause"}
+{"cmd": "resume"}
+{"cmd": "stop"}
+{"cmd": "restore-checkpoint", "checkpoint_id": "phase-3-abc123"}
+```
+
+**Architecture:**
+- `gorilla/websocket` (stdlib has no WS server) — single dep, widely used
+- One WS connection per task viewer. Fan-out: multiple viewers subscribe to the same task's event channel
+- Cloud Claw server proxies WS via existing `handleUpgrade` pattern
+- SSE endpoint KEPT for: read-only timeline replay (`Last-Event-ID`), multi-tab fan-out, environments without WS
+
+**Simplifies B12 (spec/steer collision):**
+With WS, spec approval is an explicit `{"cmd": "approve-spec"}` command, distinct from `{"cmd": "steer"}`. No shared channel — the WS handler demuxes on the `cmd` field. The `specConfirmCh` from v4's B12 fix becomes a WS command route, not a Go channel race.
+
+**New file:** `websocket.go` (~150 lines) — WS upgrade handler, event fan-out, command router
+**Extends:** `handlers.go` (+20 lines for WS upgrade route)
+**New dependency:** `gorilla/websocket` (added to go.mod)
 
 ## Dependency Chain + Implementation Order
 
@@ -823,7 +873,8 @@ New SSE event type: `queue_update` with QueueInfo.
 | **#33 queue position** | — | **0.5d** | **NEW v4 — queue tracking + SSE** |
 | #32 live timeline | — | 0d | Frontend-only (no daemon) |
 | #34 push notifications | — | 0d | Frontend-only (no daemon) |
-| **Total** | **~35d** | **~50d** | **+15 days across 4 review rounds (11+4 blockers fixed)** |
+| **#35 WebSocket** | — | **2d** | **NEW v5 — WS handler + auth + priority queue + replay** |
+| **Total** | **~35d** | **~52d** | **+17 days across 5 review rounds (17 blockers fixed)** |
 
 ## What This Does NOT Touch
 
@@ -935,3 +986,20 @@ Preview keeps the app on a port for 30 min. Next task may need the same port. Co
 - **#33 estimated wait time:** replaced with elapsed-time extrapolation + honest disclaimer. No fake progress percentage.
 - **#29 estimate:** revised from 1d to 1.5d to account for headless flake handling + browser deps.
 - **Total estimate revised to ~50d** (from 48.5d + 1.5d blocker fixes).
+
+### v5 Review (2 new blockers — all fixed below)
+
+**B16: WS auth transport (#35).**
+Browser WebSocket API cannot set `Authorization` headers. Bearer token in query params leaks in logs/proxies. Codex caught this.
+**Fix:** First-frame auth protocol. WS upgrades without auth. Client must send `{"cmd": "auth", "token": "..."}` as the FIRST message within 5 seconds. If missing or invalid: server closes with code 4001 (unauthorized). Token never appears in URL. Server-side: `websocket.go` reads first frame, validates token, then enters the event loop. Unauthenticated connections get no events.
+
+**B17: Command arbitration / preemption (#35).**
+No priority model for concurrent WS commands. `stop` must preempt queued `steer`. Both reviewers caught this.
+**Fix:** Command priority ladder: `stop` > `pause` > `restore-checkpoint` > `approve-*` > `steer` > `resume`. Implementation: each command enters a priority queue (heap). Orchestrator consumes highest-priority command first. `stop` sets an atomic flag that short-circuits all lower-priority commands. Idempotency: duplicate `stop` commands are no-op.
+
+**Concerns addressed (v5):**
+- **Reconnect + missed events (CC):** WS events carry a monotonic sequence number (from `task_events.id`). On reconnect, client sends `{"cmd": "auth", "token": "...", "last_seq": 42}`. Server replays from `task_events` WHERE `id > 42`, then switches to live.
+- **Single source of truth (Codex):** Both SSE and WS read from the SAME `task_events` table via `ProgressEmitter`. No parallel event channel — both are consumers of the append-only event log. Ordering guaranteed by SQLite autoincrement.
+- **Fan-out bounds (Codex):** Max 10 WS connections per task. Slow consumers (>5s behind) get evicted with WS close code 4002 (slow consumer).
+- **gorilla/websocket (CC):** Acknowledged as maintenance mode. Noted `nhooyr.io/websocket` as preferred alternative for Go 1.22+. Decision deferred to implementation phase — either works.
+- **Estimate revised:** #35 from 1.5d to 2d (reconnect-replay + auth protocol + priority queue).
