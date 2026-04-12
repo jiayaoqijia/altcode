@@ -3,6 +3,8 @@ package hooks
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/altcode-ai/altcode/internal/provider"
@@ -97,6 +99,39 @@ func (r *Runner) providerSnapshot() (provider.Provider, string) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	return r.provider, r.model
+}
+
+// AddMatcher appends a matcher config to the given event. Used by
+// Phase 6 CLI flag --hook which registers ad-hoc hooks at startup
+// without writing to settings.json. The appended matcher runs
+// alongside any pre-existing configs (no replacement, no dedupe).
+func (r *Runner) AddMatcher(ev Event, mc MatcherConfig) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.configs[ev] = append(r.configs[ev], mc)
+}
+
+// KnownEvents returns the list of valid Event constants so callers
+// can validate user-supplied event names without hard-coding the
+// list in a dozen places.
+func KnownEvents() []Event {
+	return []Event{
+		PreToolUse, PostToolUse, Stop, SessionStart, SessionEnd,
+		UserPromptSubmit, SubagentStop, PreCompact, Notification,
+		CwdChanged, FileChanged, TaskCreated, PermissionDenied,
+	}
+}
+
+// ParseEvent maps a CLI event name to the Event constant with
+// case-insensitive matching. Returns an error for unknown names.
+func ParseEvent(name string) (Event, error) {
+	lower := strings.ToLower(name)
+	for _, e := range KnownEvents() {
+		if strings.ToLower(string(e)) == lower {
+			return e, nil
+		}
+	}
+	return "", fmt.Errorf("unknown hook event %q (valid: PreToolUse, PostToolUse, Stop, SessionStart, SessionEnd, UserPromptSubmit, SubagentStop, PreCompact, Notification, CwdChanged, FileChanged, TaskCreated, PermissionDenied)", name)
 }
 
 // Fire executes all hooks matching the event and tool name.

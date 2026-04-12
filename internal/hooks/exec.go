@@ -5,13 +5,67 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
+	"strconv"
 	"time"
 )
 
 const defaultTimeout = 30
 
+// maxHookDepth caps how deeply hooks can recursively invoke altcode
+// (or any tool that re-runs hooks). Phase 6 added this guard
+// because a hook shelling out to `altcode` would otherwise fork-bomb
+// the system when its child re-registered the same hook.
+const maxHookDepth = 3
+
+// HookDepthExceeded is returned (as the error in the Result) when
+// ALTCODE_HOOK_DEPTH is already at the cap and firing another hook
+// would exceed it. Converted to a "deny" Result for safety — failing
+// open would cancel the recursion guard's purpose.
+var HookDepthExceeded = fmt.Errorf("hook depth exceeded (max %d)", maxHookDepth)
+
+// currentHookDepth reads the ALTCODE_HOOK_DEPTH env var set by
+// parent altcode invocations. Returns 0 when unset or non-numeric.
+func currentHookDepth() int {
+	s := os.Getenv("ALTCODE_HOOK_DEPTH")
+	if s == "" {
+		return 0
+	}
+	n, err := strconv.Atoi(s)
+	if err != nil || n < 0 {
+		return 0
+	}
+	return n
+}
+
+// DepthGuardTripped returns true if the current process's hook
+// depth is at or past the cap. Used by cmd/altcode/main.go at
+// startup to refuse to register any hooks on a recursive invocation.
+func DepthGuardTripped() bool {
+	return currentHookDepth() >= maxHookDepth
+}
+
 func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Result, error) {
+	// Phase 6: recursion guard. A hook that shells out to `altcode`
+	// would otherwise fork-bomb the system because the child
+	// invocation re-registers the same hook. We propagate
+	// ALTCODE_HOOK_DEPTH via the child env; the child reads it
+	// at startup and refuses to register hooks when depth > cap.
+	//
+	// Here we still ALLOW the run (so the top-level hook fires
+	// once), but we increment the depth for the child shell.
+	depth := currentHookDepth()
+	if depth >= maxHookDepth {
+		return &Result{
+			Decision: "deny",
+			Message: fmt.Sprintf(
+				"altcode: refusing to run command hook — "+
+					"ALTCODE_HOOK_DEPTH=%d already at cap %d",
+				depth, maxHookDepth),
+		}, nil
+	}
+
 	timeout := entry.Timeout
 	if timeout <= 0 {
 		timeout = defaultTimeout
@@ -27,6 +81,11 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 	// would leave `helper` orphaned when the timeout fires.
 	configureProcessGroup(cmd)
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
+
+	// Inject ALTCODE_HOOK_DEPTH into the child env so nested
+	// altcode invocations can detect recursion and refuse.
+	cmd.Env = append(os.Environ(),
+		fmt.Sprintf("ALTCODE_HOOK_DEPTH=%d", depth+1))
 
 	inputJSON, err := json.Marshal(input)
 	if err != nil {

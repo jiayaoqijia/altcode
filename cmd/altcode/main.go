@@ -88,6 +88,11 @@ type cliFlags struct {
 	// Phase 7: artifact + commit
 	commit      bool // --commit after successful run
 	commitDirty bool // --commit-dirty bypass clean-tree guard
+
+	// Phase 6: hooks + extensions
+	cliHooks []string // --hook event:command (repeatable)
+	cliMCP   []string // --mcp name:command (repeatable)
+	cliSkill []string // --skill name (repeatable)
 }
 
 func main() {
@@ -189,6 +194,21 @@ func main() {
 	root.Flags().BoolVar(&flags.commitDirty, "commit-dirty", false,
 		"Allow --commit even when the pre-run working tree was dirty "+
 			"(mixes human + agent changes in the commit)")
+
+	// --- Phase 6: hooks + extensions ---
+	root.Flags().StringArrayVar(&flags.cliHooks, "hook", nil,
+		"Register an ad-hoc hook for this run (repeatable). "+
+			"Format: event:command, e.g. "+
+			"--hook PreToolUse:'validate.sh'. "+
+			"Events: PreToolUse, PostToolUse, Stop, SessionStart, "+
+			"SessionEnd, UserPromptSubmit, SubagentStop, PreCompact, "+
+			"Notification, CwdChanged, FileChanged, TaskCreated, "+
+			"PermissionDenied.")
+	root.Flags().StringArrayVar(&flags.cliMCP, "mcp", nil,
+		"Attach an ad-hoc MCP server for this run (repeatable). "+
+			"Format: name:command, e.g. --mcp 'fs:npx -y foo-mcp'.")
+	root.Flags().StringArrayVar(&flags.cliSkill, "skill", nil,
+		"Preload a skill into the system prompt (repeatable)")
 
 	// --- Phase 10: inspection (print-and-exit) ---
 	root.Flags().BoolVar(&flags.printConfig, "print-config", false,
@@ -469,7 +489,32 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 	}
 	memStore := memory.NewStore(memDir)
 
+	// Phase 6: if we're already deep in a recursive hook
+	// invocation, refuse to register hooks at all. The
+	// ALTCODE_HOOK_DEPTH env var is set by parent altcode
+	// instances via runCommandHook (internal/hooks/exec.go).
+	// Without this guard, a hook that shells out to `altcode`
+	// fork-bombs the system.
 	hooksRunner := buildHooksRunner(cfg)
+	if hooks.DepthGuardTripped() {
+		fmt.Fprintln(os.Stderr,
+			"altcode: ALTCODE_HOOK_DEPTH at cap — disabling hooks "+
+				"for this recursive invocation")
+		hooksRunner = hooks.NewRunner(nil)
+	}
+	// Phase 6: apply --hook flags from the CLI onto the runner
+	// so they fire alongside config-defined hooks. Validation
+	// already happened in exec.Params.Validate(); this just
+	// routes the parsed entries through hooks.AddMatcher.
+	if err := exec.ApplyCLIHooks(hooksRunner, flags.cliHooks); err != nil {
+		return err
+	}
+	// Phase 6: --mcp flags merge into cfg.MCP before the engine
+	// picks up the config, so the ad-hoc servers behave exactly
+	// like config-defined ones.
+	if err := exec.ApplyCLIMCP(cfg, flags.cliMCP); err != nil {
+		return err
+	}
 	skills := discoverSkills()
 	agents := discoverAgents()
 
@@ -580,6 +625,9 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			MaxCost:        flags.maxCost,
 			Commit:         flags.commit,
 			CommitDirty:    flags.commitDirty,
+			Hooks:          flags.cliHooks,
+			MCPServers:     flags.cliMCP,
+			Skills:         flags.cliSkill,
 		}
 		if err := ep.Validate(); err != nil {
 			return err

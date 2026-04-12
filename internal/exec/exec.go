@@ -15,6 +15,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/config"
 	"github.com/altcode-ai/altcode/internal/engine"
 	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
 )
@@ -171,6 +172,24 @@ type Params struct {
 	// whether the working tree was dirty before the run started.
 	// Populated by Run(), not the caller.
 	preRunDirty string
+
+	// --- Phase 6: hooks + extension ---
+	// Hooks is a list of "<event>:<shell-command>" strings.
+	// Each entry is parsed into a hooks.MatcherConfig and
+	// registered on the engine's hook runner before Run() starts.
+	// Repeatable CLI flag. `:` is the separator (not `=`) so
+	// commands containing `=` aren't ambiguous.
+	Hooks []string
+
+	// MCPServers is a list of "<name>:<shell-command>" strings
+	// that register ad-hoc MCP servers for this run. Merged with
+	// any cfg.MCP entries instead of replacing them.
+	MCPServers []string
+
+	// Skills is a list of skill names to preload into the
+	// system prompt for this run. Match against discovered
+	// skills by name; unknown names fail at validation time.
+	Skills []string
 }
 
 // Permission mode constants. Match the permission.Mode enum at
@@ -258,6 +277,22 @@ func (p *Params) Validate() error {
 			return NewUsageError(
 				"--commit and --permission-mode plan are mutually exclusive " +
 					"(plan mode denies writes, nothing to commit)")
+		}
+	}
+
+	// Phase 6: --hook format check. Each entry must be
+	// "<event>:<command>" with a known event name. Command
+	// validation is not attempted here — empty commands would
+	// no-op at runtime which is harmless.
+	for _, h := range p.Hooks {
+		if _, _, err := parseHookSpec(h); err != nil {
+			return NewUsageError("invalid --hook %q: %v", h, err)
+		}
+	}
+	// --mcp format check.
+	for _, m := range p.MCPServers {
+		if _, _, err := parseMCPSpec(m); err != nil {
+			return NewUsageError("invalid --mcp %q: %v", m, err)
 		}
 	}
 	// --allow-tool / --deny-tool format check: each entry must be
@@ -512,6 +547,124 @@ func parseToolRuleSpec(spec string) (name, pattern string, err error) {
 		return "", "", errors.New("empty tool name")
 	}
 	return name, pattern, nil
+}
+
+// ApplyCLIHooks registers each --hook entry on the runner so the
+// engine sees it alongside config-defined hooks. Called from
+// main.go before the engine is built.
+//
+// If DepthGuardTripped() returns true (we're already deep in a
+// recursive hook invocation) ApplyCLIHooks returns without
+// registering anything. The engine-level hook firing path also
+// respects this — defense in depth.
+func ApplyCLIHooks(runner *hooks.Runner, cliHooks []string) error {
+	if runner == nil {
+		if len(cliHooks) == 0 {
+			return nil
+		}
+		return NewUsageError("--hook set but no hook runner available")
+	}
+	if hooks.DepthGuardTripped() {
+		// Silently drop — the engine also refuses to fire nested
+		// hooks at this depth, so registering them would be a
+		// no-op anyway and the warning would spam every recursive
+		// invocation.
+		return nil
+	}
+	for _, spec := range cliHooks {
+		ev, cmd, err := parseHookSpec(spec)
+		if err != nil {
+			return NewUsageError("invalid --hook %q: %v", spec, err)
+		}
+		evConst, _ := hooks.ParseEvent(ev) // validated above
+		runner.AddMatcher(evConst, hooks.MatcherConfig{
+			Matcher: "*", // match any tool name
+			Hooks: []hooks.EntryConfig{{
+				Type:    "command",
+				Command: cmd,
+			}},
+		})
+	}
+	return nil
+}
+
+// ApplyCLIMCP merges --mcp entries into cfg.MCP. Called from main.go
+// after config is loaded but before engine construction. Each entry
+// becomes a stdio MCP server with the given command.
+func ApplyCLIMCP(cfg *config.Config, cliMCP []string) error {
+	if len(cliMCP) == 0 {
+		return nil
+	}
+	if cfg.MCP == nil {
+		cfg.MCP = make(map[string]config.MCPServerConfig)
+	}
+	for _, spec := range cliMCP {
+		name, cmd, err := parseMCPSpec(spec)
+		if err != nil {
+			return NewUsageError("invalid --mcp %q: %v", spec, err)
+		}
+		// Parse the command into argv. Shell-quote-awareness is
+		// intentionally minimal — users that need quoting can put
+		// the logic in a wrapper script. Most MCP servers are
+		// invoked like `npx -y foo-mcp` which parses cleanly on
+		// whitespace.
+		parts := strings.Fields(cmd)
+		if len(parts) == 0 {
+			return NewUsageError("invalid --mcp %q: empty command", spec)
+		}
+		cfg.MCP[name] = config.MCPServerConfig{
+			Command: parts[0],
+			Args:    parts[1:],
+		}
+	}
+	return nil
+}
+
+// parseHookSpec splits "<event>:<command>" into (event, command).
+// Uses `:` as the separator (not `=`) so commands containing
+// equals signs stay intact. Validates the event against the set
+// of known hooks.Event constants.
+func parseHookSpec(spec string) (event, command string, err error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return "", "", errors.New("empty hook spec")
+	}
+	i := strings.IndexByte(spec, ':')
+	if i <= 0 {
+		return "", "", errors.New("expected format <event>:<command>")
+	}
+	event = strings.TrimSpace(spec[:i])
+	command = strings.TrimSpace(spec[i+1:])
+	if command == "" {
+		return "", "", errors.New("empty command after ':'")
+	}
+	// Validate against known event names. Defer to the hooks
+	// package for the canonical list so this stays in sync with
+	// new Event constants.
+	if _, err := hooks.ParseEvent(event); err != nil {
+		return "", "", err
+	}
+	return event, command, nil
+}
+
+// parseMCPSpec splits "<name>:<command>" into (name, command).
+// Like parseHookSpec but doesn't validate against a known set —
+// MCP server names are free-form.
+func parseMCPSpec(spec string) (name, command string, err error) {
+	spec = strings.TrimSpace(spec)
+	if spec == "" {
+		return "", "", errors.New("empty mcp spec")
+	}
+	i := strings.IndexByte(spec, ':')
+	if i <= 0 {
+		return "", "", errors.New("expected format <name>:<command>")
+	}
+	name = strings.TrimSpace(spec[:i])
+	command = strings.TrimSpace(spec[i+1:])
+	if command == "" {
+		return "", "", errors.New("empty command after ':'")
+	}
+	return name, command, nil
 }
 
 // parsePermissionMode maps a CLI mode string to a permission.Mode enum.

@@ -12,6 +12,28 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (Phase 6: --hook + --mcp + --skill + ALTCODE_HOOK_DEPTH guard)
+
+- `--hook <event>:<command>` registers an ad-hoc hook for the run
+  (repeatable). Event names are case-insensitive and validated at
+  flag parse. Runs alongside any config-defined hooks.
+- `--mcp <name>:<command>` attaches an ad-hoc MCP server for the
+  run (repeatable). Merged into `cfg.MCP` before engine
+  construction so it behaves exactly like config-defined entries.
+- `--skill <name>` registers skill preloads for the system prompt
+  (repeatable).
+- **`ALTCODE_HOOK_DEPTH` recursion guard**: `runCommandHook` now
+  injects `ALTCODE_HOOK_DEPTH=<parent+1>` into the child shell
+  environment. A nested `altcode` invocation triggered from a
+  hook reads the env var at startup and refuses to register any
+  hooks when the depth is at or above the cap (3). Prevents
+  fork-bomb scenarios where a hook shells out to altcode which
+  re-fires the same hook.
+- `hooks.Runner.AddMatcher` for dynamic hook registration.
+- `hooks.KnownEvents` + `hooks.ParseEvent` helpers for CLI
+  validation — single source of truth for the list of event
+  names instead of duplicating it across packages.
+
 ### Added (Phase 12: --print-tree + --save-transcript)
 
 - `--print-tree` renders an ASCII tool tree to stderr at end of run.
