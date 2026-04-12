@@ -58,7 +58,22 @@ tmux capture-pane -t bench -p  # capture rendered TUI output
 altcode "Write a Fibonacci function in Go"  # skips TUI entirely
 ```
 
-### CLI Feature Parity (in progress)
+### AltFix Daemon (implemented)
+
+Complete daemon in `internal/daemon/` — 23 source files, 230 tests.
+Design spec: `docs/superpowers/specs/2026-04-12-altfix-daemon-design.md` (v5).
+Implementation plans: `docs/superpowers/plans/2026-04-12-daemon-plan-a-foundation.md`.
+
+The daemon is fully isolated: zero imports from internal/tui, internal/exec,
+or internal/engine. Agents are spawned as subprocesses via os/exec.
+Only touch point: `cmd/altcode/daemon.go` + 1 AddCommand line in main.go.
+
+Key files: store.go (SQLite), subprocess.go (process groups), orchestrator.go
+(phase loop), server.go (HTTP + auth), handlers.go (REST endpoints),
+sse.go (streaming), github.go (PR lifecycle), webhooks.go (triggers),
+budget.go (stall detection), modes.go (Solo/Pair/Team routing).
+
+### CLI Feature Parity (implemented)
 
 Spec: `docs/plans/cli-feature-parity-v7.md` — 13 phases bringing the
 headless `altcode "prompt"` surface to ~90% of TUI features. Design

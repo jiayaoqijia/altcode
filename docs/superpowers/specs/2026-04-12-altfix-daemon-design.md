@@ -1,3 +1,8 @@
+# AltFix Daemon — Complete System Design (v5) — IMPLEMENTED
+
+> **Implementation complete.** 23 source files, 230 tests, all passing with `-race`.
+> Zero CLI/TUI impact confirmed. Only touch: `cmd/altcode/daemon.go` + 1 line in main.go.
+
 # AltFix Daemon — Complete System Design (v5)
 
 > **Covers Issues #2-#35** (31 open issues; #9 spike done, #26/#30/#34 closed)

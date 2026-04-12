@@ -12,6 +12,50 @@ who work out of vim/tmux/scripts. Design doc lives at
 `docs/plans/cli-feature-parity-v7.md` and was reviewed across 7 rounds
 between Claude Code and Codex before implementation.
 
+### Added (AltFix Daemon — 26 issues implemented)
+
+Complete daemon for AltFix coding agent, living in `internal/daemon/`
+with zero CLI/TUI impact. 23 source files, 230 tests.
+
+**Plan A — Foundation (#3, #4, #10, #15, #16):**
+- `altcode daemon --port 9100 --auth-token <token>` subcommand
+- SQLite persistence (tasks + events + checkpoints)
+- Subprocess spawner with process group isolation
+- Lead→Implement→Review orchestrator loop
+- Crash recovery, cancel, 2-hour timeout, panic recovery
+- Bearer token auth (crypto/subtle), graceful shutdown
+
+**Plan B — Intelligence (#5, #8, #17, #19, #20, #21):**
+- SSE progress streaming with Last-Event-ID replay
+- Budget controls + multi-signal stall detection
+- 6 agent prompt templates (plan, implement, review, test, autofix, steer)
+- Solo/Pair/Team workspace modes with complexity estimation
+- Classifier-first model routing (cheap→expensive fallback)
+- Versioned TaskState artifacts with SHA-256 checksum
+
+**Plan C — GitHub + Git (#7, #11, #13, #25):**
+- GitHub PR lifecycle via `gh` CLI (draft PR, CI autofix, review response)
+- Git safety: rebase conflict detection, pre-commit hook retry
+- API resilience: rate limiting, exponential backoff, webhook HMAC verification
+- Webhook triggers: label-based + @altfix comment-based task creation
+  with bot-loop guard and code-block stripping
+
+**Plan D — Advanced (#2, #6, #12, #14, #22, #23, #24, #28, #31, #33, #35):**
+- Memory evolution: background review nudge + skill auto-creation
+- Repo intelligence: language detection, monorepo, test/lint/CI detection
+- Mid-task steering with event logging
+- Input sanitization with boundary markers (advisory, not blocking)
+- Web search client with per-task rate limiting
+- Semgrep + trufflehog security scanning
+- Parallel task concurrency manager (semaphore + cancel + release)
+- Named checkpoint browser with restore endpoint
+- Queue position indicator for serial V1
+- Editable spec emission after plan phase
+- WebSocket endpoint stub (types defined, 501 pending dependency)
+
+**Design reviewed across 5 rounds by CC + Codex as 30-year agent experts.
+17 blockers found and fixed before implementation.**
+
 ### Added (Phase 13: cross-phase integration tests)
 
 - New `internal/exec/validate_test.go` with a 34-case table-driven
