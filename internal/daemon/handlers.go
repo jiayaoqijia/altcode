@@ -175,7 +175,11 @@ func (s *Server) handleSteerTask(w http.ResponseWriter, r *http.Request) {
 	data, _ := json.Marshal(map[string]string{
 		"message": req.Message,
 	})
-	s.store.AppendEvent(id, "user_steer", string(data))
+	if err := s.store.AppendEvent(id, "user_steer", string(data)); err != nil {
+		s.logger.Error("append steer event", "task", id, "err", err)
+		http.Error(w, `{"error":"failed to record steer"}`, 500)
+		return
+	}
 
 	s.logger.Info("steer", "task", id, "message", req.Message)
 	w.Header().Set("Content-Type", "application/json")
