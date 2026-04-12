@@ -126,7 +126,7 @@ func TestDrainJSON_PermissionAfterEPIPE(t *testing.T) {
 
 	// brokenWriter always returns EPIPE after 10 bytes.
 	bw := &brokenWriter{limit: 10}
-	_ = drainJSON(context.Background(), ch, bw, &Params{})
+	_ = drainJSON(context.Background(), ch, bw, &Params{}, nil)
 
 	// Engine-side: the deny must have arrived on respCh.
 	select {
@@ -156,7 +156,7 @@ func TestDrainJSON_PermissionFieldOmitsChannel(t *testing.T) {
 	close(ch)
 
 	var buf bytes.Buffer
-	if err := drainJSON(context.Background(), ch, &buf, &Params{}); err != nil {
+	if err := drainJSON(context.Background(), ch, &buf, &Params{}, nil); err != nil {
 		t.Fatalf("drainJSON: %v", err)
 	}
 
@@ -192,7 +192,7 @@ func TestDrainJSONFinal_ErrorsAccumulate(t *testing.T) {
 	close(ch)
 
 	var buf bytes.Buffer
-	err := drainJSONFinal(context.Background(), ch, &buf, &Params{})
+	err := drainJSONFinal(context.Background(), ch, &buf, &Params{}, nil)
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -242,7 +242,7 @@ func TestDrainJSONFinal_ReconcilesToolInput(t *testing.T) {
 	close(ch)
 
 	var buf bytes.Buffer
-	if err := drainJSONFinal(context.Background(), ch, &buf, &Params{}); err != nil {
+	if err := drainJSONFinal(context.Background(), ch, &buf, &Params{}, nil); err != nil {
 		t.Fatalf("drainJSONFinal: %v", err)
 	}
 
@@ -280,7 +280,7 @@ func TestDrainJSONFinal_RecordsPermissionAutoDenies(t *testing.T) {
 	close(ch)
 
 	var buf bytes.Buffer
-	err := drainJSONFinal(context.Background(), ch, &buf, &Params{})
+	err := drainJSONFinal(context.Background(), ch, &buf, &Params{}, nil)
 	if err != nil {
 		t.Fatalf("drainJSONFinal: %v", err)
 	}

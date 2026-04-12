@@ -946,34 +946,25 @@ func Run(ctx context.Context, p Params) error {
 
 	// Phase 12: event accumulator for --print-tree and --save-transcript.
 	// Nil when neither flag is set so we don't pay the buffer cost
-	// on the common path.
+	// on the common path. The observe callback is passed into each
+	// drain so events are observed inline — no tee goroutine, no
+	// channel relay, no deadlock.
 	acc := newEventAccumulator(&p)
+	var observeFunc func(event.Event)
 	if acc != nil {
-		// Wrap the channel in a tee so every event reaches both the
-		// drain and the accumulator. We drain the tee here in the
-		// main goroutine so the accumulator stays single-writer
-		// and we don't need a mutex.
-		teed := make(chan event.Event, 64)
-		go func() {
-			defer close(teed)
-			for ev := range ch {
-				acc.observe(ev)
-				teed <- ev
-			}
-		}()
-		ch = teed
+		observeFunc = acc.observe
 	}
 
 	var err error
 	switch format {
 	case FormatStreamJSON:
-		err = drainJSON(ctx, ch, w, &p)
+		err = drainJSON(ctx, ch, w, &p, observeFunc)
 	case FormatJSON:
-		err = drainJSONFinal(ctx, ch, w, &p)
+		err = drainJSONFinal(ctx, ch, w, &p, observeFunc)
 	case FormatDiff:
-		err = drainDiff(ctx, ch, w, &p)
+		err = drainDiff(ctx, ch, w, &p, observeFunc)
 	default: // FormatText
-		err = drainText(ctx, ch, w, &p)
+		err = drainText(ctx, ch, w, &p, observeFunc)
 	}
 
 	// Phase 12: render tool tree + write transcript after drain
@@ -1211,7 +1202,7 @@ func generateCommitMessage(prompt string) string {
 //     so scripts can detect "work didn't happen because a tool was
 //     denied" without guessing from the text output. Phase 3 replaces
 //     the auto-deny path with real --permission-prompt-tool routing.
-func drainJSONFinal(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params) error {
+func drainJSONFinal(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params, observe func(event.Event)) error {
 	type toolCallRecord struct {
 		Name   string          `json:"name"`
 		Input  json.RawMessage `json:"input,omitempty"`
@@ -1237,6 +1228,9 @@ func drainJSONFinal(ctx context.Context, ch <-chan event.Event, w io.Writer, p *
 	var toolOrder []string
 
 	for ev := range ch {
+		if observe != nil {
+			observe(ev)
+		}
 		switch ev.Type {
 		case event.TextDelta:
 			result.Text += ev.Text
@@ -1346,11 +1340,14 @@ func drainJSONFinal(ctx context.Context, ch <-chan event.Event, w io.Writer, p *
 //   - git diff failures used to be swallowed to stderr. Now we
 //     surface them as a UsageError so scripts can detect "diff
 //     requested but unavailable" (no git binary, detached HEAD, etc.).
-func drainDiff(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params) error {
+func drainDiff(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params, observe func(event.Event)) error {
 	editedFiles := make(map[string]struct{})
 	var lastErrs []string
 
 	for ev := range ch {
+		if observe != nil {
+			observe(ev)
+		}
 		switch ev.Type {
 		case event.ToolStart, event.ToolResultEvent:
 			// Check both start and result — engine re-sends Input on
@@ -1526,7 +1523,7 @@ func truncatePrompt(s string, n int) string {
 // non-nil — Run() passes &p. Kept the param as a pointer (not value)
 // to match drainJSON/drainJSONFinal/drainDiff and allow later phases
 // to mutate Params during the run if needed.
-func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params) error {
+func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params, observe func(event.Event)) error {
 	var lastErr string
 	// showTools controls whether tool-call chatter goes to stderr.
 	// Default: terminal detection (old behavior). Explicit flag
@@ -1539,6 +1536,9 @@ func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 		showTools = false
 	}
 	for ev := range ch {
+		if observe != nil {
+			observe(ev)
+		}
 		switch ev.Type {
 		case event.TextDelta:
 			if !p.Quiet {
@@ -1604,12 +1604,15 @@ func drainText(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Param
 	return nil
 }
 
-func drainJSON(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params) error {
+func drainJSON(ctx context.Context, ch <-chan event.Event, w io.Writer, p *Params, observe func(event.Event)) error {
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	var lastErr string
 	var encodeErr error
 	for ev := range ch {
+		if observe != nil {
+			observe(ev)
+		}
 		// BLOCKER FIX: always answer permission requests, even after
 		// an encode error. Previously the auto-deny was nested inside
 		// `if encodeErr == nil`, so an EPIPE on stdout followed by a
