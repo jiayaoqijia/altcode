@@ -145,7 +145,9 @@ func (o *Orchestrator) emitPhase(taskID, phase, action string) {
 		"phase":  phase,
 		"action": action,
 	})
-	o.store.AppendEvent(taskID, "phase_"+action, string(data))
+	if err := o.store.AppendEvent(taskID, "phase_"+action, string(data)); err != nil {
+		o.logger.Warn("emit phase event", "task", taskID, "phase", phase, "err", err)
+	}
 }
 
 // emitSpec records a spec event with current and target state
@@ -157,7 +159,9 @@ func (o *Orchestrator) emitSpec(taskID string, plan *Plan) {
 		"target_state":  extractTargetState(plan),
 	}
 	data, _ := json.Marshal(spec)
-	o.store.AppendEvent(taskID, "spec", string(data))
+	if err := o.store.AppendEvent(taskID, "spec", string(data)); err != nil {
+		o.logger.Warn("emit spec event", "task", taskID, "err", err)
+	}
 }
 
 // extractTargetState builds a list of target descriptions from
