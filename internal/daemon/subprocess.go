@@ -84,6 +84,7 @@ func SpawnAgent(ctx context.Context, cfg AgentConfig) (
 	}
 	go func() {
 		proc.exitErr = cmd.Wait()
+		proc.Stdin.Close() // prevent fd leak
 		proc.closeOnce.Do(func() { close(proc.closed) })
 	}()
 	return proc, nil
