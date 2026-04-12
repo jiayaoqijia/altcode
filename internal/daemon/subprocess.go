@@ -116,13 +116,20 @@ func (p *AgentProcess) Wait() error {
 }
 
 // Kill sends SIGTERM to the process group, then SIGKILL after 5s.
+// Safe to call multiple times and on already-exited processes.
 func (p *AgentProcess) Kill() error {
+	// Already exited — nothing to do.
+	if !p.IsRunning() {
+		return nil
+	}
 	if p.Cmd.Process == nil {
 		return nil
 	}
 	pgid, err := syscall.Getpgid(p.Cmd.Process.Pid)
 	if err != nil {
-		return p.Cmd.Process.Kill()
+		// Process already gone — treat as success.
+		<-p.closed
+		return nil
 	}
 	// SIGTERM first for graceful shutdown.
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
