@@ -5,7 +5,7 @@
 **The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and split-pane TUI.
 
 ```
-5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends · 20+ commands · CC-parity TUI
+5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends · 30+ CLI flags · CC-parity TUI · HTTP daemon
 ```
 
 ## Why a harness, not just a CLI?
@@ -36,25 +36,81 @@ altcode login codex
 # Start coding — TUI with CC-parity display
 altcode "fix the failing tests"
 
-# Initialize project — auto-generate CLAUDE.md
-altcode            # then type /init
+# CLI headless with output format control
+altcode --output-format json "analyze this code"
+altcode --output-format diff "refactor the auth module"
+
+# Permission modes
+altcode --permission-mode plan "what would you change?"   # read-only, no writes
+altcode --dry-run "add rate limiting"                     # alias for plan mode
+altcode --permission-mode bypass "fix all tests"          # auto-allow everything
+
+# Context injection
+altcode --file src/api.ts --system "Focus on error handling" "review this"
+altcode --image screenshot.png "What's wrong with this UI?"  # Anthropic multimodal
+altcode --prompt-file task.txt                               # read prompt from file
+
+# Budget controls
+altcode --max-turns 10 --max-cost 1.50 "implement feature"
+altcode --print-cost --print-tree "add auth"               # cost + tool tree on stderr
 
 # Multi-agent workspace — orchestrate claude + codex together
 altcode workspace "build JWT auth" claude:architect codex:coder
 
-# A/B test across models
-altcode            # then type /compare review this code
+# Batch mode
+altcode --prompt-each prompts.txt --parallel 3 "Review: {{input}}"
 
-# Full TUI mode — each agent in its own tmux pane
-altcode workspace "implement payment flow" --tmux
+# Run as HTTP daemon (AltFix)
+altcode daemon --port 9100 --auth-token $TOKEN
 
-# Use any Chinese AI coding plan
+# Use any provider
 altcode --model minimax/MiniMax-M2.7 "add rate limiting"
 altcode --model kimi/kimi-k2 "write tests"
-altcode --model zhipu/glm-4.7 "review security"
+altcode --model altllm/altllm-basic "review security"
 ```
 
 **Zero config needed** — altcode auto-detects Claude Code, Codex CLI, and any other installed agents.
+
+## CLI Feature Parity (37 flags)
+
+The headless CLI covers ~90% of TUI features for users who work in vim/tmux/scripts:
+
+| Category | Flags |
+|----------|-------|
+| **Output** | `--output-format text\|json\|stream-json\|diff`, `--verbose`, `--quiet`, `--print-cost`, `--print-tools`, `--print-tree`, `--show-system` |
+| **Permission** | `--permission-mode plan\|auto\|default\|bypass`, `--allow-tool`, `--deny-tool`, `--dry-run`, `--permission-prompt-tool` |
+| **Session** | `--continue`, `--fork-session`, `--session-db`, `--list-sessions` |
+| **Input** | `--image`, `--file`, `--prompt-file`, `--system`, `--system-file` |
+| **Hooks** | `--hook event:cmd`, `--mcp name:cmd`, `--skill name` |
+| **Artifacts** | `--save-transcript`, `--save-cost`, `--save-diff`, `--commit`, `--commit-dirty` |
+| **Budget** | `--max-turns`, `--max-cost` |
+| **Batch** | `--prompt-each`, `--parallel`, `--retry`, `--bail` |
+| **Inspect** | `--print-config`, `--print-tools-list`, `--print-skills`, `--print-mcp`, `--doctor` |
+
+All validation errors exit with code 64 (EX_USAGE). Design spec reviewed across 7 rounds by CC + Codex.
+
+## AltFix Daemon (`altcode daemon`)
+
+HTTP daemon for the AltFix coding agent platform. Spawns codex/claude as subprocesses, orchestrates the Lead→Implement→Review→Test loop, persists to SQLite, streams progress via SSE.
+
+```bash
+altcode daemon --port 9100 --auth-token $TOKEN --data-dir ~/.altcode/daemon
+```
+
+**Endpoints:**
+```
+POST /tasks              Create a coding task
+GET  /tasks              List all tasks
+GET  /tasks/:id          Get task status + queue position
+GET  /tasks/:id/sse      SSE progress streaming (Last-Event-ID replay)
+GET  /tasks/:id/checkpoints  Named phase snapshots
+POST /tasks/:id/steer    Inject message mid-execution
+POST /tasks/:id/stop     Cancel a running task
+POST /webhooks/github    Label/comment trigger (@altfix)
+GET  /health             Liveness probe
+```
+
+**23 source files, 230 tests**, zero CLI/TUI impact. Design reviewed across 5 rounds by CC + Codex as 30-year agent experts (17 blockers found + fixed before implementation). See `docs/superpowers/specs/2026-04-12-altfix-daemon-design.md`.
 
 ## Multi-Provider Agent Orchestration
 
