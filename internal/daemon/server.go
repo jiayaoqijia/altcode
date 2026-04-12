@@ -80,6 +80,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /tasks/{id}/checkpoints", s.handleListCheckpoints)
 	s.mux.HandleFunc("POST /tasks/{id}/restore", s.handleRestoreCheckpoint)
 	s.mux.HandleFunc("GET /tasks/{id}/sse", s.handleSSE)
+	s.mux.HandleFunc("GET /ws/{id}", s.handleWebSocket)
 }
 
 // Run starts the HTTP server and blocks until shutdown.
