@@ -68,6 +68,7 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("GET /tasks/{id}", s.handleGetTask)
 	s.mux.HandleFunc("POST /tasks/{id}/stop", s.handleStopTask)
 	s.mux.HandleFunc("POST /tasks/{id}/steer", s.handleSteerTask)
+	s.mux.HandleFunc("GET /tasks/{id}/sse", s.handleSSE)
 }
 
 // Run starts the HTTP server and blocks until shutdown.
