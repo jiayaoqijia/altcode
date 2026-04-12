@@ -77,8 +77,8 @@ func TestHandler_CreateAndGetTask(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected task object in response, got: %v", got)
 	}
-	if taskObj["ID"] != taskID {
-		t.Errorf("get ID = %v, want %s", taskObj["ID"], taskID)
+	if taskObj["id"] != taskID {
+		t.Errorf("get id = %v, want %s", taskObj["id"], taskID)
 	}
 }
 

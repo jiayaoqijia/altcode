@@ -12,34 +12,34 @@ import (
 
 // Task represents a daemon task record.
 type Task struct {
-	ID              string
-	RepoURL         string
-	TaskDescription string
-	Status          string // pending|planning|implementing|reviewing|testing|pr_open|merged|closed|failed|cancelled
-	AgentConfig     string // JSON
-	PRNumber        int
-	PRURL           string
-	BranchName      string
-	APICostUSD      float64
-	Complexity      string // simple|medium|complex
-	IssueNumber     int
-	RepoOwner       string
-	RepoName        string
-	StartedAt       *time.Time
-	CompletedAt     *time.Time
-	ErrorMessage    string
-	DeliveryID      string
-	CreatedAt       time.Time
-	UpdatedAt       time.Time
+	ID              string     `json:"id"`
+	RepoURL         string     `json:"repo_url"`
+	TaskDescription string     `json:"task_description"`
+	Status          string     `json:"status"` // pending|planning|implementing|reviewing|testing|pr_open|merged|closed|failed|cancelled
+	AgentConfig     string     `json:"agent_config,omitempty"`
+	PRNumber        int        `json:"pr_number,omitempty"`
+	PRURL           string     `json:"pr_url,omitempty"`
+	BranchName      string     `json:"branch_name,omitempty"`
+	APICostUSD      float64    `json:"api_cost_usd"`
+	Complexity      string     `json:"complexity,omitempty"`
+	IssueNumber     int        `json:"issue_number,omitempty"`
+	RepoOwner       string     `json:"repo_owner,omitempty"`
+	RepoName        string     `json:"repo_name,omitempty"`
+	StartedAt       *time.Time `json:"started_at,omitempty"`
+	CompletedAt     *time.Time `json:"completed_at,omitempty"`
+	ErrorMessage    string     `json:"error_message,omitempty"`
+	DeliveryID      string     `json:"delivery_id,omitempty"`
+	CreatedAt       time.Time  `json:"created_at"`
+	UpdatedAt       time.Time  `json:"updated_at"`
 }
 
 // TaskEvent represents a progress event for a task.
 type TaskEvent struct {
-	ID        int64
-	TaskID    string
-	EventType string
-	Data      string // JSON
-	CreatedAt time.Time
+	ID        int64     `json:"id"`
+	TaskID    string    `json:"task_id"`
+	EventType string    `json:"event_type"`
+	Data      string    `json:"data,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
 }
 
 // Store provides SQLite persistence for daemon tasks.
