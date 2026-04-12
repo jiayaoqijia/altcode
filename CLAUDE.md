@@ -63,6 +63,8 @@ altcode "Write a Fibonacci function in Go"  # skips TUI entirely
 Complete daemon in `internal/daemon/` — 23 source files, 230 tests.
 Design spec: `docs/superpowers/specs/2026-04-12-altfix-daemon-design.md` (v5).
 Implementation plans: `docs/superpowers/plans/2026-04-12-daemon-plan-a-foundation.md`.
+Spike audit: `docs/superpowers/specs/2026-04-12-daemon-spike-audit.md`.
+E2E test plan: `docs/superpowers/specs/2026-04-12-e2e-test-plan.md` (v2, 62 tests).
 
 The daemon is fully isolated: zero imports from internal/tui, internal/exec,
 or internal/engine. Agents are spawned as subprocesses via os/exec.
