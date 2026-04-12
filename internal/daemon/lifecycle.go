@@ -106,6 +106,10 @@ func (r *TaskRunner) Run(ctx context.Context) {
 			if err := r.store.AppendEvent(r.task.ID, "timeout", ""); err != nil {
 				r.logger.Warn("append timeout event", "task", r.task.ID, "err", err)
 			}
+		} else {
+			if markErr := r.store.MarkFailed(r.task.ID, err.Error()); markErr != nil {
+				r.logger.Warn("mark failed", "task", r.task.ID, "err", markErr)
+			}
 		}
 		return
 	}

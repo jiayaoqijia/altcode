@@ -376,3 +376,45 @@ func TestTaskRunner_OrchestratorError(t *testing.T) {
 		t.Errorf("status = %q, want failed", got.Status)
 	}
 }
+
+func TestTaskRunner_RunTask_NonDeadlineError(t *testing.T) {
+	s, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	task := &Task{
+		RepoURL:         "r",
+		TaskDescription: "will fail",
+		Status:          "pending",
+	}
+	if err := s.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	orch := NewOrchestrator(s, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, _ AgentConfig) (string, error) {
+			return "", fmt.Errorf("spawn process failed")
+		},
+	})
+
+	runner := NewTaskRunner(task, s, orch, testLogger())
+	runner.SetTimeout(10 * time.Second)
+	runner.Run(context.Background())
+
+	got, err := s.GetTask(task.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Status != "failed" {
+		t.Errorf("status = %q, want failed", got.Status)
+	}
+	if got.ErrorMessage == "" {
+		t.Error("error message should be set")
+	}
+	if !strings.Contains(got.ErrorMessage, "spawn process failed") {
+		t.Errorf("error = %q, want spawn error mention",
+			got.ErrorMessage)
+	}
+}
