@@ -447,6 +447,7 @@ More providers will be added (e.g. altcode login claude, altcode login altllm).`
 		return nil
 	}
 	root.AddCommand(logoutRoot)
+	root.AddCommand(newDaemonCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
