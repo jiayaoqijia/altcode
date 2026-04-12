@@ -77,6 +77,12 @@ func (s *Server) handleListTasks(w http.ResponseWriter, _ *http.Request) {
 	json.NewEncoder(w).Encode(tasks)
 }
 
+// QueueInfo describes a task's position in the pending queue.
+type QueueInfo struct {
+	Position    int `json:"queue_position"`
+	EstWaitSecs int `json:"est_wait_seconds"`
+}
+
 func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 	task, err := s.store.GetTask(id)
@@ -88,8 +94,25 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 		}
 		return
 	}
+
+	// Build response with optional queue info.
+	resp := map[string]any{
+		"task": task,
+	}
+	if task.Status == "pending" {
+		pos, err := s.store.CountPendingBefore(task.ID)
+		if err == nil {
+			resp["queue"] = QueueInfo{
+				Position:    pos + 1, // 1-indexed
+				EstWaitSecs: (pos + 1) * 300,
+			}
+		}
+	} else {
+		resp["queue"] = QueueInfo{Position: 0, EstWaitSecs: 0}
+	}
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(task)
+	json.NewEncoder(w).Encode(resp)
 }
 
 func (s *Server) handleStopTask(w http.ResponseWriter, r *http.Request) {

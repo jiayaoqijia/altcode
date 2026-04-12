@@ -75,10 +75,11 @@ func TestOrchestrator_PhasesTransition(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// plan started/completed, implement started/completed,
-	// review started/completed, finalize started/completed = 8
-	if len(events) < 8 {
-		t.Errorf("expected at least 8 phase events, got %d", len(events))
+	// plan started/completed, spec, implement started/completed,
+	// review started/completed, finalize started/completed = 9
+	if len(events) < 9 {
+		t.Errorf("expected at least 9 events (8 phase + 1 spec), got %d",
+			len(events))
 	}
 
 	// Verify event types contain expected phases.
@@ -431,5 +432,100 @@ func TestOrchestrator_ValidJSONNoSteps(t *testing.T) {
 	}
 	if implCount != 1 {
 		t.Errorf("implementer calls = %d, want 1 (fallback)", implCount)
+	}
+}
+
+func TestOrchestrator_SpecEventEmitted(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "add feature",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			if cfg.Role == "lead" {
+				return `{"steps":[
+					{"description":"add auth","prompt":"do auth"},
+					{"description":"add tests","prompt":"do tests"}
+				]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	events, err := store.ListEvents(task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var specEvent *TaskEvent
+	for _, e := range events {
+		if e.EventType == "spec" {
+			specEvent = e
+			break
+		}
+	}
+	if specEvent == nil {
+		t.Fatal("expected spec event after plan phase")
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal([]byte(specEvent.Data), &spec); err != nil {
+		t.Fatalf("unmarshal spec data: %v", err)
+	}
+	targets, ok := spec["target_state"].([]any)
+	if !ok {
+		t.Fatalf("expected target_state array, got: %v", spec)
+	}
+	if len(targets) != 2 {
+		t.Errorf("expected 2 target states, got %d", len(targets))
+	}
+	if targets[0] != "add auth" {
+		t.Errorf("target[0] = %v, want 'add auth'", targets[0])
+	}
+}
+
+func TestExtractTargetState(t *testing.T) {
+	plan := &Plan{Steps: []PlanStep{
+		{Description: "step one"},
+		{Description: "step two"},
+		{Description: "step three"},
+	}}
+	targets := extractTargetState(plan)
+	if len(targets) != 3 {
+		t.Fatalf("got %d targets, want 3", len(targets))
+	}
+	if targets[0] != "step one" {
+		t.Errorf("targets[0] = %q", targets[0])
+	}
+	if targets[2] != "step three" {
+		t.Errorf("targets[2] = %q", targets[2])
+	}
+
+	// Nil plan.
+	empty := extractTargetState(nil)
+	if len(empty) != 0 {
+		t.Errorf("nil plan should return empty slice, got %d", len(empty))
+	}
+
+	// Empty steps.
+	empty2 := extractTargetState(&Plan{})
+	if len(empty2) != 0 {
+		t.Errorf("empty steps should return empty slice, got %d",
+			len(empty2))
 	}
 }

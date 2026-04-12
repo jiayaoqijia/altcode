@@ -73,8 +73,12 @@ func TestHandler_CreateAndGetTask(t *testing.T) {
 	if err := json.Unmarshal(rec2.Body.Bytes(), &got); err != nil {
 		t.Fatalf("unmarshal get: %v", err)
 	}
-	if got["ID"] != taskID {
-		t.Errorf("get ID = %v, want %s", got["ID"], taskID)
+	taskObj, ok := got["task"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected task object in response, got: %v", got)
+	}
+	if taskObj["ID"] != taskID {
+		t.Errorf("get ID = %v, want %s", taskObj["ID"], taskID)
 	}
 }
 
@@ -262,5 +266,66 @@ func TestHandler_SteerTask_Completed(t *testing.T) {
 
 	if rec.Code != 409 {
 		t.Errorf("expected 409 for completed task, got %d", rec.Code)
+	}
+}
+
+func TestHandler_QueuePosition_PendingTask(t *testing.T) {
+	s := testServer(t)
+
+	// Create 3 pending tasks.
+	ids := make([]string, 3)
+	for i := range ids {
+		ids[i] = createTestTask(t, s)
+	}
+
+	// The third task should have position > 0 (queued behind others).
+	req := httptest.NewRequest("GET", "/tasks/"+ids[2], nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("get: got %d", rec.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	q, ok := resp["queue"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected queue info, got: %v", resp)
+	}
+	pos := int(q["queue_position"].(float64))
+	if pos <= 0 {
+		t.Errorf("expected queue_position > 0 for third pending task, got %d", pos)
+	}
+}
+
+func TestHandler_QueuePosition_RunningTask(t *testing.T) {
+	s := testServer(t)
+	taskID := createTestTask(t, s)
+
+	// Transition to a non-pending status.
+	if err := s.store.UpdateStatus(taskID, "implementing"); err != nil {
+		t.Fatal(err)
+	}
+
+	req := httptest.NewRequest("GET", "/tasks/"+taskID, nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 200 {
+		t.Fatalf("get: got %d", rec.Code)
+	}
+	var resp map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	q, ok := resp["queue"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected queue info, got: %v", resp)
+	}
+	pos := int(q["queue_position"].(float64))
+	if pos != 0 {
+		t.Errorf("expected queue_position=0 for running task, got %d", pos)
 	}
 }

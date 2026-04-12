@@ -113,6 +113,19 @@ func (s *Store) createSchema() error {
 		ON tasks(delivery_id) WHERE delivery_id != '';
 	CREATE INDEX IF NOT EXISTS idx_task_events_task
 		ON task_events(task_id, id);
+	CREATE TABLE IF NOT EXISTS checkpoints (
+		id TEXT PRIMARY KEY,
+		task_id TEXT NOT NULL REFERENCES tasks(id),
+		phase TEXT NOT NULL,
+		phase_number INTEGER NOT NULL DEFAULT 0,
+		git_sha TEXT DEFAULT '',
+		test_summary TEXT DEFAULT '',
+		cost_so_far REAL DEFAULT 0,
+		files_changed INTEGER DEFAULT 0,
+		created_at TEXT DEFAULT (datetime('now'))
+	);
+	CREATE INDEX IF NOT EXISTS idx_checkpoints_task
+		ON checkpoints(task_id, phase_number);
 	`
 	_, err := s.db.Exec(schema)
 	return err
@@ -341,4 +354,93 @@ func scanTask(s scanner) (*Task, error) {
 	t.CreatedAt = parseTime(createdAt)
 	t.UpdatedAt = parseTime(updatedAt)
 	return &t, nil
+}
+
+// Checkpoint represents a named phase snapshot.
+type Checkpoint struct {
+	ID           string    `json:"id"`
+	TaskID       string    `json:"task_id"`
+	Phase        string    `json:"phase"`
+	PhaseNumber  int       `json:"phase_number"`
+	GitSHA       string    `json:"git_sha"`
+	TestSummary  string    `json:"test_summary"`
+	CostSoFar    float64   `json:"cost_so_far"`
+	FilesChanged int       `json:"files_changed"`
+	CreatedAt    time.Time `json:"created_at"`
+}
+
+// CreateCheckpoint inserts a checkpoint with a generated ID.
+func (s *Store) CreateCheckpoint(cp *Checkpoint) error {
+	cp.ID = newID()
+	now := time.Now().UTC()
+	cp.CreatedAt = now
+	_, err := s.db.Exec(
+		`INSERT INTO checkpoints
+		 (id, task_id, phase, phase_number, git_sha,
+		  test_summary, cost_so_far, files_changed, created_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		cp.ID, cp.TaskID, cp.Phase, cp.PhaseNumber,
+		cp.GitSHA, cp.TestSummary, cp.CostSoFar,
+		cp.FilesChanged, now.Format(time.RFC3339),
+	)
+	return err
+}
+
+// ListCheckpoints returns checkpoints for a task ordered by
+// phase_number ascending.
+func (s *Store) ListCheckpoints(taskID string) ([]*Checkpoint, error) {
+	rows, err := s.db.Query(
+		`SELECT id, task_id, phase, phase_number, git_sha,
+		 test_summary, cost_so_far, files_changed, created_at
+		 FROM checkpoints WHERE task_id = ?
+		 ORDER BY phase_number ASC`, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var cps []*Checkpoint
+	for rows.Next() {
+		cp, err := scanCheckpoint(rows)
+		if err != nil {
+			return nil, err
+		}
+		cps = append(cps, cp)
+	}
+	return cps, rows.Err()
+}
+
+// GetCheckpoint retrieves a single checkpoint by ID.
+func (s *Store) GetCheckpoint(id string) (*Checkpoint, error) {
+	row := s.db.QueryRow(
+		`SELECT id, task_id, phase, phase_number, git_sha,
+		 test_summary, cost_so_far, files_changed, created_at
+		 FROM checkpoints WHERE id = ?`, id)
+	return scanCheckpoint(row)
+}
+
+// CountPendingBefore returns the number of pending tasks created
+// before the given task. Used for queue position calculation.
+func (s *Store) CountPendingBefore(taskID string) (int, error) {
+	var count int
+	err := s.db.QueryRow(
+		`SELECT COUNT(*) FROM tasks
+		 WHERE status = 'pending'
+		 AND created_at < (SELECT created_at FROM tasks WHERE id = ?)
+		 AND id != ?`, taskID, taskID).Scan(&count)
+	return count, err
+}
+
+func scanCheckpoint(s scanner) (*Checkpoint, error) {
+	var cp Checkpoint
+	var createdAt sql.NullString
+	err := s.Scan(
+		&cp.ID, &cp.TaskID, &cp.Phase, &cp.PhaseNumber,
+		&cp.GitSHA, &cp.TestSummary, &cp.CostSoFar,
+		&cp.FilesChanged, &createdAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	cp.CreatedAt = parseTime(createdAt)
+	return &cp, nil
 }

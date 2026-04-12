@@ -76,6 +76,9 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 		}}}
 	}
 
+	// Emit spec event after plan phase for editable confirmation.
+	o.emitSpec(task.ID, &plan)
+
 	// Phase 2: Implement (per step with retry loop)
 	o.emitPhase(task.ID, "implement", "started")
 	o.store.UpdateStatus(task.ID, "implementing")
@@ -129,4 +132,29 @@ func (o *Orchestrator) emitPhase(taskID, phase, action string) {
 		"action": action,
 	})
 	o.store.AppendEvent(taskID, "phase_"+action, string(data))
+}
+
+// emitSpec records a spec event with current and target state
+// extracted from the plan. The frontend uses this for the editable
+// spec confirmation flow (#28).
+func (o *Orchestrator) emitSpec(taskID string, plan *Plan) {
+	spec := map[string]any{
+		"current_state": []string{"Repository analyzed"},
+		"target_state":  extractTargetState(plan),
+	}
+	data, _ := json.Marshal(spec)
+	o.store.AppendEvent(taskID, "spec", string(data))
+}
+
+// extractTargetState builds a list of target descriptions from
+// the plan steps.
+func extractTargetState(plan *Plan) []string {
+	if plan == nil || len(plan.Steps) == 0 {
+		return []string{}
+	}
+	targets := make([]string, len(plan.Steps))
+	for i, s := range plan.Steps {
+		targets[i] = s.Description
+	}
+	return targets
 }
