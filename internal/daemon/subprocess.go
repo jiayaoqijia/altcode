@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -25,8 +26,8 @@ type AgentConfig struct {
 type AgentProcess struct {
 	Cmd       *exec.Cmd
 	Stdin     io.WriteCloser
-	Stdout    io.ReadCloser
-	Stderr    io.ReadCloser
+	stdoutBuf *bytes.Buffer // buffered stdout (avoids pipe-close race with Wait)
+	stderrBuf *bytes.Buffer // buffered stderr
 	exitErr   error
 	closeOnce sync.Once
 	closed    chan struct{} // closed when process exits
@@ -63,25 +64,23 @@ func SpawnAgent(ctx context.Context, cfg AgentConfig) (
 	if err != nil {
 		return nil, fmt.Errorf("stdin pipe: %w", err)
 	}
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stdout pipe: %w", err)
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return nil, fmt.Errorf("stderr pipe: %w", err)
-	}
+
+	// Use buffers instead of pipes for stdout/stderr so cmd.Wait()
+	// doesn't close them before ReadAll can read (race with fast commands like echo).
+	var stdoutBuf, stderrBuf bytes.Buffer
+	cmd.Stdout = &stdoutBuf
+	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("start %s: %w", cfg.Binary, err)
 	}
 
 	proc := &AgentProcess{
-		Cmd:    cmd,
-		Stdin:  stdin,
-		Stdout: stdout,
-		Stderr: stderr,
-		closed: make(chan struct{}),
+		Cmd:       cmd,
+		Stdin:     stdin,
+		stdoutBuf: &stdoutBuf,
+		stderrBuf: &stderrBuf,
+		closed:    make(chan struct{}),
 	}
 	go func() {
 		proc.exitErr = cmd.Wait()
@@ -90,14 +89,10 @@ func SpawnAgent(ctx context.Context, cfg AgentConfig) (
 	return proc, nil
 }
 
-// ReadAll reads all stdout to completion. Blocks until the process
-// closes its stdout (usually on exit).
+// ReadAll blocks until the process exits, then returns buffered stdout.
 func (p *AgentProcess) ReadAll() (string, error) {
-	data, err := io.ReadAll(p.Stdout)
-	if err != nil {
-		return "", err
-	}
-	return strings.TrimSpace(string(data)), nil
+	<-p.closed
+	return strings.TrimSpace(p.stdoutBuf.String()), nil
 }
 
 // SendMessage writes a line to the agent's stdin.

@@ -1,6 +1,9 @@
 package daemon
 
-import "fmt"
+import (
+	"fmt"
+	"sync"
+)
 
 // BudgetConfig holds all configurable limits for the fix daemon.
 type BudgetConfig struct {
@@ -35,6 +38,7 @@ type ProgressSnapshot struct {
 
 // BudgetController tracks usage and enforces limits.
 type BudgetController struct {
+	mu              sync.Mutex
 	cfg             BudgetConfig
 	turns           int
 	costUSD         float64
@@ -49,6 +53,8 @@ func NewBudgetController(cfg BudgetConfig) *BudgetController {
 
 // RecordTurn increments the turn counter and checks budget.
 func (b *BudgetController) RecordTurn(cost float64) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.turns++
 	b.costUSD += cost
 	if b.turns > b.cfg.MaxTotalTurns {
@@ -69,6 +75,8 @@ func (b *BudgetController) RecordTurn(cost float64) error {
 // RecordProgress captures a snapshot and returns whether progress
 // has stalled according to multi-signal detection.
 func (b *BudgetController) RecordProgress(snap ProgressSnapshot) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.progressHistory = append(b.progressHistory, snap)
 	return b.isStalled()
 }
@@ -116,16 +124,22 @@ func (b *BudgetController) isStalled() bool {
 
 // CanReset reports whether a strategy reset is still within budget.
 func (b *BudgetController) CanReset() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return b.resets < b.cfg.MaxStrategyResets
 }
 
 // RecordReset increments the strategy-reset counter.
 func (b *BudgetController) RecordReset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	b.resets++
 }
 
 // Summary returns a human-readable budget status line.
 func (b *BudgetController) Summary() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	return fmt.Sprintf(
 		"turns: %d/%d, cost: $%.2f/$%.2f, resets: %d/%d",
 		b.turns, b.cfg.MaxTotalTurns,

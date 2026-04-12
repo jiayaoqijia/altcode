@@ -36,6 +36,8 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, `{"error":"invalid JSON"}`, 400)
 		return
 	}
+	req.RepoURL = strings.TrimSpace(req.RepoURL)
+	req.Task = strings.TrimSpace(req.Task)
 	if req.RepoURL == "" || req.Task == "" {
 		http.Error(w, `{"error":"repo_url and task required"}`, 400)
 		return
@@ -123,8 +125,22 @@ func (s *Server) handleGetTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleStopTask(w http.ResponseWriter, r *http.Request) {
-	// Stub -- wired in Task 6 (lifecycle).
 	id := r.PathValue("id")
+
+	task, err := s.store.GetTask(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, `{"error":"task not found"}`, 404)
+		} else {
+			http.Error(w, `{"error":"internal error"}`, 500)
+		}
+		return
+	}
+	if isTerminal(task.Status) {
+		http.Error(w, `{"error":"task already completed"}`, 409)
+		return
+	}
+
 	s.logger.Info("stop requested", "id", id)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)

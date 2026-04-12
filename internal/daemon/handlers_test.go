@@ -269,6 +269,61 @@ func TestHandler_SteerTask_Completed(t *testing.T) {
 	}
 }
 
+func TestHandler_StopTask_NotFound(t *testing.T) {
+	s := testServer(t)
+	req := httptest.NewRequest("POST", "/tasks/nonexistent-id/stop", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 404 {
+		t.Errorf("expected 404 for missing task, got %d", rec.Code)
+	}
+}
+
+func TestHandler_StopTask_AlreadyDone(t *testing.T) {
+	s := testServer(t)
+	taskID := createTestTask(t, s)
+
+	// Mark task as merged (terminal state).
+	if err := s.store.MarkCompleted(taskID); err != nil {
+		t.Fatalf("mark completed: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/tasks/"+taskID+"/stop", nil)
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 409 {
+		t.Errorf("expected 409 for terminal task, got %d", rec.Code)
+	}
+}
+
+func TestHandler_CreateTask_WhitespaceFields(t *testing.T) {
+	s := testServer(t)
+
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{"whitespace repo_url", `{"repo_url":"   ","task":"fix bug"}`},
+		{"whitespace task", `{"repo_url":"https://github.com/t/r","task":"  "}`},
+		{"tabs and spaces", `{"repo_url":"\t  ","task":"\t  "}`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/tasks",
+				strings.NewReader(tt.payload))
+			rec := httptest.NewRecorder()
+			s.mux.ServeHTTP(rec, req)
+
+			if rec.Code != 400 {
+				t.Errorf("expected 400, got %d, body: %s",
+					rec.Code, rec.Body.String())
+			}
+		})
+	}
+}
+
 func TestHandler_QueuePosition_PendingTask(t *testing.T) {
 	s := testServer(t)
 

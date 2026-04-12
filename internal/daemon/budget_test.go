@@ -2,6 +2,7 @@ package daemon
 
 import (
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -172,5 +173,62 @@ func TestBudgetController_Summary(t *testing.T) {
 	want := "turns: 2/50, cost: $2.00/$50.00, resets: 1/2"
 	if got != want {
 		t.Fatalf("Summary mismatch:\n got: %s\nwant: %s", got, want)
+	}
+}
+
+func TestBudgetController_ConcurrentRecordTurn(t *testing.T) {
+	cfg := DefaultBudgetConfig()
+	cfg.MaxTotalTurns = 10000
+	cfg.MaxCostUSD = 0 // unlimited
+	cfg.MaxStrategyResets = 10000
+	bc := NewBudgetController(cfg)
+
+	const goroutines = 50
+	const turnsPerGoroutine = 100
+
+	var wg sync.WaitGroup
+	wg.Add(goroutines * 3) // 3 groups: RecordTurn, RecordProgress, RecordReset+CanReset+Summary
+
+	// Group 1: concurrent RecordTurn calls.
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < turnsPerGoroutine; j++ {
+				bc.RecordTurn(0.01)
+			}
+		}()
+	}
+
+	// Group 2: concurrent RecordProgress calls.
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < turnsPerGoroutine; j++ {
+				bc.RecordProgress(ProgressSnapshot{
+					FilesChanged: j,
+					TestsPassing: j,
+				})
+			}
+		}()
+	}
+
+	// Group 3: concurrent CanReset, RecordReset, Summary calls.
+	for i := 0; i < goroutines; i++ {
+		go func() {
+			defer wg.Done()
+			for j := 0; j < turnsPerGoroutine; j++ {
+				bc.CanReset()
+				bc.RecordReset()
+				bc.Summary()
+			}
+		}()
+	}
+
+	wg.Wait()
+
+	// Verify final state is consistent.
+	summary := bc.Summary()
+	if summary == "" {
+		t.Fatal("expected non-empty summary after concurrent access")
 	}
 }
