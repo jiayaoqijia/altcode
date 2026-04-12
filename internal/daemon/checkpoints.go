@@ -75,7 +75,9 @@ func (s *Server) handleRestoreCheckpoint(
 		"git_sha":       cp.GitSHA,
 		"phase":         cp.Phase,
 	})
-	s.store.AppendEvent(taskID, "restore_requested", string(data))
+	if err := s.store.AppendEvent(taskID, "restore_requested", string(data)); err != nil {
+		s.logger.Warn("append restore event", "task", taskID, "err", err)
+	}
 
 	s.logger.Info("restore requested",
 		"task", taskID, "checkpoint", cp.ID)
