@@ -53,6 +53,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 		RepoName:        req.RepoName,
 	}
 	if err := s.store.CreateTask(task); err != nil {
+		// Duplicate delivery_id hits the UNIQUE constraint — return 409
+		// instead of 500 so clients can distinguish dedup from real errors.
+		// Found by Codex E2E test #14 and confirmed by daemon orchestration.
+		if strings.Contains(err.Error(), "UNIQUE constraint") {
+			http.Error(w, `{"error":"duplicate delivery_id"}`, 409)
+			return
+		}
 		s.logger.Error("create task", "err", err)
 		http.Error(w, `{"error":"failed to create task"}`, 500)
 		return
