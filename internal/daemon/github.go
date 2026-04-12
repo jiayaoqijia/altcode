@@ -167,11 +167,11 @@ type ghJob struct {
 
 // GetCILogs retrieves failure output from the most recent failed run.
 func (g *GitHubClient) GetCILogs(
-	ctx context.Context, prNumber int,
+	ctx context.Context, prNumber int, branch string,
 ) (string, error) {
 	// List runs for the PR's head branch.
 	out, err := g.run(ctx, g.workDir, "gh", "run", "list",
-		"--branch", fmt.Sprintf("pr-%d", prNumber),
+		"--branch", branch,
 		"--repo", g.repo(),
 		"--json", "databaseId,status,conclusion",
 		"--limit", "1",
@@ -372,6 +372,7 @@ func (g *GitHubClient) waitForCI(
 func (g *GitHubClient) RunCIAutofix(
 	ctx context.Context,
 	prNumber int,
+	branch string,
 	maxAttempts int,
 	spawnFix SpawnFunc,
 ) error {
@@ -384,7 +385,7 @@ func (g *GitHubClient) RunCIAutofix(
 			return fmt.Errorf("CI timed out after %d min", 10)
 		}
 
-		logs, err := g.GetCILogs(ctx, prNumber)
+		logs, err := g.GetCILogs(ctx, prNumber, branch)
 		if err != nil {
 			g.logger.Warn("failed to fetch CI logs",
 				"pr", prNumber, "attempt", attempt, "err", err)

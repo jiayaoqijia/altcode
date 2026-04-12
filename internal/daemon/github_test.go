@@ -352,7 +352,7 @@ func TestRunCIAutofix_PassesFirst(t *testing.T) {
 		return "fixed", nil
 	}
 
-	err := gc.RunCIAutofix(context.Background(), 42, 3, spawnFix)
+	err := gc.RunCIAutofix(context.Background(), 42, "fix/auth", 3, spawnFix)
 	if err != nil {
 		t.Fatalf("RunCIAutofix: %v", err)
 	}
@@ -415,7 +415,7 @@ func TestRunCIAutofix_FixesOnRetry(t *testing.T) {
 		return "fixed", nil
 	}
 
-	err := gc.RunCIAutofix(context.Background(), 42, 3, spawnFix)
+	err := gc.RunCIAutofix(context.Background(), 42, "altfix/auth", 3, spawnFix)
 	if err != nil {
 		t.Fatalf("RunCIAutofix: %v", err)
 	}
@@ -466,7 +466,7 @@ func TestRunCIAutofix_ExhaustsAttempts(t *testing.T) {
 		return "attempted fix", nil
 	}
 
-	err := gc.RunCIAutofix(context.Background(), 42, 2, spawnFix)
+	err := gc.RunCIAutofix(context.Background(), 42, "fix/compile", 2, spawnFix)
 	if err == nil {
 		t.Fatal("expected error when attempts exhausted")
 	}
@@ -495,7 +495,7 @@ func TestRunCIAutofix_ContextCancelled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // cancel immediately
 
-	err := gc.RunCIAutofix(ctx, 42, 3, func(
+	err := gc.RunCIAutofix(ctx, 42, "fix/pending", 3, func(
 		_ context.Context, _ AgentConfig,
 	) (string, error) {
 		return "", nil
@@ -536,7 +536,7 @@ func TestGitHubClient_GetCILogs_FallbackOnLogFailed(t *testing.T) {
 		return nil, fmt.Errorf("unexpected: %s", key)
 	}
 
-	logs, err := gc.GetCILogs(context.Background(), 10)
+	logs, err := gc.GetCILogs(context.Background(), 10, "fix/lint")
 	if err != nil {
 		t.Fatalf("GetCILogs: %v", err)
 	}
