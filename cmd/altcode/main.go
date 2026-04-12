@@ -617,7 +617,12 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		return err
 	}
 
-	if prompt != "" {
+	// Enter exec mode when there's a positional prompt OR when
+	// --prompt-file is set (which replaces the prompt inside
+	// PrepareInputs). Without this, `altcode --prompt-file x.txt`
+	// would fall through to TUI mode because prompt is still "".
+	// E2E test 2.10 caught this bug.
+	if prompt != "" || flags.promptFile != "" {
 		// Build exec.Params from the engine params + CLI flags.
 		// Phase 1 adds output-format + observability fields; Phase 2
 		// adds permission / mode fields. Later phases extend this

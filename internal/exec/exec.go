@@ -496,6 +496,12 @@ func (p *Params) PrepareInputs(stdin io.Reader) error {
 		// Trim CRLF too — Windows-authored files end with \r\n and
 		// TrimRight(s, "\n") leaves the \r dangling.
 		p.Prompt = strings.TrimRight(string(data), "\r\n")
+		// Clear PromptFile after consuming so the re-validation
+		// inside exec.Run() doesn't see both Prompt and PromptFile
+		// set and trigger the "mutually exclusive" error. The file
+		// has been read; there's nothing left to consume.
+		// E2E test 2.10 caught this double-validate bug.
+		p.PromptFile = ""
 	}
 
 	// 2. --file entries become pre-loaded context in the prompt text
