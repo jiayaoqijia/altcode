@@ -122,7 +122,12 @@ func (a *App) buildHUDState() hudState {
 		}
 	}
 	return hudState{
-		ContextTokens:  a.tokensIn + a.tokensOut,
+		// Use currentContextTokens (last turn's input = the
+		// conversation history sent to the model) instead of
+		// cumulative tokensIn+tokensOut which double-counts the
+		// history on every turn and makes the HUD bar grow past
+		// 100% after a few turns.
+		ContextTokens:  a.currentContextTokens,
 		ContextLimit:   ctxLimit,
 		SessionStart:   a.sessionStart,
 		SessionName:    a.sessionSlug,

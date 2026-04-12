@@ -122,6 +122,15 @@ func (a *App) onUsage(ev event.Event) (tea.Model, tea.Cmd) {
 	if ev.Usage != nil {
 		a.tokensIn += ev.Usage.InputTokens
 		a.tokensOut += ev.Usage.OutputTokens
+		// Track the MOST RECENT turn's input tokens separately so
+		// the HUD can show current context window occupancy instead
+		// of cumulative session totals. Without this, the HUD bar
+		// grew to 100% after ~10 turns even though each turn only
+		// sent the conversation history which stays a fixed size.
+		// Phase 13 bug hunt catch. OnUsage fires once per API call
+		// within a turn; the last call's InputTokens is the best
+		// proxy for "what the model saw last".
+		a.currentContextTokens = ev.Usage.InputTokens
 		a.tokenInfo = fmt.Sprintf("tokens: %d in / %d out",
 			a.tokensIn, a.tokensOut)
 	}

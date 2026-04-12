@@ -275,6 +275,12 @@ func (a *App) handleEscKey() (tea.Model, tea.Cmd, bool) {
 		}
 		a.busy = false
 		a.streaming = ""
+		// Clear stale HUD state — activeToolName, thinking indicator,
+		// and zombie ⟳ entries in the tool tree. Without this, the
+		// HUD showed the last tool name + elapsed time indefinitely
+		// after user cancel. Only onError used to call this; Esc and
+		// Ctrl+C bypassed it. Phase 13 bug hunt catch.
+		a.resetTurnTransientState()
 		// CC parity: when the user interrupts a turn before any
 		// assistant text has streamed (i.e. they realised they typo'd
 		// or want to add more context), restore the just-submitted
@@ -326,6 +332,8 @@ func (a *App) handleCtrlCKey() (tea.Model, tea.Cmd, bool) {
 		}
 		a.busy = false
 		a.streaming = ""
+		// Same stale-HUD fix as handleEscKey — see comment there.
+		a.resetTurnTransientState()
 		a.appendInfo("[cancelled]")
 		return a, nil, true
 	}

@@ -72,9 +72,10 @@ type App struct {
 	cancel           context.CancelFunc
 	events           <-chan event.Event
 	tokenInfo        string
-	tokensIn         int
-	tokensOut        int
-	costUSD          float64
+	tokensIn             int
+	tokensOut            int
+	currentContextTokens int // last-turn input (not cumulative)
+	costUSD              float64
 	sessionStart     time.Time
 	sessionSlug      string
 	toolCounts       map[string]int
