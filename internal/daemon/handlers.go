@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strings"
 )
 
 func (s *Server) handleHealth(w http.ResponseWriter, _ *http.Request) {
@@ -101,10 +102,39 @@ func (s *Server) handleStopTask(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleSteerTask(w http.ResponseWriter, r *http.Request) {
-	// Stub -- wired in Plan B (#6 steering).
 	id := r.PathValue("id")
-	s.logger.Info("steer requested", "id", id)
+	var req struct {
+		Message string `json:"message"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil ||
+		strings.TrimSpace(req.Message) == "" {
+		http.Error(w, `{"error":"message required"}`, 400)
+		return
+	}
+
+	task, err := s.store.GetTask(id)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			http.Error(w, `{"error":"task not found"}`, 404)
+		} else {
+			http.Error(w, `{"error":"internal error"}`, 500)
+		}
+		return
+	}
+	if isTerminal(task.Status) {
+		http.Error(w, `{"error":"task already completed"}`, 409)
+		return
+	}
+
+	data, _ := json.Marshal(map[string]string{
+		"message": req.Message,
+	})
+	s.store.AppendEvent(id, "user_steer", string(data))
+
+	s.logger.Info("steer", "task", id, "message", req.Message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)
-	json.NewEncoder(w).Encode(map[string]string{"status": "acknowledged"})
+	json.NewEncoder(w).Encode(map[string]string{
+		"status": "acknowledged",
+	})
 }
