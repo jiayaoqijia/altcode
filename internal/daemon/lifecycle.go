@@ -28,8 +28,10 @@ func RecoverOrphanedTasks(store *Store) (int, error) {
 			if err := store.MarkFailed(t.ID, "daemon restart \u2014 task interrupted"); err != nil {
 				return count, fmt.Errorf("mark failed %s: %w", t.ID, err)
 			}
-			store.AppendEvent(t.ID, "daemon_crash_recovery",
-				fmt.Sprintf(`{"previous_status":"%s"}`, status))
+			if err := store.AppendEvent(t.ID, "daemon_crash_recovery",
+				fmt.Sprintf(`{"previous_status":"%s"}`, status)); err != nil {
+				slog.Warn("append crash recovery event", "task", t.ID, "err", err)
+			}
 			count++
 		}
 	}
