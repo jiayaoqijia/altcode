@@ -12,9 +12,11 @@ import { test, expect, type Page } from '@playwright/test';
 const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9100}`;
 
 // Helper: authenticate via test-login bypass.
+// Uses a regex that excludes /ui/login so a broken redirect is caught
+// immediately instead of silently running tests against the login page.
 async function login(page: Page) {
   await page.goto(`${BASE}/auth/test-login`);
-  await page.waitForURL('**/ui/**');
+  await page.waitForURL(/\/ui\/(?!login)/);
 }
 
 // ---- Unauthenticated tests ----
@@ -90,7 +92,7 @@ test.describe('Unauthenticated redirects', () => {
 
   test('test-login works in test mode', async ({ page }) => {
     await page.goto(`${BASE}/auth/test-login`);
-    await page.waitForURL('**/ui/**');
+    await page.waitForURL(/\/ui\/(?!login)/);
     const cookies = await page.context().cookies();
     const session = cookies.find((c) => c.name === 'altfix_session');
     expect(session).toBeTruthy();
@@ -196,6 +198,18 @@ test.describe('CSRF enforcement', () => {
     });
     expect(resp.status()).toBe(302);
     expect(resp.headers()['location']).toBe('/ui/login');
+  });
+
+  test('POST without CSRF token returns 403', async ({ page, request }) => {
+    await login(page);
+    const cookies = await page.context().cookies();
+    const session = cookies.find((c) => c.name === 'altfix_session');
+    // POST to a CSRF-protected endpoint with valid session but no token.
+    const resp = await request.post(`${BASE}/auth/logout`, {
+      headers: { Cookie: `altfix_session=${session?.value}` },
+      maxRedirects: 0,
+    });
+    expect(resp.status()).toBe(403);
   });
 });
 
@@ -308,6 +322,13 @@ test.describe('Authenticated pages', () => {
     await expect(page.locator('body')).toContainText('Access Control');
   });
 
+  test('settings shows admin-only content', async ({ page }) => {
+    await page.goto(`${BASE}/ui/settings`);
+    // Admin user should see editable sections, not a read-only warning.
+    const body = await page.textContent('body');
+    expect(body).not.toContain('read-only');
+  });
+
   test('nav bar shows branding and links', async ({ page }) => {
     const nav = page.locator('nav');
     await expect(nav).toBeVisible();
@@ -334,6 +355,14 @@ test.describe('Authenticated pages', () => {
     expect(htmxLoaded).toBe(true);
   });
 
+  test('htmx polling triggers request', async ({ page }) => {
+    // Verify that the task-list container has hx-get and hx-trigger
+    // polling attributes, proving htmx is wired for live updates.
+    const taskListContainer = page.locator('[hx-get*="task-list"]');
+    await expect(taskListContainer).toBeVisible();
+    await expect(taskListContainer).toHaveAttribute('hx-trigger', /every/);
+  });
+
   test('CSRF meta tag present', async ({ page }) => {
     const csrfContent = await page
       .locator('meta[name="csrf-token"]')
@@ -344,17 +373,17 @@ test.describe('Authenticated pages', () => {
 
   test('task detail 404 for nonexistent task', async ({ page }) => {
     const resp = await page.goto(`${BASE}/ui/tasks/nonexistent-id`);
-    // Handler calls http.NotFound or returns 500 (store not wired).
-    expect([200, 404, 500]).toContain(resp?.status() || 0);
+    // A 500 is a server bug, not an acceptable response for a missing task.
+    expect([200, 404, 302]).toContain(resp?.status() || 0);
   });
 
   test('navigation flow: dashboard -> new task -> back', async ({ page }) => {
     await page.click('a[href="/ui/tasks/new"]');
     await page.waitForURL('**/ui/tasks/new');
     await expect(page.locator('h1')).toContainText('New Task');
-    // Go back to dashboard.
+    // Go back to dashboard — assert /ui/ (not /ui/login).
     await page.goBack();
-    await page.waitForURL('**/ui/**');
+    await expect(page).toHaveURL(/\/ui\/$/);
     await expect(page.locator('h1')).toContainText('Dashboard');
   });
 

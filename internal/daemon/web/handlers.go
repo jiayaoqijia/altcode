@@ -256,7 +256,7 @@ func (h *WebHandler) HandleTaskDetail(
 
 	es := h.eventStore()
 	if es == nil {
-		http.Error(w, "store not configured", http.StatusInternalServerError)
+		http.NotFound(w, r)
 		return
 	}
 

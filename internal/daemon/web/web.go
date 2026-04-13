@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"html/template"
 	"io/fs"
+	"log"
 	"net/http"
 	"path/filepath"
 	"strings"
@@ -299,6 +300,7 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 
 	// Test-mode auth bypass (never in production).
 	if cfg.TestMode {
+		log.Println("WARNING: test mode enabled — /auth/test-login bypass is active. DO NOT use in production.")
 		mux.HandleFunc("GET /auth/test-login", h.HandleTestLogin)
 	}
 

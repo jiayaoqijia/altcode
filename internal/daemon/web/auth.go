@@ -518,6 +518,7 @@ func (h *WebHandler) HandleTestLogin(
 		Path:     "/",
 		MaxAge:   3600,
 		HttpOnly: true,
+		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/ui/", http.StatusFound)
