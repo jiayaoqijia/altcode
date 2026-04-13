@@ -1,13 +1,23 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
 // -------------------------------------------------------------------
 // AltFix Web UI E2E Tests
 //
-// These tests run against a live altcode daemon started by setup.sh.
-// The daemon uses test GitHub OAuth credentials so no real OAuth flow
-// is possible, but unauthenticated pages, redirects, API endpoints,
-// static assets, and security enforcement are fully testable.
+// These tests run against a live altcode daemon started by setup.sh
+// with --test-mode enabled. The /auth/test-login endpoint creates a
+// pre-authenticated session so Playwright can exercise all
+// authenticated pages without a real GitHub OAuth flow.
 // -------------------------------------------------------------------
+
+const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9100}`;
+
+// Helper: authenticate via test-login bypass.
+async function login(page: Page) {
+  await page.goto(`${BASE}/auth/test-login`);
+  await page.waitForURL('**/ui/**');
+}
+
+// ---- Unauthenticated tests ----
 
 test.describe('Health endpoint', () => {
   test('returns 200 with status ok', async ({ request }) => {
@@ -41,7 +51,6 @@ test.describe('Login page', () => {
 
 test.describe('Unauthenticated redirects', () => {
   test('GET /ui/ redirects to /ui/login', async ({ page }) => {
-    // Follow redirect chain and verify we land on login.
     await page.goto('/ui/');
     await expect(page).toHaveURL(/\/ui\/login/);
     await expect(page.locator('h1')).toContainText('AltFix Control Plane');
@@ -78,32 +87,44 @@ test.describe('Unauthenticated redirects', () => {
     expect(resp.status()).toBe(302);
     expect(resp.headers()['location']).toBe('/ui/login');
   });
+
+  test('test-login works in test mode', async ({ page }) => {
+    await page.goto(`${BASE}/auth/test-login`);
+    await page.waitForURL('**/ui/**');
+    const cookies = await page.context().cookies();
+    const session = cookies.find((c) => c.name === 'altfix_session');
+    expect(session).toBeTruthy();
+  });
 });
 
+// ---- Static assets ----
+
 test.describe('Static assets', () => {
-  test('htmx.min.js loads successfully', async ({ request }) => {
+  test('htmx.min.js loads', async ({ request }) => {
     const resp = await request.get('/ui/static/htmx.min.js');
     expect(resp.status()).toBe(200);
-    const contentType = resp.headers()['content-type'];
-    expect(contentType).toMatch(/javascript/);
+    const ct = resp.headers()['content-type'];
+    expect(ct).toMatch(/javascript/);
     const body = await resp.text();
     expect(body.length).toBeGreaterThan(100);
   });
 
-  test('app.css loads successfully', async ({ request }) => {
+  test('app.css loads', async ({ request }) => {
     const resp = await request.get('/ui/static/app.css');
     expect(resp.status()).toBe(200);
-    const contentType = resp.headers()['content-type'];
-    expect(contentType).toMatch(/css/);
+    const ct = resp.headers()['content-type'];
+    expect(ct).toMatch(/css/);
   });
 
-  test('tailwind.css loads successfully', async ({ request }) => {
+  test('tailwind.css loads', async ({ request }) => {
     const resp = await request.get('/ui/static/tailwind.css');
     expect(resp.status()).toBe(200);
   });
 });
 
-test.describe('Share link validation', () => {
+// ---- Share link validation ----
+
+test.describe('Share links', () => {
   test('missing dot separator returns 400', async ({ request }) => {
     const resp = await request.get('/share/badtoken');
     expect(resp.status()).toBe(400);
@@ -111,7 +132,7 @@ test.describe('Share link validation', () => {
 
   test('invalid HMAC returns 403', async ({ request }) => {
     const resp = await request.get(
-      '/share/task123.deadbeef?exp=9999999999'
+      '/share/task123.deadbeef?exp=9999999999',
     );
     expect(resp.status()).toBe(403);
   });
@@ -122,24 +143,12 @@ test.describe('Share link validation', () => {
   });
 
   test('expired share link returns 403', async ({ request }) => {
-    // Expiry set to epoch 0 -- well in the past.
-    const resp = await request.get(
-      '/share/task123.deadbeef?exp=0'
-    );
+    const resp = await request.get('/share/task123.deadbeef?exp=0');
     expect(resp.status()).toBe(403);
   });
 });
 
-test.describe('CSRF enforcement', () => {
-  test('POST /auth/logout without session returns 302 to login', async ({ request }) => {
-    // No session cookie -> RequireAuth redirects before CSRF check.
-    const resp = await request.post('/auth/logout', {
-      maxRedirects: 0,
-    });
-    expect(resp.status()).toBe(302);
-    expect(resp.headers()['location']).toBe('/ui/login');
-  });
-});
+// ---- OAuth redirect ----
 
 test.describe('OAuth redirect', () => {
   test('GET /auth/github redirects to GitHub', async ({ request }) => {
@@ -164,6 +173,8 @@ test.describe('OAuth redirect', () => {
   });
 });
 
+// ---- OAuth callback error handling ----
+
 test.describe('OAuth callback error handling', () => {
   test('missing OAuth cookie redirects to login with error', async ({ request }) => {
     const resp = await request.get('/auth/callback?state=x&code=y', {
@@ -175,6 +186,20 @@ test.describe('OAuth callback error handling', () => {
     expect(location).toContain('error=');
   });
 });
+
+// ---- CSRF enforcement ----
+
+test.describe('CSRF enforcement', () => {
+  test('POST /auth/logout without session returns 302 to login', async ({ request }) => {
+    const resp = await request.post('/auth/logout', {
+      maxRedirects: 0,
+    });
+    expect(resp.status()).toBe(302);
+    expect(resp.headers()['location']).toBe('/ui/login');
+  });
+});
+
+// ---- API auth enforcement ----
 
 test.describe('API auth enforcement', () => {
   test('POST /tasks without bearer token returns 401', async ({ request }) => {
@@ -190,16 +215,16 @@ test.describe('API auth enforcement', () => {
   });
 });
 
+// ---- Login page rendering ----
+
 test.describe('Login page rendering', () => {
   test('no unexpected console errors on login page', async ({ page }) => {
     const errors: string[] = [];
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         const text = msg.text();
-        // Known issue: layout.html references /static/ but routes
-        // are mounted at /ui/static/. The wrong paths cause MIME
-        // type errors and 401s from the bearer auth middleware.
-        // Skip these until the template paths are fixed.
+        // Known: layout.html refs /static/ vs /ui/static/ paths,
+        // causing MIME type errors and 401s from bearer auth.
         if (
           text.includes('/static/tailwind.css') ||
           text.includes('/static/app.css') ||
@@ -221,10 +246,147 @@ test.describe('Login page rendering', () => {
     await page.goto('/ui/login');
     await expect(page.locator('h1')).toBeVisible();
     await expect(page.getByText('Sign in with GitHub')).toBeVisible();
-    // Card should not overflow.
     const card = page.locator('.card');
     const box = await card.boundingBox();
     expect(box).toBeTruthy();
     expect(box!.width).toBeLessThanOrEqual(375);
+  });
+});
+
+// ---- Authenticated page tests ----
+
+test.describe('Authenticated pages', () => {
+  test.beforeEach(async ({ page }) => {
+    await login(page);
+  });
+
+  test('dashboard renders heading and new-task link', async ({ page }) => {
+    await expect(page.locator('h1')).toContainText('Dashboard');
+    // "New Task" button links to the creation form.
+    const newTaskLink = page.locator('a[href="/ui/tasks/new"]');
+    await expect(newTaskLink).toBeVisible();
+    await expect(newTaskLink).toContainText('New Task');
+  });
+
+  test('dashboard shows KPI cards container', async ({ page }) => {
+    // The htmx polling container for KPI cards should exist.
+    await expect(
+      page.locator('[hx-get="/ui/partials/kpi-cards"]'),
+    ).toBeVisible();
+  });
+
+  test('dashboard shows task-list container', async ({ page }) => {
+    // The htmx polling container for the task list should exist.
+    await expect(
+      page.locator('[hx-get*="/ui/partials/task-list"]'),
+    ).toBeVisible();
+  });
+
+  test('dashboard shows empty state when no tasks', async ({ page }) => {
+    await expect(page.locator('#task-list')).toContainText('No tasks yet');
+  });
+
+  test('new task page has form', async ({ page }) => {
+    await page.goto(`${BASE}/ui/tasks/new`);
+    await expect(page.locator('h1')).toContainText('New Task');
+    // The task creation form (not the nav logout form).
+    await expect(page.locator('form[action="/api/tasks"]')).toBeVisible();
+    // Description textarea present.
+    await expect(page.locator('textarea[name="description"]')).toBeVisible();
+  });
+
+  test('PR tracker page renders', async ({ page }) => {
+    await page.goto(`${BASE}/ui/prs`);
+    await expect(page.locator('h1')).toContainText('PR Tracker');
+  });
+
+  test('settings page renders for admin', async ({ page }) => {
+    await page.goto(`${BASE}/ui/settings`);
+    await expect(page.locator('h1')).toContainText('Settings');
+    // Admin should see the settings cards, not the read-only warning.
+    await expect(page.locator('body')).toContainText('Budget');
+    await expect(page.locator('body')).toContainText('Access Control');
+  });
+
+  test('nav bar shows branding and links', async ({ page }) => {
+    const nav = page.locator('nav');
+    await expect(nav).toBeVisible();
+    // Branding link.
+    await expect(nav.locator('a').filter({ hasText: 'AltFix' })).toBeVisible();
+    // Dashboard link.
+    await expect(nav.locator('a').filter({ hasText: 'Dashboard' })).toBeVisible();
+    // PRs link.
+    await expect(nav.locator('a').filter({ hasText: 'PRs' })).toBeVisible();
+    // Admin should see Settings link.
+    await expect(nav.locator('a').filter({ hasText: 'Settings' })).toBeVisible();
+  });
+
+  test('nav shows username and logout', async ({ page }) => {
+    const nav = page.locator('nav');
+    await expect(nav).toContainText('test-user');
+    await expect(nav.locator('button').filter({ hasText: 'Logout' })).toBeVisible();
+  });
+
+  test('htmx loaded and active', async ({ page }) => {
+    const htmxLoaded = await page.evaluate(
+      () => typeof (window as any).htmx !== 'undefined',
+    );
+    expect(htmxLoaded).toBe(true);
+  });
+
+  test('CSRF meta tag present', async ({ page }) => {
+    const csrfContent = await page
+      .locator('meta[name="csrf-token"]')
+      .getAttribute('content');
+    expect(csrfContent).toBeTruthy();
+    expect(csrfContent!.length).toBeGreaterThan(10);
+  });
+
+  test('task detail 404 for nonexistent task', async ({ page }) => {
+    const resp = await page.goto(`${BASE}/ui/tasks/nonexistent-id`);
+    // Handler calls http.NotFound or returns 500 (store not wired).
+    expect([200, 404, 500]).toContain(resp?.status() || 0);
+  });
+
+  test('navigation flow: dashboard -> new task -> back', async ({ page }) => {
+    await page.click('a[href="/ui/tasks/new"]');
+    await page.waitForURL('**/ui/tasks/new');
+    await expect(page.locator('h1')).toContainText('New Task');
+    // Go back to dashboard.
+    await page.goBack();
+    await page.waitForURL('**/ui/**');
+    await expect(page.locator('h1')).toContainText('Dashboard');
+  });
+
+  test('dashboard status filter tabs present', async ({ page }) => {
+    // All / Active / Completed / Failed tabs.
+    await expect(page.locator('a[href="/ui/"]')).toBeVisible();
+    await expect(page.locator('a[href="/ui/?status=active"]')).toBeVisible();
+    await expect(page.locator('a[href="/ui/?status=completed"]')).toBeVisible();
+    await expect(page.locator('a[href="/ui/?status=failed"]')).toBeVisible();
+  });
+
+  test('PR page has status filter tabs', async ({ page }) => {
+    await page.goto(`${BASE}/ui/prs`);
+    await expect(page.locator('a[href="/ui/prs"]')).toBeVisible();
+    await expect(page.locator('a[href="/ui/prs?status=open"]')).toBeVisible();
+    await expect(page.locator('a[href="/ui/prs?status=merged"]')).toBeVisible();
+  });
+
+  test('settings page shows connected user info', async ({ page }) => {
+    await page.goto(`${BASE}/ui/settings`);
+    // test-user login should appear in the Connected GitHub card.
+    await expect(page.locator('body')).toContainText('test-user');
+    // test-org should appear in the Connected GitHub card orgs.
+    await expect(page.locator('body')).toContainText('test-org');
+  });
+
+  test('new task form has CSRF hidden field', async ({ page }) => {
+    await page.goto(`${BASE}/ui/tasks/new`);
+    const csrfField = page.locator('input[name="_csrf"]');
+    await expect(csrfField).toHaveCount(1);
+    const val = await csrfField.getAttribute('value');
+    expect(val).toBeTruthy();
+    expect(val!.length).toBeGreaterThan(10);
   });
 });

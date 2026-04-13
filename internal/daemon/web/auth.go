@@ -37,6 +37,8 @@ type WebConfig struct {
 	// TrustProxy controls whether X-Forwarded-Proto is trusted for
 	// determining TLS status. Only enable behind a known reverse proxy.
 	TrustProxy bool
+	// TestMode enables /auth/test-login bypass (NEVER in production).
+	TestMode bool
 }
 
 // oauthPendingCount tracks in-flight OAuth sessions per source IP
@@ -493,6 +495,32 @@ func generatePKCEVerifier() string {
 func pkceChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// HandleTestLogin creates a pre-authenticated session without
+// GitHub OAuth. Only available when TestMode is enabled.
+func (h *WebHandler) HandleTestLogin(
+	w http.ResponseWriter, r *http.Request,
+) {
+	if !h.cfg.TestMode {
+		http.Error(w, "test mode not enabled", http.StatusForbidden)
+		return
+	}
+	sid := h.sessions.Create(&SessionUser{
+		Login:   "test-user",
+		IsAdmin: true,
+		Orgs:    []string{"test-org"},
+	})
+	h.sessions.SetAuthenticated(sid)
+	http.SetCookie(w, &http.Cookie{
+		Name:     "altfix_session",
+		Value:    sid,
+		Path:     "/",
+		MaxAge:   3600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+	})
+	http.Redirect(w, r, "/ui/", http.StatusFound)
 }
 
 // isSecure returns true if the request arrived over TLS.

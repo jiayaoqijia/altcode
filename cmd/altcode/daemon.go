@@ -20,6 +20,7 @@ func newDaemonCmd() *cobra.Command {
 	var allowedOrgs []string
 	var allowedUsers []string
 	var adminUsers []string
+	var testMode bool
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -55,6 +56,7 @@ Designed for AltFix VM deployment.`,
 				AllowedUsers:       allowedUsers,
 				AdminUsers:         adminUsers,
 				SigningKey:          signingKey,
+				TestMode:           testMode,
 			})
 			if err != nil {
 				return err
@@ -93,6 +95,8 @@ Designed for AltFix VM deployment.`,
 		"GitHub users with admin access")
 	cmd.Flags().StringVar(&signingKey, "signing-key", "",
 		"HMAC signing key for shared URLs")
+	cmd.Flags().BoolVar(&testMode, "test-mode", false,
+		"Enable /auth/test-login bypass for E2E tests (NEVER in production)")
 
 	return cmd
 }

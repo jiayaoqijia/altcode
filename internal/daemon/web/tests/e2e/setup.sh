@@ -54,6 +54,7 @@ echo "Starting daemon on port $PORT (data: $DATA_DIR)..."
   --auth-token "e2e-bearer-token" \
   --allowed-users "e2e-test-user" \
   --admin-users "e2e-test-user" \
+  --test-mode \
   &
 DAEMON_PID=$!
 echo "Daemon PID: $DAEMON_PID"

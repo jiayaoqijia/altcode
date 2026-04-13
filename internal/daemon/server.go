@@ -29,6 +29,8 @@ type ServerConfig struct {
 	AllowedUsers       []string
 	AdminUsers         []string
 	SigningKey          string
+	// TestMode enables /auth/test-login bypass for E2E tests.
+	TestMode bool
 }
 
 // Server is the HTTP daemon.
@@ -71,7 +73,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		)
 	}
 
-	if cfg.GitHubClientID != "" {
+	if cfg.GitHubClientID != "" || cfg.TestMode {
 		sessions := web.NewSessionStore(8 * time.Hour)
 		sessions.StartGC(5 * time.Minute)
 		if err := web.RegisterRoutes(s.mux, web.WebConfig{
@@ -85,6 +87,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			BaseURL: fmt.Sprintf(
 				"http://localhost:%d", cfg.Port,
 			),
+			TestMode: cfg.TestMode,
 		}); err != nil {
 			return nil, fmt.Errorf("web ui: %w", err)
 		}

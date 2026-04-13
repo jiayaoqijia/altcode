@@ -518,6 +518,81 @@ func TestPKCE(t *testing.T) {
 	}
 }
 
+func TestHandleTestLogin_Enabled(t *testing.T) {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	sessions := NewSessionStore(time.Hour)
+	h := NewWebHandler(tmpl, nil, sessions, WebConfig{
+		TestMode: true,
+	}, NewOrgCache(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/test-login", nil)
+	w := httptest.NewRecorder()
+	h.HandleTestLogin(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusFound)
+	}
+	loc := resp.Header.Get("Location")
+	if loc != "/ui/" {
+		t.Errorf("Location = %q, want /ui/", loc)
+	}
+
+	var sessionCookie *http.Cookie
+	for _, c := range resp.Cookies() {
+		if c.Name == "altfix_session" {
+			sessionCookie = c
+			break
+		}
+	}
+	if sessionCookie == nil {
+		t.Fatal("expected altfix_session cookie")
+	}
+	if !sessionCookie.HttpOnly {
+		t.Error("expected HttpOnly cookie")
+	}
+
+	sess, ok := sessions.Get(sessionCookie.Value)
+	if !ok {
+		t.Fatal("expected session to exist")
+	}
+	if !sess.Authenticated {
+		t.Error("expected session to be authenticated")
+	}
+	if sess.User.Login != "test-user" {
+		t.Errorf("Login = %q, want test-user", sess.User.Login)
+	}
+	if !sess.User.IsAdmin {
+		t.Error("expected test user to be admin")
+	}
+}
+
+func TestHandleTestLogin_Disabled(t *testing.T) {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		t.Fatalf("LoadTemplates: %v", err)
+	}
+	h := NewWebHandler(tmpl, nil, NewSessionStore(time.Hour), WebConfig{
+		TestMode: false,
+	}, NewOrgCache(time.Hour))
+
+	req := httptest.NewRequest(http.MethodGet, "/auth/test-login", nil)
+	w := httptest.NewRecorder()
+	h.HandleTestLogin(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusForbidden)
+	}
+}
+
 func TestIsAdmin(t *testing.T) {
 	tmpl, _ := LoadTemplates()
 	h := NewWebHandler(

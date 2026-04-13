@@ -297,6 +297,11 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 	mux.HandleFunc("GET /auth/callback", h.HandleOAuthCallback)
 	mux.HandleFunc("GET /ui/login", h.HandleLoginPage)
 
+	// Test-mode auth bypass (never in production).
+	if cfg.TestMode {
+		mux.HandleFunc("GET /auth/test-login", h.HandleTestLogin)
+	}
+
 	// Shared view (no session required).
 	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
 
