@@ -2,6 +2,7 @@ package web
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"html/template"
 	"io/fs"
@@ -23,7 +24,7 @@ type PageData struct {
 	ShowNav   bool
 	DarkMode  bool
 	CSRFToken string
-	IsAdmin   string
+	IsAdmin   bool
 	User      *SessionUser
 	Content   any
 }
@@ -227,11 +228,14 @@ func (t *Templates) Names() []string {
 	return names
 }
 
+// ErrTemplateNotFound is returned when a named template does not exist.
+var ErrTemplateNotFound = errors.New("template not found")
+
 // Render executes a full-page template into w.
 func Render(w http.ResponseWriter, t *Templates, name string, data PageData) error {
 	page := t.pages[name]
 	if page == nil {
-		return fmt.Errorf("template %q not found", name)
+		return fmt.Errorf("%w: %s", ErrTemplateNotFound, name)
 	}
 	var buf bytes.Buffer
 	if err := page.Execute(&buf, data); err != nil {
@@ -253,7 +257,7 @@ func RenderPartial(
 ) error {
 	tmpl := t.pages[page]
 	if tmpl == nil {
-		return fmt.Errorf("template %q not found", page)
+		return fmt.Errorf("%w: %s", ErrTemplateNotFound, page)
 	}
 	var buf bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&buf, partial, data); err != nil {
