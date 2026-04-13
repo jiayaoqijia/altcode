@@ -87,8 +87,11 @@ func (s *Server) registerRoutes() {
 func (s *Server) Run(ctx context.Context) error {
 	addr := fmt.Sprintf(":%d", s.cfg.Port)
 	httpServer := &http.Server{
-		Addr:    addr,
-		Handler: s.middleware(),
+		Addr:              addr,
+		Handler:           s.middleware(),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		IdleTimeout:       120 * time.Second,
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
@@ -120,18 +123,29 @@ func (s *Server) middleware() http.Handler {
 	if s.cfg.AuthToken != "" {
 		h = authMiddleware(s.cfg.AuthToken)(h)
 	}
+	h = bodySizeMiddleware(1 << 20)(h) // 1MB limit
 	h = recoveryMiddleware(s.logger)(h)
 	h = requestIDMiddleware()(h)
 	return h
 }
 
+func bodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.Body != nil {
+				r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func authMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health, metrics, and webhooks bypass auth.
+			// Health and webhooks bypass auth.
 			// Webhooks use HMAC signature verification instead.
 			if r.URL.Path == "/health" ||
-				r.URL.Path == "/metrics" ||
 				strings.HasPrefix(r.URL.Path, "/webhooks/") {
 				next.ServeHTTP(w, r)
 				return
