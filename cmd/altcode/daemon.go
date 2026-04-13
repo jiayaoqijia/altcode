@@ -31,6 +31,13 @@ Designed for AltFix VM deployment.`,
 						"API endpoints are unauthenticated")
 			}
 
+			if port < 1 || port > 65535 {
+				return fmt.Errorf("invalid port %d: must be 1-65535", port)
+			}
+			if maxTasks < 1 {
+				return fmt.Errorf("invalid max-concurrent %d: must be >= 1", maxTasks)
+			}
+
 			srv, err := daemon.NewServer(daemon.ServerConfig{
 				Port:      port,
 				DataDir:   dataDir,
