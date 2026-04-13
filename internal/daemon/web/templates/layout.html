@@ -1,0 +1,40 @@
+<!DOCTYPE html>
+<html lang="en" class="{{if .DarkMode}}dark{{end}}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="csrf-token" content="{{.CSRFToken}}">
+  <title>{{.Title}} — AltFix</title>
+  <link rel="stylesheet" href="/static/tailwind.css">
+  <link rel="stylesheet" href="/static/app.css">
+  <script src="/static/htmx.min.js" defer></script>
+</head>
+<body class="min-h-screen {{if .DarkMode}}bg-gray-900 text-gray-100{{else}}bg-gray-50 text-gray-900{{end}}">
+  {{if .ShowNav}}
+  <nav class="nav sticky top-0 z-50 border-b border-gray-200 px-4 py-2">
+    <div class="max-w-screen-xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-4">
+        <a href="/" class="font-bold text-lg">AltFix</a>
+        <a href="/" class="text-sm">Dashboard</a>
+        <a href="/prs" class="text-sm">PRs</a>
+        {{if .User}}{{if .User.IsAdmin}}
+        <a href="/settings" class="text-sm">Settings</a>
+        {{end}}{{end}}
+      </div>
+      <div class="flex items-center gap-3">
+        {{if .User}}
+        <span class="text-sm text-gray-500">{{.User.Login}}</span>
+        <form method="POST" action="/logout" class="inline">
+          <input type="hidden" name="csrf_token" value="{{.CSRFToken}}">
+          <button type="submit" class="text-sm text-gray-500 cursor-pointer">Logout</button>
+        </form>
+        {{end}}
+      </div>
+    </div>
+  </nav>
+  {{end}}
+  <main class="max-w-screen-xl mx-auto px-4 py-6">
+    {{template "content" .}}
+  </main>
+</body>
+</html>
