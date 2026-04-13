@@ -100,6 +100,13 @@ type shareContentData struct {
 func (h *WebHandler) HandleShareView(
 	w http.ResponseWriter, r *http.Request,
 ) {
+	// If no signing key is configured, shared URLs are disabled —
+	// an empty key would let any HMAC pass validation.
+	if len(h.cfg.SigningKey) == 0 {
+		http.NotFound(w, r)
+		return
+	}
+
 	raw := r.PathValue("token")
 	dot := strings.LastIndex(raw, ".")
 	if dot < 0 {

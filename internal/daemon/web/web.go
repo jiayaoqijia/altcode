@@ -264,6 +264,12 @@ func RenderPartial(
 
 // RegisterRoutes mounts all web UI routes on the provided mux.
 func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
+	// Reject short signing keys — an HMAC with fewer than 32 bytes
+	// is trivially brute-forceable.
+	if len(cfg.SigningKey) > 0 && len(cfg.SigningKey) < 32 {
+		return fmt.Errorf("signing key must be at least 32 bytes")
+	}
+
 	tmpl, err := LoadTemplates()
 	if err != nil {
 		return err

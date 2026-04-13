@@ -159,6 +159,9 @@ func computeKPI(tasks []*TaskView) kpiData {
 }
 
 // HandleDashboard renders the full dashboard page.
+// NOTE: All authenticated users can view all tasks. This is intentional for
+// single-daemon team deployments. Multi-tenant isolation requires Task.OwnerOrg
+// scoping (v2).
 func (h *WebHandler) HandleDashboard(
 	w http.ResponseWriter, r *http.Request,
 ) {
@@ -242,6 +245,9 @@ var defaultPhases = []string{
 }
 
 // HandleTaskDetail renders the task detail page.
+// NOTE: All authenticated users can view all tasks. This is intentional for
+// single-daemon team deployments. Multi-tenant isolation requires Task.OwnerOrg
+// scoping (v2).
 func (h *WebHandler) HandleTaskDetail(
 	w http.ResponseWriter, r *http.Request,
 ) {
@@ -433,6 +439,9 @@ func extractPRs(
 }
 
 // HandlePRs renders the PR tracker page.
+// NOTE: All authenticated users can view all tasks. This is intentional for
+// single-daemon team deployments. Multi-tenant isolation requires Task.OwnerOrg
+// scoping (v2).
 func (h *WebHandler) HandlePRs(
 	w http.ResponseWriter, r *http.Request,
 ) {

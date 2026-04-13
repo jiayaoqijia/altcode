@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -33,7 +34,17 @@ type WebConfig struct {
 	AdminUsers     []string
 	SigningKey      []byte
 	BaseURL        string
+	// TrustProxy controls whether X-Forwarded-Proto is trusted for
+	// determining TLS status. Only enable behind a known reverse proxy.
+	TrustProxy bool
 }
+
+// oauthPendingCount tracks in-flight OAuth sessions per source IP
+// to prevent session-flood DoS. Value type is *int32.
+var oauthPendingCount sync.Map
+
+// maxOAuthPendingPerIP is the cap on concurrent OAuth sessions per IP.
+const maxOAuthPendingPerIP int32 = 10
 
 // OrgCache caches GitHub org membership per user with a TTL.
 type OrgCache struct {
@@ -122,6 +133,23 @@ func (h *WebHandler) HandleLoginPage(w http.ResponseWriter, r *http.Request) {
 func (h *WebHandler) HandleOAuthRedirect(
 	w http.ResponseWriter, r *http.Request,
 ) {
+	// Rate-limit pending OAuth sessions per source IP.
+	ip := r.RemoteAddr
+	if h.cfg.TrustProxy {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			ip = strings.Split(fwd, ",")[0]
+		}
+	}
+	countPtr, _ := oauthPendingCount.LoadOrStore(
+		ip, new(int32),
+	)
+	count := atomic.AddInt32(countPtr.(*int32), 1)
+	if count > maxOAuthPendingPerIP {
+		atomic.AddInt32(countPtr.(*int32), -1)
+		http.Error(w, "too many pending OAuth requests", http.StatusTooManyRequests)
+		return
+	}
+
 	state := randomHex(16)
 	verifier := generatePKCEVerifier()
 	challenge := pkceChallenge(verifier)
@@ -136,7 +164,7 @@ func (h *WebHandler) HandleOAuthRedirect(
 		Path:     "/",
 		MaxAge:   600, // 10 minutes
 		HttpOnly: true,
-		Secure:   isSecure(r),
+		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -158,6 +186,17 @@ func (h *WebHandler) HandleOAuthRedirect(
 func (h *WebHandler) HandleOAuthCallback(
 	w http.ResponseWriter, r *http.Request,
 ) {
+	// Decrement the per-IP OAuth pending counter.
+	ip := r.RemoteAddr
+	if h.cfg.TrustProxy {
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			ip = strings.Split(fwd, ",")[0]
+		}
+	}
+	if countPtr, ok := oauthPendingCount.Load(ip); ok {
+		atomic.AddInt32(countPtr.(*int32), -1)
+	}
+
 	cookie, err := r.Cookie("altfix_oauth")
 	if err != nil {
 		h.loginError(w, r, "missing OAuth cookie")
@@ -183,7 +222,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isSecure(r),
+		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -239,7 +278,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		Path:     "/",
 		MaxAge:   86400, // 24 hours
 		HttpOnly: true,
-		Secure:   isSecure(r),
+		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -260,7 +299,7 @@ func (h *WebHandler) HandleLogout(
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   isSecure(r),
+		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/ui/login", http.StatusFound)
@@ -456,9 +495,15 @@ func pkceChallenge(verifier string) string {
 	return base64.RawURLEncoding.EncodeToString(h[:])
 }
 
-// isSecure returns true if the request arrived over TLS, either
-// directly or via a reverse proxy that sets X-Forwarded-Proto.
-func isSecure(r *http.Request) bool {
-	return r.TLS != nil ||
-		r.Header.Get("X-Forwarded-Proto") == "https"
+// isSecure returns true if the request arrived over TLS.
+// X-Forwarded-Proto is only trusted when trustProxy is true,
+// preventing cookie secure-flag downgrade via header spoofing.
+func isSecure(r *http.Request, trustProxy bool) bool {
+	if r.TLS != nil {
+		return true
+	}
+	if trustProxy && r.Header.Get("X-Forwarded-Proto") == "https" {
+		return true
+	}
+	return false
 }

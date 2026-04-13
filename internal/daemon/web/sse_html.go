@@ -82,6 +82,9 @@ func renderEventHTML(ev *EventView) (string, error) {
 // HandleSSEHTML streams task events as SSE with HTML partials
 // on the wire. The browser's native EventSource appends each
 // data payload directly into the activity feed DOM.
+// NOTE: All authenticated users can view all tasks. This is intentional for
+// single-daemon team deployments. Multi-tenant isolation requires Task.OwnerOrg
+// scoping (v2).
 func (h *WebHandler) HandleSSEHTML(
 	w http.ResponseWriter, r *http.Request,
 ) {

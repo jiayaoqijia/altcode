@@ -253,7 +253,7 @@ func TestRegisterRoutes_MountsAllPaths(t *testing.T) {
 		GitHubClientID: "test-id",
 		GitHubSecret:   "test-secret",
 		BaseURL:        "https://altfix.test",
-		SigningKey:      []byte("test-key"),
+		SigningKey:      []byte("test-key-at-least-32-bytes-long!"),
 	}
 
 	mux := http.NewServeMux()
@@ -352,7 +352,7 @@ func TestOAuthFullFlow_Integration(t *testing.T) {
 		GitHubClientID: "int-cid",
 		GitHubSecret:   "int-csec",
 		BaseURL:        "https://altfix.test",
-		SigningKey:      []byte("int-key"),
+		SigningKey:      []byte("integration-key-at-least-32bytes!"),
 	}
 
 	mux := http.NewServeMux()
@@ -484,7 +484,7 @@ func TestCSRFProtection_Integration(t *testing.T) {
 		GitHubClientID: "csrf-cid",
 		GitHubSecret:   "csrf-csec",
 		BaseURL:        "https://altfix.test",
-		SigningKey:      []byte("csrf-key"),
+		SigningKey:      []byte("csrf-key-needs-at-least-32-bytes!"),
 	}
 
 	mux := http.NewServeMux()
@@ -650,7 +650,7 @@ func TestMiddlewareChain(t *testing.T) {
 		GitHubClientID: "mw-cid",
 		GitHubSecret:   "mw-csec",
 		BaseURL:        "https://altfix.test",
-		SigningKey:      []byte("mw-key"),
+		SigningKey:      []byte("middleware-key-at-least-32-bytes!"),
 	}
 
 	mux := http.NewServeMux()
