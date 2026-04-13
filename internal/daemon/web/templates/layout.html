@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="csrf-token" content="{{.CSRFToken}}">
   <title>{{.Title}} — AltFix</title>
-  <link rel="stylesheet" href="/static/tailwind.css">
-  <link rel="stylesheet" href="/static/app.css">
-  <script src="/static/htmx.min.js" defer></script>
+  <link rel="stylesheet" href="/ui/static/tailwind.css">
+  <link rel="stylesheet" href="/ui/static/app.css">
+  <script src="/ui/static/htmx.min.js" defer></script>
 </head>
 <body class="min-h-screen {{if .DarkMode}}bg-gray-900 text-gray-100{{else}}bg-gray-50 text-gray-900{{end}}">
   {{if .ShowNav}}
