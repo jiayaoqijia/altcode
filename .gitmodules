@@ -43,3 +43,24 @@
 [submodule "vendor/hermes-agent"]
 	path = vendor/hermes-agent
 	url = https://github.com/nousresearch/hermes-agent.git
+[submodule "vendor/openhands-cli"]
+	path = vendor/openhands-cli
+	url = https://github.com/All-Hands-AI/OpenHands-CLI
+[submodule "vendor/openhands-docs"]
+	path = vendor/openhands-docs
+	url = https://github.com/All-Hands-AI/docs
+[submodule "vendor/openhands-trajectory"]
+	path = vendor/openhands-trajectory
+	url = https://github.com/All-Hands-AI/trajectory-visualizer
+[submodule "vendor/openhands-web"]
+	path = vendor/openhands-web
+	url = https://github.com/OpenHands/OpenHands-Web
+[submodule "vendor/openhands-llm-tracker"]
+	path = vendor/openhands-llm-tracker
+	url = https://github.com/OpenHands/llm-support-tracker
+[submodule "vendor/openhands-eval-monitor"]
+	path = vendor/openhands-eval-monitor
+	url = https://github.com/OpenHands/eval-monitor
+[submodule "vendor/openhands-pr-dashboard"]
+	path = vendor/openhands-pr-dashboard
+	url = https://github.com/OpenHands/community-pr-dashboard
