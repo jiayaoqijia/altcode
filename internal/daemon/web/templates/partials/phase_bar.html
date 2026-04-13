@@ -1,0 +1,11 @@
+{{define "phase_bar"}}
+<div class="phase-bar">
+  {{range $phase := .Phases}}
+    <span class="phase-step {{phaseClass $.CurrentPhase $phase}}">
+      {{if eq (phaseClass $.CurrentPhase $phase) "phase-done"}}&#10003;{{else if eq (phaseClass $.CurrentPhase $phase) "phase-active"}}&#10227;{{else}}&middot;{{end}}
+      {{$phase}}
+    </span>
+    {{if ne $phase "pr_open"}} &rarr; {{end}}
+  {{end}}
+</div>
+{{end}}

@@ -12,7 +12,7 @@ type DashboardStore interface {
 }
 
 // TaskView is the read-model for a single task displayed on the
-// dashboard and task-list partials.
+// dashboard, task-list partials, and detail page.
 type TaskView struct {
 	ID              string
 	RepoURL         string
@@ -22,6 +22,9 @@ type TaskView struct {
 	RepoName        string
 	IssueNumber     int
 	APICostUSD      float64
+	PRNumber        int
+	PRURL           string
+	Duration        string
 	CreatedAt       time.Time
 }
 
@@ -213,6 +216,82 @@ func (h *WebHandler) HandlePartialKPICards(
 	kpi := computeKPI(tasks)
 	err := RenderPartial(w, h.tmpl, "dashboard", "kpi_cards", kpi)
 	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// phaseBarData carries data for the phase_bar partial.
+type phaseBarData struct {
+	Phases       []string
+	CurrentPhase string
+}
+
+// detailContentData carries all fields for detail.html rendering.
+type detailContentData struct {
+	Task      *TaskView
+	IsActive  bool
+	PhaseData phaseBarData
+	Events    []*EventView
+	CSRFToken string
+}
+
+// defaultPhases is the ordered pipeline for the phase bar.
+var defaultPhases = []string{
+	"planning", "implementing", "reviewing", "testing", "pr_open",
+}
+
+// HandleTaskDetail renders the task detail page.
+func (h *WebHandler) HandleTaskDetail(
+	w http.ResponseWriter, r *http.Request,
+) {
+	taskID := r.PathValue("id")
+	sess := GetSession(r)
+
+	es := h.eventStore()
+	if es == nil {
+		http.Error(w, "store not configured", http.StatusInternalServerError)
+		return
+	}
+
+	task, err := es.GetTask(taskID)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+
+	events, _ := es.ListEvents(taskID, 0)
+
+	active := activeStatuses[task.Status]
+	csrf := ""
+	if sess != nil {
+		csrf = sess.CSRFToken
+	}
+
+	content := detailContentData{
+		Task:     task,
+		IsActive: active,
+		PhaseData: phaseBarData{
+			Phases:       defaultPhases,
+			CurrentPhase: task.Status,
+		},
+		Events:    events,
+		CSRFToken: csrf,
+	}
+
+	data := PageData{
+		Title:   "Task Detail",
+		ShowNav: true,
+	}
+	if sess != nil {
+		data.CSRFToken = sess.CSRFToken
+		data.User = sess.User
+		if sess.User != nil {
+			data.IsAdmin = sess.User.IsAdmin
+		}
+	}
+	data.Content = content
+
+	if err := Render(w, h.tmpl, "detail", data); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

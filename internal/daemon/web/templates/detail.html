@@ -1,0 +1,112 @@
+{{define "content"}}
+{{with .Content}}
+<div style="margin-bottom:16px">
+  <a href="/ui/" class="text-sm text-blue-600 hover:underline">&larr; Dashboard</a>
+</div>
+
+<div class="card" style="padding:16px;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+    <div>
+      <h1 class="text-xl font-bold" style="margin:0 0 4px 0">
+        {{if .Task.RepoOwner}}{{.Task.RepoOwner}}/{{.Task.RepoName}}{{if .Task.IssueNumber}}#{{.Task.IssueNumber}}{{end}}{{else}}Task{{end}}
+      </h1>
+      <p class="text-sm" style="margin:0;color:#6b7280">{{.Task.TaskDescription}}</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <span class="{{statusDot .Task.Status}}"></span>
+      <span class="text-sm font-medium">{{.Task.Status}}</span>
+      <span class="text-sm text-gray-500">${{printf "%.2f" .Task.APICostUSD}}</span>
+      {{if .Task.Duration}}
+      <span class="text-sm text-gray-500">{{.Task.Duration}}</span>
+      {{end}}
+      {{if .Task.PRURL}}
+      <a href="{{.Task.PRURL}}" target="_blank" rel="noopener" class="text-sm text-blue-600 hover:underline">PR #{{.Task.PRNumber}}</a>
+      {{end}}
+      {{if .IsActive}}
+      <form method="POST" action="/api/tasks/{{.Task.ID}}/stop" style="margin:0">
+        <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+        <button type="submit" class="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm font-medium transition-colors cursor-pointer">Cancel</button>
+      </form>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+{{template "phase_bar" .PhaseData}}
+
+<div class="card" style="margin-top:16px;overflow:hidden">
+  <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb;display:flex;justify-content:space-between;align-items:center">
+    <strong class="text-sm">Activity</strong>
+    <span id="sse-status" class="text-xs text-gray-400">Connected</span>
+  </div>
+  <div id="earlier-container" style="display:none;padding:8px 16px;text-align:center">
+    <button id="show-earlier" class="text-sm text-blue-600 hover:underline cursor-pointer" style="background:none;border:none">Show earlier...</button>
+  </div>
+  <div id="activity-feed" style="max-height:60vh;overflow-y:auto">
+    {{range .Events}}
+      {{template "event_item" .}}
+    {{end}}
+  </div>
+</div>
+
+{{if .IsActive}}
+<div style="margin-top:16px">
+  <form hx-post="/api/tasks/{{.Task.ID}}/steer" hx-headers='{"X-CSRF-Token":"{{$.CSRFToken}}"}' hx-on::after-request="this.reset()" style="display:flex;gap:8px">
+    <input name="message" placeholder="Steer the agent..." required class="flex-1 border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+    <button type="submit" class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer">Send</button>
+  </form>
+</div>
+{{end}}
+
+<script>
+(function() {
+  var feed = document.getElementById('activity-feed');
+  var status = document.getElementById('sse-status');
+  var earlierBtn = document.getElementById('show-earlier');
+  var earlierBox = document.getElementById('earlier-container');
+  var maxItems = 200;
+  var hidden = [];
+
+  var es = new EventSource('/ui/tasks/{{.Task.ID}}/events');
+
+  es.onmessage = function(e) {
+    status.textContent = 'Connected';
+    status.style.color = '#9ca3af';
+    var tmp = document.createElement('div');
+    tmp.innerHTML = e.data;
+    while (tmp.firstChild) {
+      feed.appendChild(tmp.firstChild);
+    }
+    // DOM cap: keep last maxItems visible, hide older ones.
+    var items = feed.querySelectorAll('[data-event-id]');
+    while (items.length > maxItems) {
+      var el = items[0];
+      el.style.display = 'none';
+      hidden.push(el);
+      items = feed.querySelectorAll('[data-event-id]:not([style*="display: none"])');
+      earlierBox.style.display = '';
+    }
+    feed.scrollTop = feed.scrollHeight;
+  };
+
+  es.onerror = function() {
+    status.textContent = 'Reconnecting...';
+    status.style.color = '#f59e0b';
+  };
+
+  if (earlierBtn) {
+    earlierBtn.addEventListener('click', function() {
+      for (var i = 0; i < hidden.length; i++) {
+        hidden[i].style.display = '';
+      }
+      hidden = [];
+      earlierBox.style.display = 'none';
+    });
+  }
+
+  // Auto-scroll on initial load.
+  feed.scrollTop = feed.scrollHeight;
+})();
+</script>
+{{end}}
+{{end}}

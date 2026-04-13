@@ -1,0 +1,40 @@
+{{define "event_item"}}
+{{if eq .EventType "phase_started" "phase_completed"}}
+<div class="feed-item feed-item-phase" data-event-id="{{.ID}}">
+  <strong>{{.EventType}}</strong>: {{.Data}}
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else if eq .EventType "agent_output" "tool_call"}}
+<div class="feed-item feed-item-agent" data-event-id="{{.ID}}">
+  <pre style="margin:0;white-space:pre-wrap;font-family:monospace;font-size:0.8rem">{{.Data}}</pre>
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else if eq .EventType "error"}}
+<div class="feed-item feed-item-error" data-event-id="{{.ID}}">
+  <span style="color:#ef4444;font-weight:600">Error:</span> {{.Data}}
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else if eq .EventType "user_steer"}}
+<div class="feed-item feed-item-steer" data-event-id="{{.ID}}">
+  <div style="background:#dbeafe;color:#1e40af;padding:0.5rem 0.75rem;border-radius:0.375rem;display:inline-block;max-width:80%">
+    {{.Data}}
+  </div>
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else if eq .EventType "pr_created"}}
+<div class="feed-item feed-item-info" data-event-id="{{.ID}}">
+  <span style="color:#10b981;font-weight:500">PR created:</span> {{.Data}}
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else if eq .EventType "ci_status"}}
+<div class="feed-item feed-item-info" data-event-id="{{.ID}}">
+  <span style="color:#3b82f6;font-weight:500">CI:</span> {{.Data}}
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{else}}
+<div class="feed-item" data-event-id="{{.ID}}" style="color:#6b7280">
+  <span class="text-xs font-medium">[{{.EventType}}]</span> {{.Data}}
+  <span class="text-xs text-gray-400" style="float:right">{{.CreatedAt.Format "15:04:05"}}</span>
+</div>
+{{end}}
+{{end}}
