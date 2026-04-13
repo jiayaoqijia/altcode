@@ -660,3 +660,144 @@ test.describe('CSRF and security tokens', () => {
     await expect(activeFilter).toBeVisible();
   });
 });
+
+// ---- Gap 1: XSS end-to-end ----
+
+test.describe('XSS end-to-end', () => {
+  test('XSS payload in task is stored verbatim in JSON API', async ({ request }) => {
+    const xss = '<script>alert("xss")</script>';
+    const create = await request.post(`${BASE}/tasks`, {
+      headers: { 'Authorization': 'Bearer e2e-token', 'Content-Type': 'application/json' },
+      data: { repo_url: 'https://github.com/test/xss-e2e', task: xss },
+    });
+    expect(create.status()).toBe(201);
+    const { id } = await create.json();
+
+    // Fetch task — the task description should be stored verbatim in JSON
+    // (Go html/template escapes on render, not on storage)
+    const get = await request.get(`${BASE}/tasks/${id}`, {
+      headers: { 'Authorization': 'Bearer e2e-token' },
+    });
+    const body = await get.json();
+    // Verify the payload is stored (proves it reaches the DB)
+    expect(body.task.task_description).toContain('<script>');
+  });
+});
+
+// ---- Gap 2: CSRF positive path ----
+
+test.describe('CSRF positive path', () => {
+  test('POST with valid CSRF token succeeds', async ({ page }) => {
+    await login(page);
+
+    // Get CSRF token from meta tag
+    const csrfToken = await page.locator('meta[name="csrf-token"]').getAttribute('content');
+    expect(csrfToken).toBeTruthy();
+
+    // POST logout WITH valid CSRF token — should succeed (302 to login, not 403)
+    const resp = await page.evaluate(async ([csrf, base]) => {
+      const r = await fetch(`${base}/auth/logout`, {
+        method: 'POST',
+        headers: { 'X-CSRF-Token': csrf! },
+        redirect: 'manual',
+      });
+      return r.status;
+    }, [csrfToken!, BASE]);
+
+    // 302 (redirect to login) means CSRF passed; 403 means it failed
+    // fetch with redirect: 'manual' returns 0 for opaque redirects
+    expect([302, 0]).toContain(resp);
+  });
+});
+
+// ---- Gap 3: SSE streams actual events ----
+
+test.describe('SSE content', () => {
+  test('SSE endpoint streams heartbeat comments', async ({ request }) => {
+    // Create a task via the API
+    const createResp = await request.post(`${BASE}/tasks`, {
+      headers: { 'Authorization': 'Bearer e2e-token', 'Content-Type': 'application/json' },
+      data: { repo_url: 'https://github.com/test/sse2', task: 'SSE heartbeat test' },
+    });
+    expect(createResp.status()).toBe(201);
+    const { id: taskId } = await createResp.json();
+
+    // Connect to SSE via Node and read the raw stream for heartbeat
+    // comments. Heartbeats are SSE comments (lines starting with ":"),
+    // which the browser EventSource.onmessage does not fire for.
+    // Use Node fetch + AbortController to read the raw bytes.
+    const ctrl = new AbortController();
+    const resp = await fetch(`${BASE}/tasks/${taskId}/sse`, {
+      headers: { 'Authorization': 'Bearer e2e-token' },
+      signal: ctrl.signal,
+    });
+    expect(resp.status).toBe(200);
+    expect(resp.headers.get('content-type')).toContain('text/event-stream');
+
+    const reader = resp.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    let hasHeartbeat = false;
+    const deadline = Date.now() + 5000;
+    try {
+      while (Date.now() < deadline) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        if (buf.includes(': heartbeat')) {
+          hasHeartbeat = true;
+          break;
+        }
+      }
+    } finally {
+      ctrl.abort();
+    }
+
+    expect(hasHeartbeat).toBe(true);
+  });
+});
+
+// ---- Gap 4: Session lifecycle ----
+
+test.describe('Session lifecycle', () => {
+  test('session stays alive across multiple page loads', async ({ page }) => {
+    await login(page);
+
+    // Load multiple pages in sequence — session should persist
+    await page.goto(`${BASE}/ui/`);
+    await expect(page.locator('nav')).toBeVisible();
+
+    await page.goto(`${BASE}/ui/prs`);
+    await expect(page.locator('nav')).toBeVisible();
+
+    await page.goto(`${BASE}/ui/settings`);
+    await expect(page.locator('nav')).toBeVisible();
+
+    // Still not redirected to login — session is alive
+    await page.goto(`${BASE}/ui/`);
+    await expect(page).not.toHaveURL(/login/);
+  });
+});
+
+// ---- Gap 5: Full page smoke test ----
+
+test.describe('Full page smoke test', () => {
+  test('all pages render without JS errors', async ({ page }) => {
+    const errors: string[] = [];
+    page.on('pageerror', (e) => errors.push(e.message));
+
+    await login(page);
+
+    const pages = ['/ui/', '/ui/tasks/new', '/ui/prs', '/ui/settings'];
+    for (const p of pages) {
+      await page.goto(`${BASE}${p}`);
+      await page.waitForLoadState('domcontentloaded');
+      // Verify page has content (not blank)
+      const body = await page.textContent('body');
+      expect(body!.length).toBeGreaterThan(50);
+    }
+
+    // No JS errors on any page
+    expect(errors).toHaveLength(0);
+  });
+});
