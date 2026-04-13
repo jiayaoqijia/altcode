@@ -37,7 +37,7 @@ func RequireAuth(sessions *SessionStore) func(http.Handler) http.Handler {
 				return
 			}
 			sess, ok := sessions.Get(cookie.Value)
-			if !ok {
+			if !ok || !sess.Authenticated {
 				http.Redirect(w, r, "/ui/login", http.StatusFound)
 				return
 			}

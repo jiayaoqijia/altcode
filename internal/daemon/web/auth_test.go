@@ -79,14 +79,14 @@ func TestOAuthRedirect_SetsStateAndPKCE(t *testing.T) {
 		t.Errorf("SameSite = %v, want Lax", oauthCookie.SameSite)
 	}
 
-	// Verify session has state:verifier stored.
+	// Verify session has state:verifier stored in OAuthState (not CSRFToken).
 	sess, ok := sessions.Get(oauthCookie.Value)
 	if !ok {
 		t.Fatal("expected session for OAuth cookie")
 	}
-	parts := strings.SplitN(sess.CSRFToken, ":", 2)
+	parts := strings.SplitN(sess.OAuthState, ":", 2)
 	if len(parts) != 2 {
-		t.Fatalf("CSRFToken = %q, want state:verifier", sess.CSRFToken)
+		t.Fatalf("OAuthState = %q, want state:verifier", sess.OAuthState)
 	}
 	if parts[0] != q.Get("state") {
 		t.Errorf("stored state = %q, URL state = %q", parts[0], q.Get("state"))
@@ -191,8 +191,9 @@ func TestHandleLogout(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	h := NewWebHandler(tmpl, nil, sessions, WebConfig{}, NewOrgCache(time.Hour))
 
-	// Create a session.
+	// Create an authenticated session.
 	sessionID := sessions.Create(&SessionUser{Login: "testuser"})
+	sessions.SetAuthenticated(sessionID)
 
 	req := httptest.NewRequest(http.MethodPost, "/logout", nil)
 	req.AddCookie(&http.Cookie{
@@ -452,6 +453,9 @@ func TestOAuthCallback_FullFlow(t *testing.T) {
 	sess, ok := sessions.Get(sessionCookie.Value)
 	if !ok {
 		t.Fatal("expected session to exist")
+	}
+	if !sess.Authenticated {
+		t.Error("expected session to be marked Authenticated")
 	}
 	if sess.User.Login != "octocat" {
 		t.Errorf("Login = %q, want octocat", sess.User.Login)

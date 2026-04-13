@@ -113,6 +113,10 @@ func TestSessionStore_SetOAuthState(t *testing.T) {
 	store := NewSessionStore(time.Hour)
 	id := store.Create(&SessionUser{Login: "oauth-user"})
 
+	// Capture CSRFToken before SetOAuthState.
+	sessBefore, _ := store.Get(id)
+	origCSRF := sessBefore.CSRFToken
+
 	store.SetOAuthState(id, "state123", "verifier456")
 
 	sess, ok := store.Get(id)
@@ -120,12 +124,36 @@ func TestSessionStore_SetOAuthState(t *testing.T) {
 		t.Fatal("session not found")
 	}
 	want := "state123:verifier456"
-	if sess.CSRFToken != want {
-		t.Errorf("CSRFToken = %q, want %q", sess.CSRFToken, want)
+	if sess.OAuthState != want {
+		t.Errorf("OAuthState = %q, want %q", sess.OAuthState, want)
+	}
+	// CSRFToken must NOT be overwritten by SetOAuthState.
+	if sess.CSRFToken != origCSRF {
+		t.Errorf("CSRFToken changed from %q to %q", origCSRF, sess.CSRFToken)
 	}
 
 	// SetOAuthState on non-existent session is a no-op.
 	store.SetOAuthState("nonexistent", "s", "v")
+}
+
+func TestSessionStore_SetAuthenticated(t *testing.T) {
+	store := NewSessionStore(time.Hour)
+	id := store.Create(&SessionUser{Login: "auth-user"})
+
+	sess, _ := store.Get(id)
+	if sess.Authenticated {
+		t.Error("new session should not be authenticated")
+	}
+
+	store.SetAuthenticated(id)
+
+	sess, _ = store.Get(id)
+	if !sess.Authenticated {
+		t.Error("expected session to be authenticated after SetAuthenticated")
+	}
+
+	// SetAuthenticated on non-existent session is a no-op.
+	store.SetAuthenticated("nonexistent")
 }
 
 func TestSessionStore_Concurrent(t *testing.T) {

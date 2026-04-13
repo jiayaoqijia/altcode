@@ -32,9 +32,36 @@ func TestRequireAuth_RedirectsUnauthenticated(t *testing.T) {
 	}
 }
 
+func TestRequireAuth_RejectsTempOAuthSession(t *testing.T) {
+	sessions := NewSessionStore(time.Hour)
+	// Create a temp session (not authenticated) like HandleOAuthRedirect does.
+	tempID := sessions.Create(&SessionUser{})
+	sessions.SetOAuthState(tempID, "state", "verifier")
+
+	mw := RequireAuth(sessions)
+
+	inner := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+
+	req := httptest.NewRequest(http.MethodGet, "/ui/dashboard", nil)
+	req.AddCookie(&http.Cookie{Name: "altfix_session", Value: tempID})
+	w := httptest.NewRecorder()
+	mw(inner).ServeHTTP(w, req)
+
+	resp := w.Result()
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusFound {
+		t.Fatalf("status = %d, want %d (temp session should be rejected)",
+			resp.StatusCode, http.StatusFound)
+	}
+}
+
 func TestRequireAuth_AllowsAuthenticated(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	id := sessions.Create(&SessionUser{Login: "alice", IsAdmin: true})
+	sessions.SetAuthenticated(id)
 
 	mw := RequireAuth(sessions)
 
@@ -94,6 +121,7 @@ func TestRequireAuth_ExpiredSession(t *testing.T) {
 func TestCSRFCheck_SkipsGET(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	id := sessions.Create(&SessionUser{Login: "carol"})
+	sessions.SetAuthenticated(id)
 
 	authMW := RequireAuth(sessions)
 	csrfMW := CSRFCheck()
@@ -121,6 +149,7 @@ func TestCSRFCheck_SkipsGET(t *testing.T) {
 func TestCSRFCheck_RejectsInvalidToken(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	id := sessions.Create(&SessionUser{Login: "dave"})
+	sessions.SetAuthenticated(id)
 
 	authMW := RequireAuth(sessions)
 	csrfMW := CSRFCheck()
@@ -149,6 +178,7 @@ func TestCSRFCheck_RejectsInvalidToken(t *testing.T) {
 func TestCSRFCheck_AcceptsValidToken(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	id := sessions.Create(&SessionUser{Login: "eve"})
+	sessions.SetAuthenticated(id)
 
 	sess, ok := sessions.Get(id)
 	if !ok {
@@ -181,6 +211,7 @@ func TestCSRFCheck_AcceptsValidToken(t *testing.T) {
 func TestCSRFCheck_AcceptsFormField(t *testing.T) {
 	sessions := NewSessionStore(time.Hour)
 	id := sessions.Create(&SessionUser{Login: "frank"})
+	sessions.SetAuthenticated(id)
 
 	sess, ok := sessions.Get(id)
 	if !ok {
@@ -219,6 +250,7 @@ func TestRequireAdmin_RejectsNonAdmin(t *testing.T) {
 		Login:   "normie",
 		IsAdmin: false,
 	})
+	sessions.SetAuthenticated(id)
 
 	authMW := RequireAuth(sessions)
 	adminMW := RequireAdmin()
@@ -249,6 +281,7 @@ func TestRequireAdmin_AllowsAdmin(t *testing.T) {
 		Login:   "boss",
 		IsAdmin: true,
 	})
+	sessions.SetAuthenticated(id)
 
 	authMW := RequireAuth(sessions)
 	adminMW := RequireAdmin()

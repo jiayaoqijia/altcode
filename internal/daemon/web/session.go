@@ -18,11 +18,13 @@ type SessionUser struct {
 
 // Session is a single authenticated browser session.
 type Session struct {
-	ID        string
-	User      *SessionUser
-	CSRFToken string
-	CreatedAt time.Time
-	TouchedAt time.Time
+	ID            string
+	User          *SessionUser
+	CSRFToken     string
+	OAuthState    string
+	Authenticated bool
+	CreatedAt     time.Time
+	TouchedAt     time.Time
 }
 
 // SessionStore is a thread-safe in-memory session store with TTL.
@@ -90,11 +92,20 @@ func (s *SessionStore) Delete(id string) {
 }
 
 // SetOAuthState atomically stores the OAuth state and PKCE verifier
-// into the session's CSRFToken field as "state:verifier".
+// into the session's OAuthState field as "state:verifier".
 func (s *SessionStore) SetOAuthState(id, state, verifier string) {
 	s.mu.Lock()
 	if sess, ok := s.sessions[id]; ok {
-		sess.CSRFToken = state + ":" + verifier
+		sess.OAuthState = state + ":" + verifier
+	}
+	s.mu.Unlock()
+}
+
+// SetAuthenticated marks the session as fully authenticated.
+func (s *SessionStore) SetAuthenticated(id string) {
+	s.mu.Lock()
+	if sess, ok := s.sessions[id]; ok {
+		sess.Authenticated = true
 	}
 	s.mu.Unlock()
 }

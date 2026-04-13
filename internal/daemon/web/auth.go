@@ -7,12 +7,17 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
 )
+
+// githubHTTPClient is used for all GitHub API calls instead of
+// http.DefaultClient so that a stalled upstream can't block forever.
+var githubHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
 // StoreIface is a placeholder for the daemon.Store dependency.
 // Task 8 wires the real implementation.
@@ -132,7 +137,7 @@ func (h *WebHandler) HandleOAuthRedirect(
 		Path:     "/",
 		MaxAge:   600, // 10 minutes
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -164,7 +169,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		h.loginError(w, r, "expired OAuth session")
 		return
 	}
-	parts := strings.SplitN(sess.CSRFToken, ":", 2)
+	parts := strings.SplitN(sess.OAuthState, ":", 2)
 	if len(parts) != 2 {
 		h.loginError(w, r, "invalid OAuth state")
 		return
@@ -179,7 +184,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -227,6 +232,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		Orgs:        orgNames(orgs),
 	}
 	sessionID := h.sessions.Create(user)
+	h.sessions.SetAuthenticated(sessionID)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_session",
@@ -234,7 +240,7 @@ func (h *WebHandler) HandleOAuthCallback(
 		Path:     "/",
 		MaxAge:   86400, // 24 hours
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -255,7 +261,7 @@ func (h *WebHandler) HandleLogout(
 		Path:     "/",
 		MaxAge:   -1,
 		HttpOnly: true,
-		Secure:   r.TLS != nil,
+		Secure:   isSecure(r),
 		SameSite: http.SameSiteLaxMode,
 	})
 	http.Redirect(w, r, "/ui/login", http.StatusFound)
@@ -266,6 +272,9 @@ func (h *WebHandler) HandleLogout(
 // are empty (allow-all).
 func (h *WebHandler) isAuthorized(login string, orgs []string) bool {
 	if len(h.cfg.AllowedUsers) == 0 && len(h.cfg.AllowedOrgs) == 0 {
+		// No access restrictions configured — allowing all GitHub users.
+		// Set --allowed-orgs or --allowed-users in production.
+		log.Printf("warn: no AllowedUsers or AllowedOrgs configured, allowing %q", login)
 		return true
 	}
 	for _, u := range h.cfg.AllowedUsers {
@@ -353,7 +362,7 @@ func (h *WebHandler) exchangeCode(
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	req.Header.Set("User-Agent", "AltFix/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return "", fmt.Errorf("token request: %w", err)
 	}
@@ -387,7 +396,7 @@ func (h *WebHandler) fetchGitHubUser(
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "AltFix/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("user request: %w", err)
 	}
@@ -417,7 +426,7 @@ func (h *WebHandler) fetchGitHubOrgs(
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("User-Agent", "AltFix/1.0")
 
-	resp, err := http.DefaultClient.Do(req)
+	resp, err := githubHTTPClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("orgs request: %w", err)
 	}
@@ -446,4 +455,11 @@ func generatePKCEVerifier() string {
 func pkceChallenge(verifier string) string {
 	h := sha256.Sum256([]byte(verifier))
 	return base64.RawURLEncoding.EncodeToString(h[:])
+}
+
+// isSecure returns true if the request arrived over TLS, either
+// directly or via a reverse proxy that sets X-Forwarded-Proto.
+func isSecure(r *http.Request) bool {
+	return r.TLS != nil ||
+		r.Header.Get("X-Forwarded-Proto") == "https"
 }
