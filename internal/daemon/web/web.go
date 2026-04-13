@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // PageData carries data into every template render.
@@ -259,4 +260,59 @@ func RenderPartial(
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	_, err := buf.WriteTo(w)
 	return err
+}
+
+// RegisterRoutes mounts all web UI routes on the provided mux.
+func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		return err
+	}
+
+	// Static assets.
+	staticFS, _ := fs.Sub(content, "static")
+	mux.Handle(
+		"GET /ui/static/",
+		http.StripPrefix("/ui/static/",
+			http.FileServer(http.FS(staticFS))),
+	)
+
+	sessions := cfg.Sessions
+	h := &WebHandler{
+		tmpl:     tmpl,
+		store:    nil,
+		sessions: sessions,
+		cfg:      cfg,
+		orgCache: NewOrgCache(15 * time.Minute),
+	}
+
+	// Auth routes (no session required).
+	mux.HandleFunc("GET /auth/github", h.HandleOAuthRedirect)
+	mux.HandleFunc("GET /auth/callback", h.HandleOAuthCallback)
+	mux.HandleFunc("GET /ui/login", h.HandleLoginPage)
+
+	// Shared view (no session required).
+	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
+
+	// Auth + CSRF middleware.
+	auth := RequireAuth(sessions)
+	csrf := CSRFCheck()
+
+	// Authenticated page routes.
+	mux.Handle("GET /ui/", auth(http.HandlerFunc(h.HandleDashboard)))
+	mux.Handle("GET /ui/tasks/new", auth(http.HandlerFunc(h.HandleNewTask)))
+	mux.Handle("GET /ui/tasks/{id}", auth(http.HandlerFunc(h.HandleTaskDetail)))
+	mux.Handle("GET /ui/prs", auth(http.HandlerFunc(h.HandlePRs)))
+	mux.Handle("GET /ui/settings", auth(http.HandlerFunc(h.HandleSettings)))
+	mux.Handle("GET /ui/tasks/{id}/events", auth(http.HandlerFunc(h.HandleSSEHTML)))
+
+	// Partial endpoints for htmx polling.
+	mux.Handle("GET /ui/partials/task-list", auth(http.HandlerFunc(h.HandlePartialTaskList)))
+	mux.Handle("GET /ui/partials/kpi-cards", auth(http.HandlerFunc(h.HandlePartialKPICards)))
+	mux.Handle("GET /ui/partials/repo-issues", auth(http.HandlerFunc(h.HandlePartialRepoIssues)))
+
+	// Mutating routes with CSRF.
+	mux.Handle("POST /auth/logout", auth(csrf(http.HandlerFunc(h.HandleLogout))))
+
+	return nil
 }

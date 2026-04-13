@@ -14,6 +14,12 @@ func newDaemonCmd() *cobra.Command {
 	var dataDir string
 	var authToken string
 	var maxTasks int
+	var githubClientID string
+	var githubClientSecret string
+	var signingKey string
+	var allowedOrgs []string
+	var allowedUsers []string
+	var adminUsers []string
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -39,10 +45,16 @@ Designed for AltFix VM deployment.`,
 			}
 
 			srv, err := daemon.NewServer(daemon.ServerConfig{
-				Port:      port,
-				DataDir:   dataDir,
-				AuthToken: authToken,
-				MaxTasks:  maxTasks,
+				Port:               port,
+				DataDir:            dataDir,
+				AuthToken:          authToken,
+				MaxTasks:           maxTasks,
+				GitHubClientID:     githubClientID,
+				GitHubClientSecret: githubClientSecret,
+				AllowedOrgs:        allowedOrgs,
+				AllowedUsers:       allowedUsers,
+				AdminUsers:         adminUsers,
+				SigningKey:          signingKey,
 			})
 			if err != nil {
 				return err
@@ -69,6 +81,18 @@ Designed for AltFix VM deployment.`,
 		"Bearer token for API auth")
 	cmd.Flags().IntVar(&maxTasks, "max-concurrent", 2,
 		"Max concurrent tasks")
+	cmd.Flags().StringVar(&githubClientID, "github-client-id", "",
+		"GitHub OAuth App client ID (enables web UI)")
+	cmd.Flags().StringVar(&githubClientSecret, "github-client-secret", "",
+		"GitHub OAuth App client secret")
+	cmd.Flags().StringSliceVar(&allowedOrgs, "allowed-orgs", nil,
+		"GitHub orgs allowed to access web UI")
+	cmd.Flags().StringSliceVar(&allowedUsers, "allowed-users", nil,
+		"GitHub users allowed to access web UI")
+	cmd.Flags().StringSliceVar(&adminUsers, "admin-users", nil,
+		"GitHub users with admin access")
+	cmd.Flags().StringVar(&signingKey, "signing-key", "",
+		"HMAC signing key for shared URLs")
 
 	return cmd
 }

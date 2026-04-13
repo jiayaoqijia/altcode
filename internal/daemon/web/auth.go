@@ -24,9 +24,8 @@ var githubHTTPClient = &http.Client{Timeout: 10 * time.Second}
 type StoreIface interface{}
 
 // WebConfig holds OAuth and access-control settings.
-// This will move to the wiring task (Task 8); defined here so
-// Task 3 compiles independently.
 type WebConfig struct {
+	Sessions       *SessionStore
 	GitHubClientID string
 	GitHubSecret   string
 	AllowedOrgs    []string

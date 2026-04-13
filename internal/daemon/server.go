@@ -12,15 +12,23 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/altcode-ai/altcode/internal/daemon/web"
 )
 
 // ServerConfig holds daemon startup parameters.
 type ServerConfig struct {
-	Port           int
-	DataDir        string
-	AuthToken      string
-	MaxTasks       int
-	WebhookSecret  string
+	Port               int
+	DataDir            string
+	AuthToken          string
+	MaxTasks           int
+	WebhookSecret      string
+	GitHubClientID     string
+	GitHubClientSecret string
+	AllowedOrgs        []string
+	AllowedUsers       []string
+	AdminUsers         []string
+	SigningKey          string
 }
 
 // Server is the HTTP daemon.
@@ -60,6 +68,30 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		wh := NewWebhookHandler(store, cfg.WebhookSecret, logger)
 		s.mux.HandleFunc(
 			"POST /webhooks/github", wh.HandleWebhook,
+		)
+	}
+
+	if cfg.GitHubClientID != "" {
+		sessions := web.NewSessionStore(8 * time.Hour)
+		sessions.StartGC(5 * time.Minute)
+		if err := web.RegisterRoutes(s.mux, web.WebConfig{
+			Sessions:       sessions,
+			GitHubClientID: cfg.GitHubClientID,
+			GitHubSecret:   cfg.GitHubClientSecret,
+			AllowedOrgs:    cfg.AllowedOrgs,
+			AllowedUsers:   cfg.AllowedUsers,
+			AdminUsers:     cfg.AdminUsers,
+			SigningKey:      []byte(cfg.SigningKey),
+			BaseURL: fmt.Sprintf(
+				"http://localhost:%d", cfg.Port,
+			),
+		}); err != nil {
+			return nil, fmt.Errorf("web ui: %w", err)
+		}
+		logger.Info("web UI enabled",
+			"login", fmt.Sprintf(
+				"http://localhost:%d/ui/login", cfg.Port,
+			),
 		)
 	}
 
@@ -144,10 +176,14 @@ func bodySizeMiddleware(maxBytes int64) func(http.Handler) http.Handler {
 func authMiddleware(token string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Health and webhooks bypass auth.
+			// Health, webhooks, and web UI paths bypass Bearer auth.
 			// Webhooks use HMAC signature verification instead.
+			// Web UI uses session-based auth via its own middleware.
 			if r.URL.Path == "/health" ||
-				strings.HasPrefix(r.URL.Path, "/webhooks/") {
+				strings.HasPrefix(r.URL.Path, "/webhooks/") ||
+				strings.HasPrefix(r.URL.Path, "/ui/") ||
+				strings.HasPrefix(r.URL.Path, "/auth/") ||
+				strings.HasPrefix(r.URL.Path, "/share/") {
 				next.ServeHTTP(w, r)
 				return
 			}
