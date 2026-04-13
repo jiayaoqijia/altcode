@@ -1,0 +1,41 @@
+{{define "content"}}
+{{with .Content}}
+<div style="margin-bottom:16px">
+  <span class="text-sm text-gray-500">Shared task view (read-only)</span>
+</div>
+
+<div class="card" style="padding:16px;margin-bottom:16px">
+  <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:8px">
+    <div>
+      <h1 class="text-xl font-bold" style="margin:0 0 4px 0">
+        {{if .Task.RepoOwner}}{{.Task.RepoOwner}}/{{.Task.RepoName}}{{if .Task.IssueNumber}}#{{.Task.IssueNumber}}{{end}}{{else}}Task{{end}}
+      </h1>
+      <p class="text-sm" style="margin:0;color:#6b7280">{{.Task.TaskDescription}}</p>
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-shrink:0">
+      <span class="{{statusDot .Task.Status}}"></span>
+      <span class="text-sm font-medium">{{.Task.Status}}</span>
+      {{if .Task.Duration}}
+      <span class="text-sm text-gray-500">{{.Task.Duration}}</span>
+      {{end}}
+      {{if .Task.PRURL}}
+      <a href="{{.Task.PRURL}}" target="_blank" rel="noopener" class="text-sm text-blue-600 hover:underline">PR #{{.Task.PRNumber}}</a>
+      {{end}}
+    </div>
+  </div>
+</div>
+
+{{template "phase_bar" .PhaseData}}
+
+<div class="card" style="margin-top:16px;overflow:hidden">
+  <div style="padding:12px 16px;border-bottom:1px solid #e5e7eb">
+    <strong class="text-sm">Activity</strong>
+  </div>
+  <div id="activity-feed" style="max-height:60vh;overflow-y:auto">
+    {{range .Events}}
+      {{template "event_item" .}}
+    {{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
