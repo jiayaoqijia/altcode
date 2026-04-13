@@ -90,8 +90,9 @@ func (s *Server) Run(ctx context.Context) error {
 		Addr:              addr,
 		Handler:           s.middleware(),
 		ReadHeaderTimeout: 10 * time.Second,
-		ReadTimeout:       30 * time.Second,
 		IdleTimeout:       120 * time.Second,
+		// ReadTimeout omitted: it applies to the full request duration
+		// and would kill SSE streaming connections after the timeout.
 		BaseContext: func(_ net.Listener) context.Context {
 			return ctx
 		},
