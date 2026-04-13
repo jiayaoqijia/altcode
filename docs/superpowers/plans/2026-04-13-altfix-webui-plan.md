@@ -17,28 +17,28 @@
 | File | Responsibility | Created in |
 |------|---------------|------------|
 | `internal/daemon/web/embed.go` | `//go:embed` directives, FS access | Task 1 |
-| `internal/daemon/web/web.go` | Template loading, `RegisterRoutes`, render helpers | Task 1 |
+| `internal/daemon/web/web.go` | Template loading, render helpers (`LoadTemplates`, `Render`, `RenderPartial`, `PageData`) | Task 1 |
 | `internal/daemon/web/session.go` | In-memory session store with TTL | Task 2 |
 | `internal/daemon/web/auth.go` | GitHub OAuth + PKCE flow | Task 3 |
 | `internal/daemon/web/middleware.go` | RequireAuth, RequireAdmin, CSRFCheck | Task 4 |
-| `internal/daemon/web/handlers.go` | Dashboard, detail, new, PRs, settings page handlers | Task 5 |
-| `internal/daemon/web/share.go` | HMAC signing, verification, redaction | Task 6 |
-| `internal/daemon/web/sse_html.go` | SSE endpoint that sends HTML partials (wraps existing JSON SSE) | Task 5 |
+| `internal/daemon/web/handlers.go` | Dashboard, detail, new, PRs, settings page handlers | Task 5a/5b/5c |
+| `internal/daemon/web/share.go` | HMAC signing, verification, redaction | Task 7 |
+| `internal/daemon/web/sse_html.go` | SSE endpoint that sends HTML partials (wraps existing JSON SSE) | Task 5b |
 | `internal/daemon/web/templates/layout.html` | Base template: htmx, tailwind, nav, dark mode | Task 1 |
 | `internal/daemon/web/templates/login.html` | GitHub OAuth button | Task 3 |
-| `internal/daemon/web/templates/dashboard.html` | KPI cards + task list + filters | Task 5 |
-| `internal/daemon/web/templates/detail.html` | Phase timeline + SSE feed + steering | Task 5 |
-| `internal/daemon/web/templates/new.html` | Progressive task creation form | Task 5 |
-| `internal/daemon/web/templates/prs.html` | PR tracker table | Task 5 |
-| `internal/daemon/web/templates/settings.html` | Config viewer/editor | Task 5 |
-| `internal/daemon/web/templates/share.html` | Public read-only detail | Task 6 |
-| `internal/daemon/web/templates/partials/*.html` | Swap targets (task_card, event_item, kpi_cards, phase_bar, task_list, repo_issues, pr_row) | Task 5 |
+| `internal/daemon/web/templates/dashboard.html` | KPI cards + task list + filters | Task 5a |
+| `internal/daemon/web/templates/detail.html` | Phase timeline + SSE feed + steering | Task 5b |
+| `internal/daemon/web/templates/new.html` | Progressive task creation form | Task 5c |
+| `internal/daemon/web/templates/prs.html` | PR tracker table | Task 5c |
+| `internal/daemon/web/templates/settings.html` | Config viewer/editor | Task 5c |
+| `internal/daemon/web/templates/share.html` | Public read-only detail | Task 7 |
+| `internal/daemon/web/templates/partials/*.html` | Swap targets (task_card, event_item, kpi_cards, phase_bar, task_list, repo_issues, pr_row) | Task 5a/5b/5c |
 | `internal/daemon/web/templates/errors/*.html` | 403, 404, session_expired | Task 4 |
 | `internal/daemon/web/static/htmx.min.js` | Vendored htmx 2.x | Task 1 |
 | `internal/daemon/web/static/tailwind.css` | Vendored + purged Tailwind | Task 1 |
 | `internal/daemon/web/static/app.css` | Status colors, feed layout, dark mode | Task 1 |
-| `internal/daemon/server.go` | Modified: add WebUI config fields, call `web.RegisterRoutes` | Task 7 |
-| `cmd/altcode/daemon.go` | Modified: add `--github-client-id`, `--github-client-secret`, `--allowed-orgs`, `--allowed-users`, `--signing-key` flags | Task 7 |
+| `internal/daemon/server.go` | Modified: add WebUI config fields, call `web.RegisterRoutes` | Task 8 |
+| `cmd/altcode/daemon.go` | Modified: add `--github-client-id`, `--github-client-secret`, `--allowed-orgs`, `--allowed-users`, `--signing-key` flags | Task 8 |
 
 ---
 
@@ -204,7 +204,6 @@ import (
 	"html/template"
 	"io"
 	"io/fs"
-	"net/http"
 	"path/filepath"
 	"strings"
 )
@@ -330,73 +329,11 @@ func (t *Templates) RenderPartial(w io.Writer, page, partial string, data any) e
 
 type errTemplateNotFound struct{ name string }
 func (e *errTemplateNotFound) Error() string { return "template not found: " + e.name }
-
-// RegisterRoutes wires all web UI routes onto the given mux.
-// Called from server.go after NewServer.
-func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
-	tmpl, err := LoadTemplates()
-	if err != nil {
-		return err
-	}
-
-	// Static assets.
-	staticFS, err := fs.Sub(content, "static")
-	if err != nil {
-		return err
-	}
-	mux.Handle("GET /ui/static/", http.StripPrefix("/ui/static/",
-		http.FileServer(http.FS(staticFS))))
-
-	h := &WebHandler{
-		tmpl:    tmpl,
-		store:   cfg.Store,
-		sessions: cfg.Sessions,
-		cfg:     cfg,
-	}
-
-	// Auth routes (no session required).
-	mux.HandleFunc("GET /auth/github", h.HandleOAuthRedirect)
-	mux.HandleFunc("GET /auth/callback", h.HandleOAuthCallback)
-	mux.HandleFunc("POST /auth/logout", h.HandleLogout)
-	mux.HandleFunc("GET /ui/login", h.HandleLoginPage)
-
-	// Shared view (no session required).
-	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
-
-	// Authenticated routes.
-	auth := RequireAuth(cfg.Sessions)
-	csrf := CSRFCheck()
-
-	mux.Handle("GET /ui/", auth(http.HandlerFunc(h.HandleDashboard)))
-	mux.Handle("GET /ui/tasks/{id}", auth(http.HandlerFunc(h.HandleTaskDetail)))
-	mux.Handle("GET /ui/tasks/new", auth(http.HandlerFunc(h.HandleNewTask)))
-	mux.Handle("GET /ui/prs", auth(http.HandlerFunc(h.HandlePRs)))
-	mux.Handle("GET /ui/settings", auth(http.HandlerFunc(h.HandleSettings)))
-
-	// Partial endpoints for htmx polling.
-	mux.Handle("GET /ui/partials/task-list", auth(http.HandlerFunc(h.HandlePartialTaskList)))
-	mux.Handle("GET /ui/partials/kpi-cards", auth(http.HandlerFunc(h.HandlePartialKPICards)))
-	mux.Handle("GET /ui/partials/repo-issues", auth(http.HandlerFunc(h.HandlePartialRepoIssues)))
-
-	// SSE endpoint that sends HTML partials (wraps existing JSON SSE).
-	mux.Handle("GET /ui/tasks/{id}/events", auth(http.HandlerFunc(h.HandleSSEHTML)))
-
-	return nil
-}
-
-// WebConfig holds dependencies for the web UI handlers.
-type WebConfig struct {
-	Store          interface{ /* daemon.Store methods used by web */ }
-	Sessions       *SessionStore
-	GitHubClientID string
-	GitHubSecret   string
-	AllowedOrgs    []string
-	AllowedUsers   []string
-	AdminUsers     []string
-	SigningKey      []byte
-	BaseURL        string // e.g. "http://localhost:9100"
-}
 ```
+
+Note: `RegisterRoutes` and `WebConfig` are defined in Task 8 (wiring) so that
+Task 1 compiles independently without referencing `SessionStore` (Task 2),
+`WebHandler` (Task 3), or `RequireAuth` (Task 4).
 
 - [ ] **Step 8: Write test for template loading**
 
@@ -632,6 +569,34 @@ func (s *SessionStore) Delete(id string) {
 	s.mu.Unlock()
 }
 
+// SetOAuthState atomically stores the OAuth state+verifier in a session's
+// CSRFToken field. This avoids a Get-then-mutate race (B3 fix).
+func (s *SessionStore) SetOAuthState(id, state, verifier string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if sess, ok := s.sessions[id]; ok {
+		sess.CSRFToken = state + ":" + verifier
+	}
+}
+
+// StartGC launches a background goroutine that periodically evicts expired
+// sessions. Call once from the wiring layer (Task 8).
+func (s *SessionStore) StartGC(interval time.Duration) {
+	go func() {
+		for {
+			time.Sleep(interval)
+			s.mu.Lock()
+			now := time.Now()
+			for id, sess := range s.sessions {
+				if now.Sub(sess.TouchedAt) > s.ttl {
+					delete(s.sessions, id)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}()
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	rand.Read(b)
@@ -755,28 +720,24 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
+
+	"github.com/anthropics/altcode/internal/daemon"
 )
 
 // WebHandler holds dependencies for all web UI handlers.
 type WebHandler struct {
 	tmpl     *Templates
-	store    StoreInterface
+	store    *daemon.Store
 	sessions *SessionStore
 	cfg      WebConfig
 	orgCache *OrgCache
 }
 
-// StoreInterface defines the daemon.Store methods used by the web UI.
-type StoreInterface interface {
-	GetTask(id string) (interface{}, error)
-	ListTasks() (interface{}, error)
-	ListTasksByStatus(status string) (interface{}, error)
-	ListEvents(taskID string, afterID int64) (interface{}, error)
-}
-
-// OrgCache caches GitHub org membership per user.
+// OrgCache caches GitHub org membership per user (thread-safe).
 type OrgCache struct {
+	mu      sync.RWMutex
 	entries map[string]*orgEntry
 	ttl     time.Duration
 }
@@ -791,6 +752,8 @@ func NewOrgCache(ttl time.Duration) *OrgCache {
 }
 
 func (c *OrgCache) Get(login string) ([]string, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 	e, ok := c.entries[login]
 	if !ok || time.Since(e.cachedAt) > c.ttl {
 		return nil, false
@@ -799,6 +762,8 @@ func (c *OrgCache) Get(login string) ([]string, bool) {
 }
 
 func (c *OrgCache) Set(login string, orgs []string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	c.entries[login] = &orgEntry{orgs: orgs, cachedAt: time.Now()}
 }
 
@@ -818,12 +783,9 @@ func (h *WebHandler) HandleOAuthRedirect(w http.ResponseWriter, r *http.Request)
 	state := randomHex(16)
 	verifier := randomHex(32)
 
-	// Store state + verifier in a short-lived session.
-	sid := h.sessions.Create(&SessionUser{Login: "__pending__"})
-	sess, _ := h.sessions.Get(sid)
-	sess.User.Login = "__oauth_pending__"
-	// Store OAuth state in CSRF token field (repurposed for OAuth).
-	sess.CSRFToken = state + ":" + verifier
+	// Store state + verifier in a short-lived session (thread-safe via SetOAuthState).
+	sid := h.sessions.Create(&SessionUser{Login: "__oauth_pending__"})
+	h.sessions.SetOAuthState(sid, state, verifier)
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_oauth",
@@ -984,6 +946,7 @@ func exchangeCode(ctx context.Context, clientID, clientSecret, code, verifier, r
 	req, _ := http.NewRequestWithContext(ctx, "POST", "https://github.com/login/oauth/access_token", strings.NewReader(data.Encode()))
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	req.Header.Set("User-Agent", "altcode-daemon/1.0")
 
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
@@ -992,6 +955,9 @@ func exchangeCode(ctx context.Context, clientID, clientSecret, code, verifier, r
 	defer resp.Body.Close()
 
 	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != 200 {
+		return "", fmt.Errorf("github token exchange %d: %s", resp.StatusCode, body)
+	}
 	var result struct {
 		AccessToken string `json:"access_token"`
 		Error       string `json:"error"`
@@ -1009,11 +975,16 @@ func exchangeCode(ctx context.Context, clientID, clientSecret, code, verifier, r
 func fetchGitHubUser(ctx context.Context, token string) (*ghUser, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "altcode-daemon/1.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github API %d: %s", resp.StatusCode, body)
+	}
 	var u ghUser
 	json.NewDecoder(resp.Body).Decode(&u)
 	if u.Login == "" {
@@ -1025,11 +996,16 @@ func fetchGitHubUser(ctx context.Context, token string) (*ghUser, error) {
 func fetchGitHubOrgs(ctx context.Context, token string) ([]string, error) {
 	req, _ := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/orgs", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
+	req.Header.Set("User-Agent", "altcode-daemon/1.0")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("github API %d: %s", resp.StatusCode, body)
+	}
 	var orgs []struct{ Login string `json:"login"` }
 	json.NewDecoder(resp.Body).Decode(&orgs)
 	names := make([]string, len(orgs))
@@ -1264,58 +1240,108 @@ git commit -m "feat(web): auth + CSRF middleware, error pages"
 
 ---
 
-### Task 5: Page Handlers + Templates (Dashboard, Detail, New, PRs, Settings)
+### Task 5a: Dashboard Page + Core Partials
 
 **Files:**
-- Create: `internal/daemon/web/handlers.go`
-- Create: `internal/daemon/web/sse_html.go`
+- Create: `internal/daemon/web/handlers.go` (Dashboard handlers only)
 - Create: `internal/daemon/web/templates/dashboard.html`
-- Create: `internal/daemon/web/templates/detail.html`
-- Create: `internal/daemon/web/templates/new.html`
-- Create: `internal/daemon/web/templates/prs.html`
-- Create: `internal/daemon/web/templates/settings.html`
 - Create: `internal/daemon/web/templates/partials/task_card.html`
 - Create: `internal/daemon/web/templates/partials/task_list.html`
-- Create: `internal/daemon/web/templates/partials/event_item.html`
 - Create: `internal/daemon/web/templates/partials/kpi_cards.html`
-- Create: `internal/daemon/web/templates/partials/phase_bar.html`
-- Create: `internal/daemon/web/templates/partials/repo_issues.html`
-- Create: `internal/daemon/web/templates/partials/pr_row.html`
-
-This is the largest task. The implementer should create each template and its corresponding handler, testing incrementally. Each page template defines a `{{define "content"}}` block that layout.html includes.
 
 Key patterns:
 - Every handler calls `getSession(r)` to get the user
 - Every handler builds `PageData{Title, ShowNav: true, User, IsAdmin, CSRFToken, Content}`
-- Dashboard uses `hx-get` polling, detail uses native EventSource, new uses `hx-get` for progressive disclosure
+- Dashboard uses `hx-get` polling for task list and KPI cards
 - Partials are used as htmx swap targets AND as SSE data payloads
 
 The implementer should refer to the spec at `docs/superpowers/specs/2026-04-13-altfix-webui-design.md` sections "Pages" (lines 108-301) for exact field layouts, event type rendering, and form flows.
 
-- [ ] **Step 1: Create all partial templates** (event_item, task_card, task_list, kpi_cards, phase_bar, repo_issues, pr_row)
+- [ ] **Step 1: Create task_card, task_list, kpi_cards partials**
 - [ ] **Step 2: Create dashboard.html with KPI cards + task list**
-- [ ] **Step 3: Create detail.html with phase timeline + SSE script + steering form**
-- [ ] **Step 4: Create new.html with progressive disclosure form**
-- [ ] **Step 5: Create prs.html with PR tracker table**
-- [ ] **Step 6: Create settings.html with config viewer**
-- [ ] **Step 7: Implement handlers.go** — HandleDashboard, HandleTaskDetail, HandleNewTask, HandlePRs, HandleSettings, HandlePartialTaskList, HandlePartialKPICards, HandlePartialRepoIssues
-- [ ] **Step 8: Implement sse_html.go** — HandleSSEHTML that wraps events as HTML partials in SSE format
-- [ ] **Step 9: Run template render tests**
+- [ ] **Step 3: Implement handlers.go** — HandleDashboard, HandlePartialTaskList, HandlePartialKPICards
+- [ ] **Step 4: Run template render tests**
 
 ```bash
 GOFLAGS=-mod=mod go test ./internal/daemon/web/... -v -race
 ```
 
-- [ ] **Step 10: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add internal/daemon/web/handlers.go internal/daemon/web/sse_html.go internal/daemon/web/templates/
-git commit -m "feat(web): dashboard, detail, new, PRs, settings pages + partials"
+git add internal/daemon/web/handlers.go internal/daemon/web/templates/dashboard.html internal/daemon/web/templates/partials/
+git commit -m "feat(web): dashboard page + task_list, task_card, kpi_cards partials"
 ```
 
 ---
 
-### Task 6: Shared URLs — HMAC Signing + Redaction
+### Task 5b: Detail Page + SSE HTML Streaming
+
+**Files:**
+- Create: `internal/daemon/web/sse_html.go`
+- Create: `internal/daemon/web/templates/detail.html`
+- Create: `internal/daemon/web/templates/partials/event_item.html`
+- Create: `internal/daemon/web/templates/partials/phase_bar.html`
+
+Key patterns:
+- Detail page uses native EventSource for live event streaming
+- `HandleSSEHTML` wraps JSON SSE events as rendered HTML partials in SSE format
+- `event_item` partial renders differently based on event type (error, phase, steer, agent)
+
+- [ ] **Step 1: Create event_item and phase_bar partials**
+- [ ] **Step 2: Create detail.html with phase timeline + SSE script + steering form**
+- [ ] **Step 3: Implement HandleTaskDetail in handlers.go**
+- [ ] **Step 4: Implement sse_html.go** — HandleSSEHTML that wraps events as HTML partials in SSE format
+- [ ] **Step 5: Run template render tests**
+
+```bash
+GOFLAGS=-mod=mod go test ./internal/daemon/web/... -v -race
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/daemon/web/sse_html.go internal/daemon/web/templates/detail.html internal/daemon/web/templates/partials/
+git commit -m "feat(web): detail page + event_item, phase_bar partials + SSE HTML streaming"
+```
+
+---
+
+### Task 5c: New + PRs + Settings Pages + Remaining Partials
+
+**Files:**
+- Create: `internal/daemon/web/templates/new.html`
+- Create: `internal/daemon/web/templates/prs.html`
+- Create: `internal/daemon/web/templates/settings.html`
+- Create: `internal/daemon/web/templates/partials/repo_issues.html`
+- Create: `internal/daemon/web/templates/partials/pr_row.html`
+
+Key patterns:
+- New task page uses `hx-get` for progressive disclosure (repo selector -> issue list)
+- PRs page is a filterable table of open/merged PRs
+- Settings page is admin-only config viewer
+
+- [ ] **Step 1: Create repo_issues and pr_row partials**
+- [ ] **Step 2: Create new.html with progressive disclosure form**
+- [ ] **Step 3: Create prs.html with PR tracker table**
+- [ ] **Step 4: Create settings.html with config viewer**
+- [ ] **Step 5: Implement remaining handlers** — HandleNewTask, HandlePRs, HandleSettings, HandlePartialRepoIssues
+- [ ] **Step 6: Run template render tests**
+
+```bash
+GOFLAGS=-mod=mod go test ./internal/daemon/web/... -v -race
+```
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add internal/daemon/web/templates/ internal/daemon/web/handlers.go
+git commit -m "feat(web): new, PRs, settings pages + repo_issues, pr_row partials"
+```
+
+---
+
+### Task 7: Shared URLs — HMAC Signing + Redaction
 
 **Files:**
 - Create: `internal/daemon/web/share.go`
@@ -1329,6 +1355,7 @@ git commit -m "feat(web): dashboard, detail, new, PRs, settings pages + partials
 package web
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
@@ -1391,8 +1418,8 @@ func TestRedactSecrets(t *testing.T) {
 	}
 	for _, tt := range tests {
 		got := RedactSecrets(tt.input)
-		if got == tt.input && tt.input != tt.want {
-			t.Errorf("RedactSecrets(%q) was not redacted", tt.input)
+		if !strings.Contains(got, "[REDACTED]") && tt.input != tt.want {
+			t.Errorf("RedactSecrets(%q) = %q, expected redaction", tt.input, got)
 		}
 	}
 }
@@ -1517,13 +1544,87 @@ git commit -m "feat(web): HMAC shared URLs with secret redaction"
 
 ---
 
-### Task 7: Wire Into Server + CLI Flags
+### Task 8: Wire Into Server + CLI Flags
 
 **Files:**
 - Modify: `internal/daemon/server.go`
 - Modify: `cmd/altcode/daemon.go`
+- Add to: `internal/daemon/web/web.go` — `RegisterRoutes` and `WebConfig` (moved from Task 1 per B1)
 
-- [ ] **Step 1: Add WebUI config to ServerConfig**
+- [ ] **Step 1: Add RegisterRoutes and WebConfig to web.go**
+
+These were deferred from Task 1 so that Task 1 compiles without referencing
+`SessionStore` (Task 2), `WebHandler` (Task 3), or `RequireAuth` (Task 4).
+
+```go
+// WebConfig holds dependencies for the web UI handlers.
+type WebConfig struct {
+	Store          *daemon.Store
+	Sessions       *SessionStore
+	GitHubClientID string
+	GitHubSecret   string
+	AllowedOrgs    []string
+	AllowedUsers   []string
+	AdminUsers     []string
+	SigningKey      []byte
+	BaseURL        string // e.g. "http://localhost:9100"
+}
+
+// RegisterRoutes wires all web UI routes onto the given mux.
+// Called from server.go after NewServer.
+func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
+	tmpl, err := LoadTemplates()
+	if err != nil {
+		return err
+	}
+
+	// Static assets.
+	staticFS, err := fs.Sub(content, "static")
+	if err != nil {
+		return err
+	}
+	mux.Handle("GET /ui/static/", http.StripPrefix("/ui/static/",
+		http.FileServer(http.FS(staticFS))))
+
+	h := &WebHandler{
+		tmpl:    tmpl,
+		store:   cfg.Store,
+		sessions: cfg.Sessions,
+		cfg:     cfg,
+	}
+
+	// Auth routes (no session required).
+	auth := RequireAuth(cfg.Sessions)
+	csrf := CSRFCheck()
+
+	mux.HandleFunc("GET /auth/github", h.HandleOAuthRedirect)
+	mux.HandleFunc("GET /auth/callback", h.HandleOAuthCallback)
+	mux.Handle("POST /auth/logout", auth(csrf(http.HandlerFunc(h.HandleLogout))))
+	mux.HandleFunc("GET /ui/login", h.HandleLoginPage)
+
+	// Shared view (no session required).
+	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
+
+	// Authenticated routes.
+	mux.Handle("GET /ui/", auth(http.HandlerFunc(h.HandleDashboard)))
+	mux.Handle("GET /ui/tasks/{id}", auth(http.HandlerFunc(h.HandleTaskDetail)))
+	mux.Handle("GET /ui/tasks/new", auth(http.HandlerFunc(h.HandleNewTask)))
+	mux.Handle("GET /ui/prs", auth(http.HandlerFunc(h.HandlePRs)))
+	mux.Handle("GET /ui/settings", auth(http.HandlerFunc(h.HandleSettings)))
+
+	// Partial endpoints for htmx polling.
+	mux.Handle("GET /ui/partials/task-list", auth(http.HandlerFunc(h.HandlePartialTaskList)))
+	mux.Handle("GET /ui/partials/kpi-cards", auth(http.HandlerFunc(h.HandlePartialKPICards)))
+	mux.Handle("GET /ui/partials/repo-issues", auth(http.HandlerFunc(h.HandlePartialRepoIssues)))
+
+	// SSE endpoint that sends HTML partials (wraps existing JSON SSE).
+	mux.Handle("GET /ui/tasks/{id}/events", auth(http.HandlerFunc(h.HandleSSEHTML)))
+
+	return nil
+}
+```
+
+- [ ] **Step 2: Add WebUI config to ServerConfig**
 
 Add to `internal/daemon/server.go` `ServerConfig`:
 
@@ -1537,13 +1638,14 @@ AdminUsers         []string
 SigningKey          string
 ```
 
-- [ ] **Step 2: Wire RegisterRoutes in NewServer**
+- [ ] **Step 3: Wire RegisterRoutes in NewServer**
 
 In `NewServer`, after `s.registerRoutes()`, add:
 
 ```go
 if cfg.GitHubClientID != "" {
     sessions := web.NewSessionStore(8 * time.Hour)
+    sessions.StartGC(5 * time.Minute)
     if err := web.RegisterRoutes(s.mux, web.WebConfig{
         Store:          s.store,
         Sessions:       sessions,
@@ -1561,7 +1663,7 @@ if cfg.GitHubClientID != "" {
 }
 ```
 
-- [ ] **Step 3: Add CLI flags to daemon.go**
+- [ ] **Step 4: Add CLI flags to daemon.go**
 
 Add flags to `newDaemonCmd`:
 
@@ -1580,23 +1682,23 @@ cmd.Flags().StringVar(&signingKey, "signing-key", "", "HMAC signing key for shar
 
 Wire into `ServerConfig` in `RunE`.
 
-- [ ] **Step 4: Build and test**
+- [ ] **Step 5: Build and test**
 
 ```bash
 GOFLAGS=-mod=mod go build ./...
 GOFLAGS=-mod=mod go test ./internal/daemon/... -race -count=1 -timeout=60s
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git add internal/daemon/server.go cmd/altcode/daemon.go
+git add internal/daemon/web/web.go internal/daemon/server.go cmd/altcode/daemon.go
 git commit -m "feat(web): wire web UI into daemon server + CLI flags"
 ```
 
 ---
 
-### Task 8: Integration Tests + Template Contract Tests
+### Task 9: Integration Tests + Template Contract Tests
 
 **Files:**
 - Create: `internal/daemon/web/integration_test.go`
@@ -1669,131 +1771,10 @@ git commit -m "test(web): template contract tests + HMAC edge cases"
 
 ---
 
-## CC Review Blocker Fixes (applied)
-
-CC graded 6/10 with 9 blockers. All addressed below — implementers MUST apply these:
-
-### B1. Task ordering fix
-**Problem**: `web.go` (T1) references `SessionStore` (T2), `WebHandler` (T3), `RequireAuth` (T4).
-**Fix**: T1 should ONLY create `embed.go`, `static/`, `templates/layout.html`, and a minimal
-`web.go` with `LoadTemplates`, `Render`, `RenderPartial` — NO `RegisterRoutes` or `WebHandler`.
-Move `RegisterRoutes` and `WebConfig` to T7 (wiring). Each task compiles independently.
-
-### B2. StoreInterface must be concrete
-**Problem**: `WebConfig.Store interface{ /* ... */ }` is not valid Go.
-**Fix**: Define with real signatures matching `daemon.Store`:
-```go
-type StoreInterface interface {
-    GetTask(id string) (*daemon.Task, error)
-    ListTasks() ([]*daemon.Task, error)
-    ListTasksByStatus(status string) ([]*daemon.Task, error)
-    ListEvents(taskID string, afterID int64) ([]*daemon.TaskEvent, error)
-    CountPendingBefore(taskID string) (int, error)
-}
-```
-Or use `*daemon.Store` directly (preferred — no interface needed for single implementation).
-
-### B3. OAuth session mutation race
-**Problem**: `HandleOAuthRedirect` mutates `sess.User.Login` and `sess.CSRFToken` after Get().
-**Fix**: Add `SetOAuthState` method to `SessionStore`:
-```go
-func (s *SessionStore) SetOAuthState(id, state, verifier string) {
-    s.mu.Lock()
-    defer s.mu.Unlock()
-    if sess, ok := s.sessions[id]; ok {
-        sess.CSRFToken = state + ":" + verifier
-    }
-}
-```
-
-### B4. CSRF middleware not applied
-**Problem**: `csrf := CSRFCheck()` declared but not used on any route.
-**Fix**: Wrap all mutating routes:
-```go
-mux.Handle("POST /auth/logout", auth(csrf(http.HandlerFunc(h.HandleLogout))))
-// Steer/stop already go through /api/ with Bearer auth — CSRF applies only to /ui/ POST routes
-```
-
-### B5. Task 5 split into 3
-**Problem**: 7 pages + 7 partials + 8 handlers in one task.
-**Fix**: Split into:
-- **T5a**: Dashboard page + task_list + task_card + kpi_cards partials + HandleDashboard + HandlePartialTaskList + HandlePartialKPICards
-- **T5b**: Detail page + event_item + phase_bar partials + HandleTaskDetail + HandleSSEHTML
-- **T5c**: New + PRs + Settings pages + repo_issues + pr_row partials + remaining handlers
-
-### B6. Session GC goroutine
-**Fix**: Add to `SessionStore`:
-```go
-func (s *SessionStore) StartGC(interval time.Duration) {
-    go func() {
-        for {
-            time.Sleep(interval)
-            s.mu.Lock()
-            now := time.Now()
-            for id, sess := range s.sessions {
-                if now.Sub(sess.TouchedAt) > s.ttl {
-                    delete(s.sessions, id)
-                }
-            }
-            s.mu.Unlock()
-        }
-    }()
-}
-```
-Call `sessions.StartGC(5 * time.Minute)` in T7 wiring.
-
-### B7. GitHub API User-Agent + status checks
-**Fix**: Add to all GitHub API calls:
-```go
-req.Header.Set("User-Agent", "altcode-daemon/1.0")
-```
-And check response status:
-```go
-if resp.StatusCode != 200 {
-    body, _ := io.ReadAll(resp.Body)
-    return nil, fmt.Errorf("github API %d: %s", resp.StatusCode, body)
-}
-```
-
-### B8. OrgCache mutex
-**Fix**: Add `sync.RWMutex` to `OrgCache`:
-```go
-type OrgCache struct {
-    mu      sync.RWMutex
-    entries map[string]*orgEntry
-    ttl     time.Duration
-}
-func (c *OrgCache) Get(login string) ([]string, bool) {
-    c.mu.RLock()
-    defer c.mu.RUnlock()
-    // ...
-}
-func (c *OrgCache) Set(login string, orgs []string) {
-    c.mu.Lock()
-    defer c.mu.Unlock()
-    // ...
-}
-```
-
-### B9. TestRedactSecrets assertion fix
-**Fix**: Replace inverted assertion:
-```go
-for _, tt := range tests {
-    got := RedactSecrets(tt.input)
-    if !strings.Contains(got, "[REDACTED]") && tt.input != tt.want {
-        t.Errorf("RedactSecrets(%q) = %q, expected redaction", tt.input, got)
-    }
-}
-```
-
-### Additional test cases (CC coverage gaps)
-Add tests for: OAuth callback state mismatch, expired OAuth cookie, GitHub 4xx response,
-`RequireAdmin` rejection, `_csrf` form field fallback, `isAuthorized` empty config (allow-all),
-share link boundary (expiry ± 1s), concurrent `SessionStore` operations.
-
 ## Self-Review Checklist
 
-1. **Spec coverage**: All 7 pages covered (login T3, dashboard T5a, detail T5b, new/PRs/settings T5c, share T6). Auth T3, CSRF T4, middleware T4, SSE T5b, wiring T7, tests T8.
-2. **Placeholder scan**: All steps have code. No TBD/TODO. B5 split provides clearer boundaries.
-3. **Type consistency**: `PageData`, `SessionUser`, `Session`, `WebConfig`, `WebHandler` — used consistently. `StoreInterface` replaced with `*daemon.Store` (B2 fix).
-4. **Missing from spec**: All appendix items (A1-A8) covered. CC blocker fixes (B1-B9) applied.
+1. **Spec coverage**: All 7 pages covered (login T3, dashboard T5a, detail T5b, new/PRs/settings T5c, share T7). Auth T3, CSRF T4, middleware T4, SSE T5b, wiring T8, tests T9. 9 tasks total.
+2. **Placeholder scan**: All steps have code. No TBD/TODO. B5 split provides clearer task boundaries.
+3. **Type consistency**: `PageData`, `SessionUser`, `Session`, `WebConfig`, `WebHandler` — used consistently. `*daemon.Store` used directly (no unnecessary interface).
+4. **Blocker fixes applied inline**: B1 (Task 1 scope), B2 (`*daemon.Store`), B3 (`SetOAuthState`), B4 (CSRF on logout), B5 (Task 5 three-way split), B6 (`StartGC`), B7 (User-Agent + status checks), B8 (OrgCache mutex), B9 (TestRedactSecrets assertion).
+5. **Additional test cases needed**: OAuth callback state mismatch, expired OAuth cookie, GitHub 4xx response, `RequireAdmin` rejection, `_csrf` form field fallback, `isAuthorized` empty config (allow-all), share link boundary (expiry +/- 1s), concurrent `SessionStore` operations.
