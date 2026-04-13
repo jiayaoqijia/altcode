@@ -91,7 +91,7 @@ OAuth authenticates identity. Authorization is separate:
     "allowed_orgs": ["altcode-ai"],       // GitHub org membership required
     "allowed_users": ["jiayaoqijia"],     // OR specific usernames
     "admin_users": ["jiayaoqijia"],       // can edit settings, manage webhooks
-    "viewer_default": true                 // non-admin = read-only + steer
+    "viewer_default": true                 // non-admin = read-only (no steer/stop)
   }
 }
 ```
@@ -334,8 +334,7 @@ internal/daemon/web/
 │       └── session_expired.html
 └── static/
     ├── htmx.min.js       # Vendored htmx 2.x (~14KB gzipped)
-    ├── sse.js             # htmx SSE extension (~2KB)
-    ├── tailwind.css       # Vendored + purged (~20KB)
+    ├── tailwind.css       # Vendored + purged (~20KB, built via scripts/build-css.sh)
     └── app.css            # Status colors, feed layout, dark mode, animations (~100 lines)
 ```
 
@@ -593,6 +592,135 @@ GitHub OAuth uses `net/http` directly (no oauth2 library needed for a single pro
 v1 (this spec): htmx dashboard, GitHub OAuth, core pages, shared URLs
 v2: WebSocket upgrade for bidirectional steering (replace SSE for detail page only)
 v3: Multi-daemon federation (central control plane for multiple daemon instances)
+
+## Appendix: Review Blocker Fixes
+
+### A1. Daemon Secret Lifecycle (CC blocker)
+
+The HMAC signing key for shared URLs:
+
+```
+Generation:  crypto/rand, 32 bytes, on first daemon start if not configured
+Storage:     {dataDir}/daemon.key (file permission 0600)
+Config:      --signing-key flag OR web_ui.signing_key in config
+Rotation:    --rotate-signing-key generates new key, keeps old as previous_key
+             Both keys are checked during verification for 24h transition window
+             After 24h, previous_key is dropped
+```
+
+### A2. Settings Persistence (CC blocker)
+
+Settings page edits write to `{dataDir}/web_config.json` via:
+- `PUT /api/settings` (admin only, CSRF-protected)
+- Daemon reloads config on next request (no restart needed)
+- Budget caps, model routing, allowed users are editable
+- Webhook secrets are NOT editable via UI (security — CLI only)
+
+### A3. GitHub Repo List Caching (CC blocker)
+
+`/ui/tasks/new` needs the user's GitHub repos. Cached per-session:
+
+```go
+type RepoCache struct {
+    repos    []GitHubRepo
+    cachedAt time.Time
+}
+const repoCacheTTL = 10 * time.Minute
+```
+
+On cache miss or TTL expiry: fetch `GET /user/repos?sort=updated&per_page=100`
+with user's GitHub token. Rate limit: ~1 call per 10 minutes per user.
+
+### A4. SSE Replay Semantics (Codex blocker)
+
+```
+Event IDs:        Auto-incrementing int64 from SQLite rowid
+Retention:        All events retained in task_events table (no TTL)
+Duplicate delivery: EventSource sends Last-Event-ID on reconnect;
+                    server queries WHERE id > lastID, returns only new events
+Missed events:    Impossible — events are persisted before SSE delivery,
+                    and Last-Event-ID ensures gapless replay
+Fallback:         If Last-Event-ID is invalid (0 or missing), replay ALL events
+```
+
+### A5. HMAC Test Vectors (Codex blocker)
+
+```go
+// Test vectors for HMAC shared URL signing
+func TestSignShareURL(t *testing.T) {
+    secret := []byte("test-secret-32-bytes-long-xxxxx")
+    tests := []struct {
+        taskID string
+        expiry int64
+        want   string // pre-computed expected HMAC hex
+    }{
+        {"abc123", 1700000000, "expected_hmac_hex_here"},
+        {"", 1700000000, "expected_for_empty_id"},        // edge: empty task ID
+        {"abc123", 0, "expected_for_zero_expiry"},        // edge: zero expiry
+    }
+    for _, tt := range tests {
+        got := signShareURL(tt.taskID, tt.expiry, secret)
+        if got != tt.want {
+            t.Errorf("signShareURL(%q, %d) = %s, want %s",
+                tt.taskID, tt.expiry, got, tt.want)
+        }
+    }
+}
+```
+
+Actual expected values computed at implementation time and committed as fixtures.
+
+### A6. Org Cache Invalidation (Codex blocker)
+
+```
+TTL:          15 minutes (cached in memory per username)
+Invalidation: On 403 from GitHub API (token revoked), clear cache entry immediately
+Manual:       Admin can POST /api/admin/clear-org-cache to force re-check
+On login:     Always fetches fresh (bypasses cache)
+```
+
+### A7. Template Contract Tests (Codex blocker)
+
+```go
+// Every page template renders without error with mock data
+func TestAllTemplatesRender(t *testing.T) {
+    tmpl := loadTemplates()
+    pages := []struct {
+        name string
+        data any
+    }{
+        {"dashboard.html", mockDashboardData()},
+        {"detail.html", mockDetailData()},
+        {"new.html", mockNewTaskData()},
+        {"prs.html", mockPRData()},
+        {"settings.html", mockSettingsData()},
+        {"share.html", mockShareData()},
+        {"login.html", nil},
+        {"errors/403.html", nil},
+        {"errors/404.html", nil},
+    }
+    for _, p := range pages {
+        t.Run(p.name, func(t *testing.T) {
+            var buf bytes.Buffer
+            if err := tmpl.ExecuteTemplate(&buf, p.name, p.data); err != nil {
+                t.Fatalf("render %s: %v", p.name, err)
+            }
+            if buf.Len() == 0 {
+                t.Errorf("render %s: empty output", p.name)
+            }
+        })
+    }
+}
+```
+
+### A8. Empty States (CC blocker)
+
+| Page | Empty state |
+|------|-------------|
+| Dashboard (no tasks) | "No tasks yet. Create one or connect a GitHub webhook." + example prompts |
+| PR Tracker (no PRs) | "No PRs created yet. Tasks that reach the PR phase will appear here." |
+| Task Detail (no events) | "Waiting for agent activity..." with spinner |
+| Settings (no repos) | "Connect a GitHub repository to get started." |
 
 ## Research Sources
 
