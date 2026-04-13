@@ -1,0 +1,73 @@
+{{define "content"}}
+<h1 class="text-xl font-bold" style="margin-bottom:16px">Settings</h1>
+
+{{with .Content}}
+{{if not $.IsAdmin}}
+<div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded mb-4 text-sm">
+  You have read-only access. Contact an admin to change settings.
+</div>
+{{end}}
+
+<div style="display:grid;gap:16px;max-width:640px">
+  <div class="card" style="padding:16px">
+    <h2 class="text-sm font-bold" style="margin:0 0 12px 0">Connected GitHub</h2>
+    <div style="display:flex;align-items:center;gap:12px">
+      {{if .AvatarURL}}
+      <img src="{{.AvatarURL}}" alt="avatar" style="width:40px;height:40px;border-radius:50%">
+      {{end}}
+      <div>
+        <div class="text-sm font-medium">{{.GitHubLogin}}</div>
+        {{if .Orgs}}
+        <div class="text-xs text-gray-500">Orgs: {{range $i, $o := .Orgs}}{{if $i}}, {{end}}{{$o}}{{end}}</div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:16px">
+    <h2 class="text-sm font-bold" style="margin:0 0 12px 0">Budget</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div class="text-xs text-gray-500">Daily Cap</div>
+        <div class="text-sm font-medium">${{printf "%.2f" .DailyCap}}</div>
+      </div>
+      <div>
+        <div class="text-xs text-gray-500">Per-Task Cap</div>
+        <div class="text-sm font-medium">${{printf "%.2f" .PerTaskCap}}</div>
+      </div>
+      <div>
+        <div class="text-xs text-gray-500">Max Concurrent</div>
+        <div class="text-sm font-medium">{{.MaxConcurrent}}</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" style="padding:16px">
+    <h2 class="text-sm font-bold" style="margin:0 0 12px 0">Model Routing</h2>
+    <div class="text-sm">{{if .DefaultModel}}{{.DefaultModel}}{{else}}<span class="text-gray-400">Not configured</span>{{end}}</div>
+  </div>
+
+  <div class="card" style="padding:16px">
+    <h2 class="text-sm font-bold" style="margin:0 0 12px 0">Access Control</h2>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div>
+        <div class="text-xs text-gray-500">Allowed Users</div>
+        {{if .AllowedUsers}}
+        <div class="text-sm">{{range $i, $u := .AllowedUsers}}{{if $i}}, {{end}}{{$u}}{{end}}</div>
+        {{else}}
+        <div class="text-sm text-gray-400">All users</div>
+        {{end}}
+      </div>
+      <div>
+        <div class="text-xs text-gray-500">Allowed Orgs</div>
+        {{if .AllowedOrgs}}
+        <div class="text-sm">{{range $i, $o := .AllowedOrgs}}{{if $i}}, {{end}}{{$o}}{{end}}</div>
+        {{else}}
+        <div class="text-sm text-gray-400">All orgs</div>
+        {{end}}
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}

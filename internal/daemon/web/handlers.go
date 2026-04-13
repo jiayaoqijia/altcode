@@ -2,6 +2,7 @@ package web
 
 import (
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -292,6 +293,236 @@ func (h *WebHandler) HandleTaskDetail(
 	data.Content = content
 
 	if err := Render(w, h.tmpl, "detail", data); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// --- New Task page ---
+
+// RepoStore abstracts repository listing for the new-task form.
+// Task 8 wires the real implementation.
+type RepoStore interface {
+	ListRepos() ([]string, error)
+}
+
+// IssueView is the read-model for a GitHub issue shown in the
+// repo-issue dropdown.
+type IssueView struct {
+	Number int
+	Title  string
+}
+
+// IssueStore abstracts issue listing per repo.
+// Task 8 wires the real implementation.
+type IssueStore interface {
+	ListIssues(repo string) ([]*IssueView, error)
+}
+
+// newTaskData carries fields for new.html rendering.
+type newTaskData struct {
+	Repos []string
+}
+
+// repoIssuesData carries fields for the repo_issues partial.
+type repoIssuesData struct {
+	Issues []*IssueView
+}
+
+// HandleNewTask renders the new task creation form.
+func (h *WebHandler) HandleNewTask(
+	w http.ResponseWriter, r *http.Request,
+) {
+	sess := GetSession(r)
+
+	var repos []string
+	if rs, ok := h.store.(RepoStore); ok {
+		repos, _ = rs.ListRepos()
+	}
+
+	data := PageData{
+		Title:   "New Task",
+		ShowNav: true,
+	}
+	if sess != nil {
+		data.CSRFToken = sess.CSRFToken
+		data.User = sess.User
+		if sess.User != nil {
+			data.IsAdmin = sess.User.IsAdmin
+		}
+	}
+	data.Content = newTaskData{Repos: repos}
+
+	if err := Render(w, h.tmpl, "new", data); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// HandlePartialRepoIssues returns the repo_issues partial for the
+// selected repository. Called via htmx when the repo dropdown changes.
+func (h *WebHandler) HandlePartialRepoIssues(
+	w http.ResponseWriter, r *http.Request,
+) {
+	repo := r.URL.Query().Get("repo")
+
+	var issues []*IssueView
+	if repo != "" {
+		if is, ok := h.store.(IssueStore); ok {
+			issues, _ = is.ListIssues(repo)
+		}
+	}
+
+	rd := repoIssuesData{Issues: issues}
+	err := RenderPartial(w, h.tmpl, "new", "repo_issues", rd)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// --- PR Tracker page ---
+
+// PRView is the read-model for a PR row in the tracker table.
+type PRView struct {
+	RepoOwner       string
+	RepoName        string
+	PRNumber        int
+	PRURL           string
+	TaskDescription string
+	Status          string
+	APICostUSD      float64
+	CreatedAt       time.Time
+}
+
+// prPageData carries fields for prs.html rendering.
+type prPageData struct {
+	PRs          []*PRView
+	StatusFilter string
+}
+
+// prStatusMatch returns true if a PR's status matches the filter.
+func prStatusMatch(status, filter string) bool {
+	if filter == "" {
+		return true
+	}
+	return strings.EqualFold(status, filter)
+}
+
+// extractPRs builds PRView slices from tasks that have a PR URL.
+func extractPRs(
+	tasks []*TaskView, filter string,
+) []*PRView {
+	var prs []*PRView
+	for _, t := range tasks {
+		if t.PRURL == "" {
+			continue
+		}
+		if !prStatusMatch(t.Status, filter) {
+			continue
+		}
+		prs = append(prs, &PRView{
+			RepoOwner:       t.RepoOwner,
+			RepoName:        t.RepoName,
+			PRNumber:        t.PRNumber,
+			PRURL:           t.PRURL,
+			TaskDescription: t.TaskDescription,
+			Status:          t.Status,
+			APICostUSD:      t.APICostUSD,
+			CreatedAt:       t.CreatedAt,
+		})
+	}
+	return prs
+}
+
+// HandlePRs renders the PR tracker page.
+func (h *WebHandler) HandlePRs(
+	w http.ResponseWriter, r *http.Request,
+) {
+	sess := GetSession(r)
+	tasks := h.loadTasks()
+	statusFilter := r.URL.Query().Get("status")
+	prs := extractPRs(tasks, statusFilter)
+
+	data := PageData{
+		Title:   "PR Tracker",
+		ShowNav: true,
+	}
+	if sess != nil {
+		data.CSRFToken = sess.CSRFToken
+		data.User = sess.User
+		if sess.User != nil {
+			data.IsAdmin = sess.User.IsAdmin
+		}
+	}
+	data.Content = prPageData{
+		PRs:          prs,
+		StatusFilter: statusFilter,
+	}
+
+	if err := Render(w, h.tmpl, "prs", data); err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// HandlePartialPRList renders the pr_list partial for htmx polling.
+func (h *WebHandler) HandlePartialPRList(
+	w http.ResponseWriter, r *http.Request,
+) {
+	tasks := h.loadTasks()
+	status := r.URL.Query().Get("status")
+	prs := extractPRs(tasks, status)
+
+	pd := prPageData{PRs: prs, StatusFilter: status}
+	err := RenderPartial(w, h.tmpl, "prs", "pr_list", pd)
+	if err != nil {
+		http.Error(w, "internal error", http.StatusInternalServerError)
+	}
+}
+
+// --- Settings page ---
+
+// settingsData carries all fields for settings.html rendering.
+type settingsData struct {
+	GitHubLogin   string
+	AvatarURL     string
+	Orgs          []string
+	DailyCap      float64
+	PerTaskCap    float64
+	MaxConcurrent int
+	DefaultModel  string
+	AllowedUsers  []string
+	AllowedOrgs   []string
+}
+
+// HandleSettings renders the settings page. Non-admins see a
+// read-only view; admin status is conveyed via PageData.IsAdmin.
+func (h *WebHandler) HandleSettings(
+	w http.ResponseWriter, r *http.Request,
+) {
+	sess := GetSession(r)
+
+	sd := settingsData{
+		AllowedUsers: h.cfg.AllowedUsers,
+		AllowedOrgs:  h.cfg.AllowedOrgs,
+	}
+	if sess != nil && sess.User != nil {
+		sd.GitHubLogin = sess.User.Login
+		sd.AvatarURL = sess.User.AvatarURL
+		sd.Orgs = sess.User.Orgs
+	}
+
+	data := PageData{
+		Title:   "Settings",
+		ShowNav: true,
+	}
+	if sess != nil {
+		data.CSRFToken = sess.CSRFToken
+		data.User = sess.User
+		if sess.User != nil {
+			data.IsAdmin = sess.User.IsAdmin
+		}
+	}
+	data.Content = sd
+
+	if err := Render(w, h.tmpl, "settings", data); err != nil {
 		http.Error(w, "internal error", http.StatusInternalServerError)
 	}
 }

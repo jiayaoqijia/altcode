@@ -1,0 +1,45 @@
+{{define "content"}}
+<h1 class="text-xl font-bold" style="margin-bottom:16px">PR Tracker</h1>
+
+<div style="display:flex;gap:8px;margin-bottom:12px">
+  <a href="/ui/prs" class="text-sm font-medium px-3 py-1 rounded-md {{if not .Content.StatusFilter}}bg-blue-100 text-blue-800{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}" style="text-decoration:none">All</a>
+  <a href="/ui/prs?status=open" class="text-sm font-medium px-3 py-1 rounded-md {{if eq .Content.StatusFilter "open"}}bg-blue-100 text-blue-800{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}" style="text-decoration:none">Open</a>
+  <a href="/ui/prs?status=draft" class="text-sm font-medium px-3 py-1 rounded-md {{if eq .Content.StatusFilter "draft"}}bg-blue-100 text-blue-800{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}" style="text-decoration:none">Draft</a>
+  <a href="/ui/prs?status=merged" class="text-sm font-medium px-3 py-1 rounded-md {{if eq .Content.StatusFilter "merged"}}bg-blue-100 text-blue-800{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}" style="text-decoration:none">Merged</a>
+  <a href="/ui/prs?status=closed" class="text-sm font-medium px-3 py-1 rounded-md {{if eq .Content.StatusFilter "closed"}}bg-blue-100 text-blue-800{{else}}bg-gray-100 text-gray-600 hover:bg-gray-200{{end}}" style="text-decoration:none">Closed</a>
+</div>
+
+<div hx-get="/ui/partials/pr-list{{if .Content.StatusFilter}}?status={{.Content.StatusFilter}}{{end}}" hx-trigger="every 30s" hx-swap="innerHTML">
+  {{template "pr_list" .Content}}
+</div>
+{{end}}
+
+{{define "pr_list"}}
+<div id="pr-list">
+  {{if .PRs}}
+  <div class="card" style="overflow:hidden">
+    <table style="width:100%;border-collapse:collapse">
+      <thead>
+        <tr style="border-bottom:1px solid #e5e7eb;background:#f9fafb">
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:left">Repo</th>
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:left">PR</th>
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:left">Description</th>
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:left">Status</th>
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:right">Cost</th>
+          <th class="text-xs text-gray-500 font-medium" style="padding:8px 12px;text-align:left">Created</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .PRs}}
+          {{template "pr_row" .}}
+        {{end}}
+      </tbody>
+    </table>
+  </div>
+  {{else}}
+  <div class="card p-8 text-center text-gray-500">
+    No PRs created yet.
+  </div>
+  {{end}}
+</div>
+{{end}}

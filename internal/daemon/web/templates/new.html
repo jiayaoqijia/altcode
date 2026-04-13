@@ -1,0 +1,66 @@
+{{define "content"}}
+<div style="margin-bottom:16px">
+  <a href="/ui/" class="text-sm text-blue-600 hover:underline">&larr; Dashboard</a>
+</div>
+
+<h1 class="text-xl font-bold" style="margin-bottom:16px">New Task</h1>
+
+{{with .Content}}
+<form method="POST" action="/api/tasks" class="card" style="padding:24px;max-width:640px">
+  <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
+
+  {{if .Repos}}
+  <div style="margin-bottom:16px">
+    <label class="text-sm font-medium" style="display:block;margin-bottom:4px">Repository</label>
+    <select name="repo" id="repo-select"
+      class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+      hx-get="/ui/partials/repo-issues"
+      hx-target="#issue-section"
+      hx-trigger="change"
+      hx-include="[name='repo']">
+      <option value="">Select a repository...</option>
+      {{range .Repos}}
+      <option value="{{.}}">{{.}}</option>
+      {{end}}
+    </select>
+  </div>
+  {{else}}
+  <div class="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded mb-4 text-sm">
+    No repositories available. Connect a GitHub webhook to get started.
+  </div>
+  {{end}}
+
+  <div id="issue-section" style="margin-bottom:16px">
+    <label class="text-sm font-medium" style="display:block;margin-bottom:4px">Task Description</label>
+    <textarea name="description" rows="4" placeholder="Describe the task..."
+      class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+  </div>
+
+  <details style="margin-bottom:16px">
+    <summary class="text-sm font-medium cursor-pointer" style="margin-bottom:8px">Advanced Options</summary>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-top:8px">
+      <div>
+        <label class="text-sm text-gray-600" style="display:block;margin-bottom:4px">Model</label>
+        <input name="model" type="text" placeholder="default"
+          class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="text-sm text-gray-600" style="display:block;margin-bottom:4px">Max Cost (USD)</label>
+        <input name="max_cost" type="number" step="0.01" min="0" placeholder="no limit"
+          class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+      <div>
+        <label class="text-sm text-gray-600" style="display:block;margin-bottom:4px">Max Turns</label>
+        <input name="max_turns" type="number" min="1" placeholder="no limit"
+          class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+      </div>
+    </div>
+  </details>
+
+  <button type="submit"
+    class="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer">
+    Create Task
+  </button>
+</form>
+{{end}}
+{{end}}

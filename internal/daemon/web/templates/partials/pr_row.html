@@ -1,0 +1,15 @@
+{{define "pr_row"}}
+<tr style="border-bottom:1px solid #f3f4f6">
+  <td class="text-sm" style="padding:8px 12px">{{.RepoOwner}}/{{.RepoName}}</td>
+  <td class="text-sm" style="padding:8px 12px">
+    <a href="{{.PRURL}}" target="_blank" rel="noopener" class="text-blue-600 hover:underline">#{{.PRNumber}}</a>
+  </td>
+  <td class="text-sm" style="padding:8px 12px">{{truncate .TaskDescription 60}}</td>
+  <td style="padding:8px 12px">
+    <span class="{{statusDot .Status}}"></span>
+    <span class="text-sm">{{.Status}}</span>
+  </td>
+  <td class="text-sm" style="padding:8px 12px;text-align:right">${{printf "%.2f" .APICostUSD}}</td>
+  <td class="text-sm text-gray-500" style="padding:8px 12px">{{.CreatedAt.Format "Jan 2 15:04"}}</td>
+</tr>
+{{end}}

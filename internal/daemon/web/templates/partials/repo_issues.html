@@ -1,0 +1,14 @@
+{{define "repo_issues"}}
+{{if .Issues}}
+<label class="text-sm font-medium" style="display:block;margin-bottom:4px">Issue (optional)</label>
+<select name="issue" class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 mb-3">
+  <option value="">No issue — use description below</option>
+  {{range .Issues}}
+  <option value="{{.Number}}">#{{.Number}} — {{.Title}}</option>
+  {{end}}
+</select>
+{{end}}
+<label class="text-sm font-medium" style="display:block;margin-bottom:4px">Task Description</label>
+<textarea name="description" rows="4" placeholder="Describe the task..."
+  class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+{{end}}
