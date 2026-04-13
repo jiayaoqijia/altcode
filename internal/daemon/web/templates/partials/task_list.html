@@ -1,0 +1,13 @@
+{{define "task_list"}}
+<div id="task-list">
+  {{if .Tasks}}
+    {{range .Tasks}}
+      {{template "task_card" .}}
+    {{end}}
+  {{else}}
+    <div class="card p-8 text-center text-gray-500">
+      No tasks yet. Create one or connect a GitHub webhook.
+    </div>
+  {{end}}
+</div>
+{{end}}

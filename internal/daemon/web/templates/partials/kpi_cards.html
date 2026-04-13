@@ -1,0 +1,20 @@
+{{define "kpi_cards"}}
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+  <div class="card p-4">
+    <div class="text-sm text-gray-500">Active</div>
+    <div class="text-2xl font-bold">{{.ActiveCount}}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-sm text-gray-500">Queued</div>
+    <div class="text-2xl font-bold">{{.QueueDepth}}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-sm text-gray-500">Cost (24h)</div>
+    <div class="text-2xl font-bold">${{printf "%.2f" .Cost24h}}</div>
+  </div>
+  <div class="card p-4">
+    <div class="text-sm text-gray-500">Success Rate</div>
+    <div class="text-2xl font-bold">{{printf "%.0f" .SuccessRate}}%</div>
+  </div>
+</div>
+{{end}}

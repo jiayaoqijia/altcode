@@ -1,0 +1,13 @@
+{{define "task_card"}}
+<a href="/ui/tasks/{{.ID}}" class="card" style="display:block;text-decoration:none;color:inherit;margin-bottom:8px">
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:12px 16px 0 16px">
+    <div style="display:flex;align-items:center;gap:8px">
+      <span class="{{statusDot .Status}}"></span>
+      <strong>{{if .RepoOwner}}{{.RepoOwner}}/{{.RepoName}}{{if .IssueNumber}}#{{.IssueNumber}}{{end}}{{else}}Task{{end}}</strong>
+    </div>
+    <span class="text-sm text-gray-500">${{printf "%.2f" .APICostUSD}}</span>
+  </div>
+  <p class="text-sm" style="margin:4px 16px">{{truncate .TaskDescription 80}}</p>
+  <div class="text-sm text-gray-500" style="padding:0 16px 12px 16px">{{.Status}} · {{.CreatedAt.Format "Jan 2 15:04"}}</div>
+</a>
+{{end}}
