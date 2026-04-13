@@ -11,13 +11,6 @@ import (
 	"strings"
 )
 
-// SessionUser is a placeholder for the OAuth session user (Task 2).
-type SessionUser struct {
-	Login     string
-	AvatarURL string
-	IsAdmin   bool
-}
-
 // PageData carries data into every template render.
 type PageData struct {
 	Title     string
