@@ -172,7 +172,9 @@ func TestHandler_StopTask_Stub(t *testing.T) {
 		t.Fatalf("create: got %d", rec.Code)
 	}
 	var created map[string]any
-	json.Unmarshal(rec.Body.Bytes(), &created)
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
 	taskID := created["id"].(string)
 
 	// Stop.
@@ -199,7 +201,9 @@ func createTestTask(t *testing.T, s *Server) string {
 		t.Fatalf("create: got %d, body: %s", rec.Code, rec.Body.String())
 	}
 	var created map[string]any
-	json.Unmarshal(rec.Body.Bytes(), &created)
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("unmarshal create: %v", err)
+	}
 	return created["id"].(string)
 }
 

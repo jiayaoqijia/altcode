@@ -71,7 +71,7 @@ func TestAuthMiddleware_HealthBypassesAuth(t *testing.T) {
 	}
 }
 
-func TestAuthMiddleware_MetricsBypassesAuth(t *testing.T) {
+func TestAuthMiddleware_MetricsRequiresAuth(t *testing.T) {
 	handler := authMiddleware("secret-token")(
 		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(200)
@@ -81,8 +81,8 @@ func TestAuthMiddleware_MetricsBypassesAuth(t *testing.T) {
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 
-	if rec.Code != 200 {
-		t.Errorf("metrics should bypass auth, got %d", rec.Code)
+	if rec.Code != 401 {
+		t.Errorf("metrics should require auth, got %d", rec.Code)
 	}
 }
 
