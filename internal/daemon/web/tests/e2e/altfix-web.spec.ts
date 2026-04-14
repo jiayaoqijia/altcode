@@ -390,18 +390,18 @@ test.describe('Authenticated pages', () => {
   });
 
   test('dashboard status filter tabs present', async ({ page }) => {
-    // All / Active / Completed / Failed tabs.
-    await expect(page.locator('a[href="/ui/"]')).toBeVisible();
-    await expect(page.locator('a[href="/ui/?status=active"]')).toBeVisible();
-    await expect(page.locator('a[href="/ui/?status=completed"]')).toBeVisible();
-    await expect(page.locator('a[href="/ui/?status=failed"]')).toBeVisible();
+    // All / Active / Completed / Failed tabs (scoped to main, not nav).
+    await expect(page.locator('main a[href="/ui/"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/?status=active"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/?status=completed"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/?status=failed"]')).toBeVisible();
   });
 
   test('PR page has status filter tabs', async ({ page }) => {
     await page.goto(`${BASE}/ui/prs`);
-    await expect(page.locator('a[href="/ui/prs"]')).toBeVisible();
-    await expect(page.locator('a[href="/ui/prs?status=open"]')).toBeVisible();
-    await expect(page.locator('a[href="/ui/prs?status=merged"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/prs"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/prs?status=open"]')).toBeVisible();
+    await expect(page.locator('main a[href="/ui/prs?status=merged"]')).toBeVisible();
   });
 
   test('settings page shows connected user info', async ({ page }) => {
@@ -655,10 +655,10 @@ test.describe('CSRF and security tokens', () => {
   test('dashboard filter links exist with correct hrefs', async ({ page }) => {
     await login(page);
 
-    // Check filter links exist
-    const allFilter = page.locator('a[href="/ui/"]');
+    // Check filter links exist (scoped to main, not nav)
+    const allFilter = page.locator('main a[href="/ui/"]');
     await expect(allFilter).toBeVisible();
-    const activeFilter = page.locator('a[href="/ui/?status=active"]');
+    const activeFilter = page.locator('main a[href="/ui/?status=active"]');
     await expect(activeFilter).toBeVisible();
   });
 });
