@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1500,6 +1501,8 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 			}), nil
 		}
 		if pcfg, ok := cfg.Provider["openai"]; ok && pcfg.APIKey != "" {
+			slog.Warn("unknown provider, falling back to OpenAI-compatible",
+				"provider", name)
 			return provider.NewOpenAI(provider.OpenAIConfig{
 				APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
 			}), nil

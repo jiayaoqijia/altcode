@@ -882,6 +882,15 @@ func Run(ctx context.Context, p Params) error {
 		return err
 	}
 
+	// If no permission mode was explicitly set for headless execution,
+	// default to "auto" (allow read tools, ask for write tools via
+	// --permission-prompt-tool if set, otherwise deny writes).
+	// This prevents the confusing "tool is blocked" behavior when
+	// users run altcode "prompt" without --permission-mode.
+	if p.PermissionMode == "" {
+		p.PermissionMode = ModeAuto
+	}
+
 	// Phase 7: snapshot pre-run working tree state so --commit can
 	// detect whether the user had uncommitted changes before this
 	// run started. Captured BEFORE engine construction so the
