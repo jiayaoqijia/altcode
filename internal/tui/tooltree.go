@@ -52,6 +52,7 @@ func smartTruncate(s string, maxLen int) string {
 
 // toolEntry records a single tool call for the tool tree display.
 type toolEntry struct {
+	id        string // tool call ID for matching Start/Done pairs
 	name      string
 	detail    string // e.g. file path, command
 	status    string // "running", "done", "error"
@@ -71,9 +72,12 @@ func newToolTree() *toolTree {
 	return &toolTree{active: -1}
 }
 
-// Start records a new tool call starting.
-func (t *toolTree) Start(name, detail string) {
+// Start records a new tool call starting. The id is the unique tool call
+// ID from the provider so that Done can match the correct entry even when
+// multiple tools run concurrently.
+func (t *toolTree) Start(id, name, detail string) {
 	t.entries = append(t.entries, toolEntry{
+		id:        id,
 		name:      name,
 		detail:    detail,
 		status:    "running",
@@ -82,11 +86,11 @@ func (t *toolTree) Start(name, detail string) {
 	t.active = len(t.entries) - 1
 }
 
-// Done marks the OLDEST running tool as complete. When tools run
-// concurrently or complete out of order, this finds the right entry
-// instead of blindly using t.active (which caused the ⟳ 37s stale bug).
-func (t *toolTree) Done(title string, elapsed time.Duration) {
-	idx := t.findRunning()
+// Done marks the matching running tool as complete. It first tries to
+// match by tool call ID (exact match); if no ID is provided or no match
+// is found, it falls back to the oldest running entry.
+func (t *toolTree) Done(id, title string, elapsed time.Duration) {
+	idx := t.findRunningByID(id)
 	if idx >= 0 {
 		t.entries[idx].status = "done"
 		t.entries[idx].elapsed = elapsed
@@ -97,9 +101,9 @@ func (t *toolTree) Done(title string, elapsed time.Duration) {
 	t.active = -1
 }
 
-// DoneWithOutput marks the oldest running tool as complete with output.
-func (t *toolTree) DoneWithOutput(title string, elapsed time.Duration, output string) {
-	idx := t.findRunning()
+// DoneWithOutput marks the matching running tool as complete with output.
+func (t *toolTree) DoneWithOutput(id, title string, elapsed time.Duration, output string) {
+	idx := t.findRunningByID(id)
 	if idx >= 0 {
 		t.entries[idx].status = "done"
 		t.entries[idx].elapsed = elapsed
@@ -109,6 +113,20 @@ func (t *toolTree) DoneWithOutput(title string, elapsed time.Duration, output st
 		t.entries[idx].output = output
 	}
 	t.active = -1
+}
+
+// findRunningByID returns the index of the running entry with the given
+// tool call ID. If id is empty or no match is found, falls back to the
+// oldest running entry (preserving legacy behavior).
+func (t *toolTree) findRunningByID(id string) int {
+	if id != "" {
+		for i, e := range t.entries {
+			if e.status == "running" && e.id == id {
+				return i
+			}
+		}
+	}
+	return t.findRunning()
 }
 
 // findRunning returns the index of the oldest running entry, or -1.
@@ -128,9 +146,9 @@ func (t *toolTree) HasRunning() bool {
 	return t.findRunning() >= 0
 }
 
-// DoneWithError marks the oldest running tool as failed with error output.
-func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
-	idx := t.findRunning()
+// DoneWithError marks the matching running tool as failed.
+func (t *toolTree) DoneWithError(id, title string, elapsed time.Duration) {
+	idx := t.findRunningByID(id)
 	if idx >= 0 {
 		t.entries[idx].status = "error"
 		t.entries[idx].elapsed = elapsed
@@ -141,11 +159,10 @@ func (t *toolTree) DoneWithError(title string, elapsed time.Duration) {
 	t.active = -1
 }
 
-// DoneWithErrorOutput marks as failed and stores the error message for display.
-func (t *toolTree) DoneWithErrorOutput(title string, elapsed time.Duration, errMsg string) {
-	// Find the running entry FIRST, then mark it — avoids index aliasing
-	// when multiple error entries exist from prior tool calls.
-	idx := t.findRunning()
+// DoneWithErrorOutput marks the matching running tool as failed and
+// stores the error message for display.
+func (t *toolTree) DoneWithErrorOutput(id, title string, elapsed time.Duration, errMsg string) {
+	idx := t.findRunningByID(id)
 	if idx >= 0 {
 		t.entries[idx].status = "error"
 		t.entries[idx].elapsed = elapsed

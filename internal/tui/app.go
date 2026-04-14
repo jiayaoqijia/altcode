@@ -339,6 +339,9 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		// quit, despite what the previous comment claimed.
 		return a, nil, true
 	case "ctrl+c":
+		if a.cancel != nil {
+			a.cancel()
+		}
 		return a, tea.Quit, true
 	case "ctrl+k":
 		a.togglePalette()

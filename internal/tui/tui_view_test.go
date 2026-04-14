@@ -740,12 +740,12 @@ func TestToolTree_CollapseConsecutiveReads(t *testing.T) {
 
 	// Simulate 5 consecutive Read calls
 	for i := 0; i < 5; i++ {
-		tree.Start("Read", fmt.Sprintf("file%d.go", i))
-		tree.Done(fmt.Sprintf("file%d.go", i), 10*time.Millisecond)
+		tree.Start("", "Read", fmt.Sprintf("file%d.go", i))
+		tree.Done("",fmt.Sprintf("file%d.go", i), 10*time.Millisecond)
 	}
 	// Then a different tool
-	tree.Start("Edit", "main.go")
-	tree.Done("main.go", 50*time.Millisecond)
+	tree.Start("", "Edit", "main.go")
+	tree.Done("","main.go", 50*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -764,10 +764,10 @@ func TestToolTree_NoCollapseUnder3(t *testing.T) {
 	tree := newToolTree()
 
 	// 2 consecutive Reads — should NOT collapse
-	tree.Start("Read", "a.go")
-	tree.Done("a.go", 5*time.Millisecond)
-	tree.Start("Read", "b.go")
-	tree.Done("b.go", 5*time.Millisecond)
+	tree.Start("", "Read", "a.go")
+	tree.Done("","a.go", 5*time.Millisecond)
+	tree.Start("", "Read", "b.go")
+	tree.Done("","b.go", 5*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -786,15 +786,15 @@ func TestToolTree_MixedToolsCollapse(t *testing.T) {
 
 	// 4 Grep, then 3 Read, then 1 Bash
 	for i := 0; i < 4; i++ {
-		tree.Start("Grep", fmt.Sprintf("pattern%d", i))
-		tree.Done(fmt.Sprintf("pattern%d", i), 8*time.Millisecond)
+		tree.Start("", "Grep", fmt.Sprintf("pattern%d", i))
+		tree.Done("",fmt.Sprintf("pattern%d", i), 8*time.Millisecond)
 	}
 	for i := 0; i < 3; i++ {
-		tree.Start("Read", fmt.Sprintf("file%d.go", i))
-		tree.Done(fmt.Sprintf("file%d.go", i), 5*time.Millisecond)
+		tree.Start("", "Read", fmt.Sprintf("file%d.go", i))
+		tree.Done("",fmt.Sprintf("file%d.go", i), 5*time.Millisecond)
 	}
-	tree.Start("Bash", "go test ./...")
-	tree.Done("go test ./...", 1000*time.Millisecond)
+	tree.Start("", "Bash", "go test ./...")
+	tree.Done("","go test ./...", 1000*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -815,10 +815,10 @@ func TestToolTree_RunningNotCollapsed(t *testing.T) {
 
 	// 3 completed Reads + 1 running Read — running should not be collapsed
 	for i := 0; i < 3; i++ {
-		tree.Start("Read", fmt.Sprintf("done%d.go", i))
-		tree.Done(fmt.Sprintf("done%d.go", i), 5*time.Millisecond)
+		tree.Start("", "Read", fmt.Sprintf("done%d.go", i))
+		tree.Done("",fmt.Sprintf("done%d.go", i), 5*time.Millisecond)
 	}
-	tree.Start("Read", "active.go")
+	tree.Start("", "Read", "active.go")
 	// Don't call Done — this one is still running
 
 	output := tree.Render(DefaultTheme, 120)
@@ -831,6 +831,68 @@ func TestToolTree_RunningNotCollapsed(t *testing.T) {
 	// The running one should show individually with ⟳
 	if !strings.Contains(plain, "⟳") {
 		t.Error("missing running indicator for active Read")
+	}
+}
+
+// Bug #14: When two tools run concurrently, Done must mark the correct
+// one by ID rather than blindly taking the oldest running entry.
+func TestToolTree_DoneMatchesByID(t *testing.T) {
+	tree := newToolTree()
+
+	// Start two concurrent tools with different IDs
+	tree.Start("id-read", "Read", "config.go")
+	tree.Start("id-bash", "Bash", "go test")
+
+	// Complete the SECOND one first (out of order)
+	tree.Done("id-bash", "go test", 50*time.Millisecond)
+
+	// The first should still be running, the second should be done
+	if tree.entries[0].status != "running" {
+		t.Errorf("entry 0 (Read) should still be running, got %q", tree.entries[0].status)
+	}
+	if tree.entries[1].status != "done" {
+		t.Errorf("entry 1 (Bash) should be done, got %q", tree.entries[1].status)
+	}
+
+	// Now complete the first one
+	tree.Done("id-read", "config.go", 100*time.Millisecond)
+	if tree.entries[0].status != "done" {
+		t.Errorf("entry 0 (Read) should be done after Done(id-read), got %q", tree.entries[0].status)
+	}
+}
+
+// DoneWithOutput should also match by ID for concurrent tools.
+func TestToolTree_DoneWithOutputMatchesByID(t *testing.T) {
+	tree := newToolTree()
+
+	tree.Start("id-a", "Edit", "foo.go")
+	tree.Start("id-b", "Edit", "bar.go")
+
+	// Complete id-b with output
+	tree.DoneWithOutput("id-b", "bar.go", 30*time.Millisecond, "+added line")
+
+	if tree.entries[0].status != "running" {
+		t.Errorf("entry 0 should still be running, got %q", tree.entries[0].status)
+	}
+	if tree.entries[1].output != "+added line" {
+		t.Errorf("entry 1 output = %q, want %q", tree.entries[1].output, "+added line")
+	}
+}
+
+// Fallback: when ID is empty, Done falls back to oldest running entry.
+func TestToolTree_DoneFallbackWithoutID(t *testing.T) {
+	tree := newToolTree()
+
+	tree.Start("", "Read", "a.go")
+	tree.Start("", "Read", "b.go")
+
+	// Without ID, should mark the oldest running (entry 0)
+	tree.Done("", "a.go", 10*time.Millisecond)
+	if tree.entries[0].status != "done" {
+		t.Errorf("entry 0 should be done (oldest fallback), got %q", tree.entries[0].status)
+	}
+	if tree.entries[1].status != "running" {
+		t.Errorf("entry 1 should still be running, got %q", tree.entries[1].status)
 	}
 }
 
@@ -903,7 +965,7 @@ func TestPaletteBuiltins_MatchSlashCommandNames(t *testing.T) {
 func TestToolTree_RunningHasNoTimeoutLabel(t *testing.T) {
 	tree := newToolTree()
 	for _, name := range []string{"Grep", "Read", "Bash"} {
-		tree.Start(name, "target")
+		tree.Start("", name, "target")
 		// Backdate startedAt so the elapsed branch fires (>= 1s).
 		last := len(tree.entries) - 1
 		tree.entries[last].startedAt = time.Now().Add(-3 * time.Second)
@@ -1188,11 +1250,11 @@ func TestCCParity_TrackTaskFromTool(t *testing.T) {
 func TestCCParity_ToolTree_WithTargets(t *testing.T) {
 	tree := newToolTree()
 
-	tree.Start("Read", "main.go")
-	tree.Done("main.go", 15*time.Millisecond)
-	tree.Start("Bash", "go test ./...")
-	tree.Done("go test ./...", 2500*time.Millisecond)
-	tree.Start("Edit", "app.go")
+	tree.Start("", "Read", "main.go")
+	tree.Done("","main.go", 15*time.Millisecond)
+	tree.Start("", "Bash", "go test ./...")
+	tree.Done("","go test ./...", 2500*time.Millisecond)
+	tree.Start("", "Edit", "app.go")
 	// Still running
 
 	output := tree.Render(DefaultTheme, 120)
@@ -1340,9 +1402,9 @@ func TestCCParity_FullHUD_AllFeatures(t *testing.T) {
 
 func TestCCStyle_EditDiffOutput(t *testing.T) {
 	tree := newToolTree()
-	tree.Start("Edit", "app.go")
+	tree.Start("", "Edit", "app.go")
 	diffOutput := "- old line removed\n+ new line added\n  context line\n+ another addition"
-	tree.DoneWithOutput("app.go", 50*time.Millisecond, diffOutput)
+	tree.DoneWithOutput("","app.go", 50*time.Millisecond, diffOutput)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1366,9 +1428,9 @@ func TestCCStyle_EditDiffOutput(t *testing.T) {
 
 func TestCCStyle_BashCommandOutput(t *testing.T) {
 	tree := newToolTree()
-	tree.Start("Bash", "go test ./... -race")
+	tree.Start("", "Bash", "go test ./... -race")
 	bashOutput := "ok  github.com/altcode-ai/altcode/internal/tui  2.902s\nok  github.com/altcode-ai/altcode/cmd/altcode  1.2s"
-	tree.DoneWithOutput("go test", 2500*time.Millisecond, bashOutput)
+	tree.DoneWithOutput("","go test", 2500*time.Millisecond, bashOutput)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1389,14 +1451,14 @@ func TestCCStyle_BashCommandOutput(t *testing.T) {
 
 func TestCCStyle_OutputTruncation(t *testing.T) {
 	tree := newToolTree()
-	tree.Start("Bash", "long command")
+	tree.Start("", "Bash", "long command")
 
 	// Generate 20 lines of output — should be truncated to 8
 	var lines []string
 	for i := 0; i < 20; i++ {
 		lines = append(lines, fmt.Sprintf("output line %d", i))
 	}
-	tree.DoneWithOutput("long command", 100*time.Millisecond, strings.Join(lines, "\n"))
+	tree.DoneWithOutput("","long command", 100*time.Millisecond, strings.Join(lines, "\n"))
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1413,8 +1475,8 @@ func TestCCStyle_OutputTruncation(t *testing.T) {
 
 func TestCCStyle_NoOutputForRead(t *testing.T) {
 	tree := newToolTree()
-	tree.Start("Read", "file.go")
-	tree.Done("file.go", 10*time.Millisecond)
+	tree.Start("", "Read", "file.go")
+	tree.Done("","file.go", 10*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1431,10 +1493,10 @@ func TestCCStyle_NoOutputForRead(t *testing.T) {
 
 func TestCCStyle_NameParenFormat(t *testing.T) {
 	tree := newToolTree()
-	tree.Start("Grep", "func.*Update")
-	tree.Done("func.*Update", 8*time.Millisecond)
-	tree.Start("Glob", "**/*.go")
-	tree.Done("**/*.go", 5*time.Millisecond)
+	tree.Start("", "Grep", "func.*Update")
+	tree.Done("","func.*Update", 8*time.Millisecond)
+	tree.Start("", "Glob", "**/*.go")
+	tree.Done("","**/*.go", 5*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1663,8 +1725,8 @@ func TestTUIView_NarrowWidth_NoNegative(t *testing.T) {
 	a.messages = append(a.messages, chatMessage{
 		role: roleAssistant, content: "hello",
 	})
-	a.tools.Start("bash", "echo test")
-	a.tools.Done("echo test", 100)
+	a.tools.Start("", "bash", "echo test")
+	a.tools.Done("", "echo test", 100)
 
 	// Must not panic
 	out := a.View()
@@ -1729,7 +1791,7 @@ func TestTUIView_CtrlL_ClearsToolTree(t *testing.T) {
 	a := testApp()
 	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
 	a.busy = true
-	a.tools.Start("bash", "echo test")
+	a.tools.Start("", "bash", "echo test")
 
 	if len(a.tools.entries) != 1 {
 		t.Fatal("expected 1 tool entry before Ctrl+L")

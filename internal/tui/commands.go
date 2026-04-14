@@ -180,6 +180,11 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 			return true, a.startCompare(task)
 		}
 	case "/quit", "/exit", "/q":
+		// Cancel any in-flight engine context first so tool
+		// subprocesses get SIGTERM and don't leak as zombies.
+		if a.cancel != nil {
+			a.cancel()
+		}
 		return true, tea.Quit
 	default:
 		return false, nil

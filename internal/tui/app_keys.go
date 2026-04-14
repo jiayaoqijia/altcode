@@ -48,6 +48,9 @@ func (a *App) handleSetupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		a.saveSetupKey()
 		return a, nil, true
 	case "ctrl+c":
+		if a.cancel != nil {
+			a.cancel()
+		}
 		return a, tea.Quit, true
 	}
 	return a, nil, false
@@ -220,7 +223,11 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		return a, nil, true
 	case "ctrl+d":
-		// Ctrl+D = quit
+		// Ctrl+D = quit. Cancel any in-flight engine context first so
+		// tool subprocesses get SIGTERM and don't leak as zombies.
+		if a.cancel != nil {
+			a.cancel()
+		}
 		return a, tea.Quit, true
 	case "ctrl+g":
 		// Ctrl+G = open current input in $EDITOR (CC parity).
@@ -348,6 +355,11 @@ func (a *App) handleCtrlCKey() (tea.Model, tea.Cmd, bool) {
 		copyToClipboard(last)
 		a.appendInfo("[copied last response to clipboard]")
 		return a, nil, true
+	}
+	// Cancel any in-flight engine context before quitting so tool
+	// subprocesses don't leak.
+	if a.cancel != nil {
+		a.cancel()
 	}
 	return a, tea.Quit, true
 }

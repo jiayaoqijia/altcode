@@ -73,7 +73,7 @@ func (a *App) onToolStart(ev event.Event) (tea.Model, tea.Cmd) {
 		a.activeToolName = ev.ToolCall.Name
 		target := extractToolTarget(ev.ToolCall)
 		a.activeToolDetail = target
-		a.tools.Start(ev.ToolCall.Name, target)
+		a.tools.Start(ev.ToolCall.ID, ev.ToolCall.Name, target)
 		a.toolStart = time.Now()
 	}
 	a.updateViewport()
@@ -97,10 +97,17 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 		elapsed = time.Since(a.toolStart)
 	}
 
+	// Extract tool call ID for matching the correct running entry
+	// when multiple tools run concurrently.
+	toolID := ""
+	if ev.ToolCall != nil {
+		toolID = ev.ToolCall.ID
+	}
+
 	if hasError {
-		a.tools.DoneWithErrorOutput(title, elapsed, output)
+		a.tools.DoneWithErrorOutput(toolID, title, elapsed, output)
 	} else {
-		a.recordToolSuccess(ev, title, elapsed, output)
+		a.recordToolSuccess(ev, toolID, title, elapsed, output)
 	}
 	a.recordToolMeta(ev, title, hasError)
 	// Lightweight git dirty refresh after file-changing tools
@@ -296,20 +303,20 @@ func extractToolOutput(ev event.Event) (string, string) {
 // recordToolSuccess dispatches the tool result to the tree with output.
 // Tool names are normalized to lower case so this matches the actual
 // registry names (read, edit, bash, …) as well as the CC-style capitals.
-func (a *App) recordToolSuccess(ev event.Event, title string, elapsed time.Duration, output string) {
+func (a *App) recordToolSuccess(ev event.Event, toolID, title string, elapsed time.Duration, output string) {
 	toolName := ""
 	if ev.ToolCall != nil {
 		toolName = ev.ToolCall.Name
 	}
 	switch strings.ToLower(toolName) {
 	case "edit", "bash", "write", "apply_patch":
-		a.tools.DoneWithOutput(title, elapsed, output)
+		a.tools.DoneWithOutput(toolID, title, elapsed, output)
 	case "read":
-		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 3))
+		a.tools.DoneWithOutput(toolID, title, elapsed, truncateLines(output, 3))
 	case "grep":
-		a.tools.DoneWithOutput(title, elapsed, truncateLines(output, 4))
+		a.tools.DoneWithOutput(toolID, title, elapsed, truncateLines(output, 4))
 	default:
-		a.tools.Done(title, elapsed)
+		a.tools.Done(toolID, title, elapsed)
 	}
 }
 
