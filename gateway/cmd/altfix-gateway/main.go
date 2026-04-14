@@ -19,6 +19,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/altcode-ai/altcode/gateway"
 	"github.com/altcode-ai/altcode/gateway/slack"
@@ -33,6 +34,9 @@ func main() {
 		telegramToken string
 		slackBotToken string
 		slackAppToken string
+		chatBinary    string
+		chatModel     string
+		chatTimeout   time.Duration
 	)
 
 	flag.StringVar(&daemonURL, "daemon-url",
@@ -53,6 +57,15 @@ func main() {
 	flag.StringVar(&slackAppToken, "slack-app-token",
 		env("SLACK_APP_TOKEN", ""),
 		"Slack app-level token")
+	flag.StringVar(&chatBinary, "chat-binary",
+		env("ALTFIX_CHAT_BINARY", "altcode"),
+		"path to altcode binary for chat")
+	flag.StringVar(&chatModel, "chat-model",
+		env("ALTFIX_CHAT_MODEL", "altllm-basic"),
+		"default model for chat responses")
+	flag.DurationVar(&chatTimeout, "chat-timeout",
+		60*time.Second,
+		"chat subprocess timeout")
 	flag.Parse()
 
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{
@@ -65,6 +78,11 @@ func main() {
 		DaemonURL: daemonURL,
 		AuthToken: authToken,
 		RepoURL:   repoURL,
+		Chat: gateway.ChatConfig{
+			Binary:  chatBinary,
+			Model:   chatModel,
+			Timeout: chatTimeout,
+		},
 	}, mgr)
 
 	registered := 0

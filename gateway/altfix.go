@@ -8,9 +8,20 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 )
+
+// ChatConfig holds settings for the chat subprocess.
+type ChatConfig struct {
+	Binary   string        // path to altcode binary, default "altcode"
+	Model    string        // default model for chat, e.g. "altllm-basic"
+	MaxTurns int           // max agent turns for chat, default 1
+	Timeout  time.Duration // subprocess timeout, default 60s
+}
 
 // AltFixBridge translates channel messages into altcode daemon API calls.
 type AltFixBridge struct {
@@ -20,6 +31,7 @@ type AltFixBridge struct {
 	client      *http.Client
 	manager     *Manager
 	rateLimiter *RateLimiter
+	chatCfg     ChatConfig
 }
 
 // BridgeConfig configures the AltFix bridge.
@@ -27,6 +39,7 @@ type BridgeConfig struct {
 	DaemonURL string
 	AuthToken string
 	RepoURL   string // default repo URL for tasks
+	Chat      ChatConfig
 }
 
 // NewAltFixBridge creates a bridge between channels and the daemon.
@@ -37,6 +50,7 @@ func NewAltFixBridge(cfg BridgeConfig, mgr *Manager) *AltFixBridge {
 		repoURL:   cfg.RepoURL,
 		client:    &http.Client{Timeout: 30 * time.Second},
 		manager:   mgr,
+		chatCfg:   cfg.Chat,
 		rateLimiter: NewRateLimiter(RateLimitConfig{
 			MaxAttempts:    5,
 			WindowSeconds:  60,
@@ -104,8 +118,9 @@ func (b *AltFixBridge) HandleMessage(
 	case text == "/help" || text == "/start":
 		reply = helpText()
 	default:
-		// Not a recognized command; treat as a /fix
-		reply, err = b.createTaskWithOpts(ctx, text)
+		// Normal chat — run through altcode CLI subprocess.
+		b.sendTyping(ctx, msg)
+		reply, err = b.chat(ctx, text)
 	}
 
 	if err != nil {
@@ -713,6 +728,74 @@ func (b *AltFixBridge) doRequest(
 	return data, nil
 }
 
+// chat runs the altcode CLI as a subprocess and returns its output.
+func (b *AltFixBridge) chat(
+	ctx context.Context, prompt string,
+) (string, error) {
+	cfg := b.chatCfg
+	if cfg.Binary == "" {
+		cfg.Binary = "altcode"
+	}
+	if cfg.Model == "" {
+		cfg.Model = "altllm-basic"
+	}
+	if cfg.Timeout == 0 {
+		cfg.Timeout = 60 * time.Second
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
+	defer cancel()
+
+	args := []string{"--model", cfg.Model}
+	if cfg.MaxTurns > 0 {
+		args = append(args, "--max-turns", strconv.Itoa(cfg.MaxTurns))
+	}
+	args = append(args, prompt)
+
+	cmd := exec.CommandContext(ctx, cfg.Binary, args...)
+	cmd.Env = filterEnv(os.Environ())
+
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		if ctx.Err() == context.DeadlineExceeded {
+			return "Response timed out. Try a simpler question or use /fix for complex tasks.", nil
+		}
+		return "", fmt.Errorf("chat failed: %w", err)
+	}
+
+	result := strings.TrimSpace(string(output))
+	if result == "" {
+		return "No response generated.", nil
+	}
+
+	// Truncate long responses for chat platforms.
+	if len(result) > 3500 {
+		result = result[:3500] +
+			"\n\n... (truncated, use altcode CLI for full output)"
+	}
+
+	return result, nil
+}
+
+// filterEnv removes daemon-specific env vars that could conflict
+// with the subprocess altcode invocation.
+func filterEnv(env []string) []string {
+	filtered := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "ALTFIX_") {
+			continue
+		}
+		filtered = append(filtered, e)
+	}
+	return filtered
+}
+
+// sendTyping notifies the channel that a response is being prepared.
+// Currently a no-op; the Manager could expose a typing API later.
+func (b *AltFixBridge) sendTyping(_ context.Context, _ InboundMessage) {
+	// Placeholder for channel-layer typing indicators.
+}
+
 func helpText() string {
 	return `AltFix Gateway Commands:
 
@@ -733,7 +816,7 @@ func helpText() string {
 /cost                 - Show total cost
 /help                 - Show this help
 
-Or just send a message to create a task.`
+Or just send a message to chat with the AI agent.`
 }
 
 // safeTrunc returns s truncated to n characters, or s itself if

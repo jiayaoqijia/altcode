@@ -7,8 +7,11 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestAltFixBridge_HelpCommand(t *testing.T) {
@@ -346,4 +349,175 @@ func (f *fakeChannel) IsRunning() bool                                  { return
 func (f *fakeChannel) Send(_ context.Context, msg OutboundMessage) error {
 	*f.sent = append(*f.sent, msg.Text)
 	return nil
+}
+
+// --- Chat subprocess tests ---
+
+func writeFakeScript(t *testing.T, script string) string {
+	t.Helper()
+	dir := t.TempDir()
+	p := filepath.Join(dir, "altcode")
+	if err := os.WriteFile(p, []byte(script), 0755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestChat_Success(t *testing.T) {
+	bin := writeFakeScript(t,
+		"#!/bin/sh\necho \"Hello! I can help with Go.\"")
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 5 * time.Second,
+		},
+	}
+
+	reply, err := bridge.chat(context.Background(), "explain goroutines")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "Hello") {
+		t.Errorf("unexpected reply: %s", reply)
+	}
+}
+
+func TestChat_Timeout(t *testing.T) {
+	bin := writeFakeScript(t, "#!/bin/sh\nsleep 10")
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 100 * time.Millisecond,
+		},
+	}
+
+	reply, err := bridge.chat(context.Background(), "slow question")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "timed out") {
+		t.Errorf("expected timeout message, got: %s", reply)
+	}
+}
+
+func TestChat_Truncation(t *testing.T) {
+	// Generate a script that outputs 5000 'x' chars.
+	bin := writeFakeScript(t,
+		"#!/bin/sh\nhead -c 5000 /dev/zero | tr '\\0' 'x'")
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 5 * time.Second,
+		},
+	}
+
+	reply, err := bridge.chat(context.Background(), "verbose question")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "truncated") {
+		t.Errorf("expected truncation notice")
+	}
+	if len(reply) > 4000 {
+		t.Errorf("reply too long: %d chars", len(reply))
+	}
+}
+
+func TestChat_EmptyOutput(t *testing.T) {
+	bin := writeFakeScript(t, "#!/bin/sh\n# no output")
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 5 * time.Second,
+		},
+	}
+
+	reply, err := bridge.chat(context.Background(), "empty question")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if reply != "No response generated." {
+		t.Errorf("unexpected reply for empty output: %s", reply)
+	}
+}
+
+func TestChat_ProcessError(t *testing.T) {
+	bin := writeFakeScript(t, "#!/bin/sh\nexit 1")
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 5 * time.Second,
+		},
+	}
+
+	_, err := bridge.chat(context.Background(), "failing question")
+	if err == nil {
+		t.Fatal("expected error for exit 1")
+	}
+	if !strings.Contains(err.Error(), "chat failed") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}
+
+func TestFilterEnv(t *testing.T) {
+	env := []string{
+		"HOME=/home/user",
+		"PATH=/usr/bin",
+		"ALTFIX_PORT=9200",
+		"ALTFIX_TOKEN=secret",
+		"ANTHROPIC_API_KEY=sk-test",
+	}
+
+	filtered := filterEnv(env)
+	for _, e := range filtered {
+		if strings.HasPrefix(e, "ALTFIX_") {
+			t.Errorf("ALTFIX_ var should be filtered: %s", e)
+		}
+	}
+	if len(filtered) != 3 {
+		t.Errorf("expected 3 remaining vars, got %d", len(filtered))
+	}
+}
+
+func TestHandleMessage_ChatFallback(t *testing.T) {
+	bin := writeFakeScript(t,
+		"#!/bin/sh\necho 'chat response'")
+
+	var sent []string
+	mgr := &Manager{
+		channels: make(map[string]Channel),
+		workers:  make(map[string]*worker),
+		logger:   slog.Default(),
+	}
+	fakeCh := &fakeChannel{name: "test", sent: &sent}
+	mgr.channels["test"] = fakeCh
+	mgr.workers["test"] = newWorker("test", fakeCh)
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{
+			Binary:  bin,
+			Timeout: 5 * time.Second,
+		},
+		manager: mgr,
+	}
+
+	msg := InboundMessage{
+		ChannelName: "test",
+		ChatID:      "c1",
+		SenderID:    "u1",
+		Text:        "what is a mutex?",
+	}
+	bridge.HandleMessage(context.Background(), msg)
+
+	if len(sent) == 0 {
+		t.Fatal("expected a reply")
+	}
+	if !strings.Contains(sent[0], "chat response") {
+		t.Errorf("expected chat response, got: %s", sent[0])
+	}
 }
