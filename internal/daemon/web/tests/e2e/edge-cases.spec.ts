@@ -303,3 +303,83 @@ test.describe('Auth edge cases', () => {
     await ctx.close();
   });
 });
+
+// --- XSS render safety ---
+
+test.describe('XSS render safety', () => {
+  test('HTML in task description is escaped in dashboard', async ({ page, request }) => {
+    const xss = '<img src=x onerror=alert(1)>';
+    await request.post(`${BASE}/tasks`, {
+      headers: apiHeaders,
+      data: { repo_url: 'https://github.com/test/xss-render', task: xss }
+    });
+
+    await login(page);
+    await page.waitForTimeout(6000); // wait for htmx refresh
+
+    // Capture any alert dialogs
+    const alerts: string[] = [];
+    page.on('dialog', d => { alerts.push(d.message()); d.dismiss(); });
+    await page.waitForTimeout(1000);
+
+    // No alert should have fired
+    expect(alerts).toHaveLength(0);
+
+    // The raw HTML tag should NOT be in the page DOM as an element
+    const imgCount = await page.locator('img[onerror]').count();
+    expect(imgCount).toBe(0);
+
+    // The escaped version should be visible as text
+    const html = await page.content();
+    expect(html).toContain('&lt;img');
+  });
+});
+
+// --- Concurrent operations ---
+
+test.describe('Concurrent operations', () => {
+  test('concurrent stop and steer on same task do not crash', async ({ request }) => {
+    const { id } = await (await request.post(`${BASE}/tasks`, {
+      headers: apiHeaders,
+      data: { repo_url: 'https://github.com/test/race', task: 'Race test' }
+    })).json();
+
+    // Fire stop and steer concurrently
+    const [stopResp, steerResp] = await Promise.all([
+      request.post(`${BASE}/tasks/${id}/stop`, { headers: apiHeaders }),
+      request.post(`${BASE}/tasks/${id}/steer`, {
+        headers: apiHeaders,
+        data: { message: 'concurrent steer' }
+      })
+    ]);
+
+    // Both should return valid HTTP status (no 500)
+    expect(stopResp.status()).toBeLessThan(500);
+    expect(steerResp.status()).toBeLessThan(500);
+
+    // At least one should succeed
+    const statuses = [stopResp.status(), steerResp.status()];
+    expect(statuses.some(s => s >= 200 && s < 300)).toBe(true);
+  });
+});
+
+// --- Malformed requests ---
+
+test.describe('Malformed requests', () => {
+  test('malformed JSON body returns 400 not 500', async ({ request }) => {
+    const resp = await request.post(`${BASE}/tasks`, {
+      headers: { 'Authorization': `Bearer ${API_TOKEN}`, 'Content-Type': 'application/json' },
+      data: '{bad json'
+    });
+    expect(resp.status()).toBe(400);
+  });
+
+  test('missing Content-Type with JSON body still works or returns 400', async ({ request }) => {
+    const resp = await request.post(`${BASE}/tasks`, {
+      headers: { 'Authorization': `Bearer ${API_TOKEN}` },
+      data: JSON.stringify({ repo_url: 'https://github.com/test/ct', task: 'test' })
+    });
+    // Should be 201 (Go json.Decoder doesn't require Content-Type) or 400
+    expect([201, 400]).toContain(resp.status());
+  });
+});
