@@ -1,4 +1,9 @@
-//go:build wip
+// Adapted from ottie's Signal channel implementation.
+// Copyright (c) 2026 Ottie contributors — MIT License
+//
+// Stripped ottie-specific dependencies (bus, identity, media, config).
+// Wired to gateway.MessageHandler instead of bus.PublishInbound.
+// Uses signal-cli JSON-RPC 2.0 API over HTTP.
 
 package signal
 
@@ -13,34 +18,42 @@ import (
 	"sync/atomic"
 	"time"
 
-	gateway "github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/config"
-	"github.com/altcode-ai/altcode/gateway/logger"
+	"github.com/altcode-ai/altcode/gateway"
 )
 
-// SignalChannel implements the gateway.Channel interface for Signal messenger
-// using signal-cli's JSON-RPC 2.0 API over HTTP.
-type SignalChannel struct {
+// Config holds Signal channel configuration.
+type Config struct {
+	Account     string // phone number
+	AccountUUID string // for mention detection
+	CLIPath     string // path to signal-cli binary
+	HTTPHost    string // defaults to 127.0.0.1
+	HTTPPort    int    // defaults to 8080
+	AutoStart   bool   // start signal-cli daemon automatically
+	AllowFrom   []string
+	AllowAll    bool
+}
+
+// Channel implements gateway.Channel for Signal.
+type Channel struct {
 	*gateway.BaseChannel
-	config     config.SignalConfig
+	config     Config
 	httpClient *http.Client
 	baseURL    string
 	daemonCmd  *daemonProcess
 	ctx        context.Context
 	cancel     context.CancelFunc
 	rpcID      atomic.Int64
+	allowList  []string
+	allowAll   bool
 }
 
-// NewSignalChannel creates a new Signal channel instance.
-func NewSignalChannel(cfg config.SignalConfig, messageBus *gateway.MessageBus) (*SignalChannel, error) {
+// New creates a Signal channel.
+func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	if cfg.Account == "" {
-		return nil, fmt.Errorf("signal account (phone number) is required")
+		return nil, fmt.Errorf(
+			"signal account (phone number) is required",
+		)
 	}
-
-	base := gateway.NewBaseChannel("signal", cfg, messageBus, cfg.AllowFrom,
-		gateway.WithGroupTrigger(cfg.GroupTrigger),
-		gateway.WithReasoningChannelID(cfg.ReasoningChannelID),
-	)
 
 	host := cfg.HTTPHost
 	if host == "" {
@@ -51,84 +64,76 @@ func NewSignalChannel(cfg config.SignalConfig, messageBus *gateway.MessageBus) (
 		port = 8080
 	}
 
-	return &SignalChannel{
-		BaseChannel: base,
+	return &Channel{
+		BaseChannel: gateway.NewBaseChannel("signal", handler),
 		config:      cfg,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-		baseURL: "http://" + net.JoinHostPort(host, fmt.Sprintf("%d", port)),
+		httpClient:  &http.Client{Timeout: 30 * time.Second},
+		baseURL: "http://" + net.JoinHostPort(
+			host, fmt.Sprintf("%d", port),
+		),
+		allowList: cfg.AllowFrom,
+		allowAll:  cfg.AllowAll,
 	}, nil
 }
 
-// Start initializes the Signal channel, optionally starting the signal-cli daemon.
-func (c *SignalChannel) Start(ctx context.Context) error {
-	logger.InfoC("signal", "Starting Signal channel")
-
+func (c *Channel) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Start daemon if auto-start is enabled
 	if c.config.AutoStart {
 		daemon, err := startDaemon(c.config)
 		if err != nil {
 			c.cancel()
-			return fmt.Errorf("failed to start signal-cli daemon: %w", err)
+			return fmt.Errorf(
+				"failed to start signal-cli daemon: %w", err,
+			)
 		}
 		c.daemonCmd = daemon
 
-		if err := waitForDaemon(c.ctx, c.baseURL, 30*time.Second); err != nil {
+		if err := waitForDaemon(
+			c.ctx, c.baseURL, 30*time.Second,
+		); err != nil {
 			c.stopDaemon()
 			c.cancel()
-			return fmt.Errorf("signal-cli daemon failed to become ready: %w", err)
+			return fmt.Errorf(
+				"signal-cli daemon not ready: %w", err,
+			)
 		}
-		logger.InfoC("signal", "signal-cli daemon started and ready")
 	}
 
-	// Start SSE event listener
 	go c.sseLoop()
 
 	c.SetRunning(true)
-	logger.InfoCF("signal", "Signal channel started", map[string]any{
-		"account": c.config.Account,
-		"baseURL": c.baseURL,
-	})
 	return nil
 }
 
-// Stop shuts down the Signal channel.
-func (c *SignalChannel) Stop(ctx context.Context) error {
-	logger.InfoC("signal", "Stopping Signal channel")
-
+func (c *Channel) Stop(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
-
 	c.stopDaemon()
-
 	c.SetRunning(false)
-	logger.InfoC("signal", "Signal channel stopped")
 	return nil
 }
 
-func (c *SignalChannel) stopDaemon() {
+func (c *Channel) stopDaemon() {
 	if c.daemonCmd != nil {
 		stopDaemon(c.daemonCmd)
 		c.daemonCmd = nil
 	}
 }
 
-// Send sends a message via Signal using JSON-RPC.
-func (c *SignalChannel) Send(ctx context.Context, msg gateway.OutboundMessage) error {
+func (c *Channel) Send(
+	ctx context.Context, msg gateway.OutboundMessage,
+) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
 
 	params := map[string]any{
 		"account": c.config.Account,
-		"message": msg.Content,
+		"message": msg.Text,
 	}
 
-	// Determine if this is a group or DM based on chatID format
 	if strings.HasPrefix(msg.ChatID, "group:") {
 		groupID := strings.TrimPrefix(msg.ChatID, "group:")
 		params["groupId"] = groupID
@@ -140,11 +145,11 @@ func (c *SignalChannel) Send(ctx context.Context, msg gateway.OutboundMessage) e
 	if err != nil {
 		return fmt.Errorf("signal send: %w", err)
 	}
-
 	return nil
 }
 
-// jsonRPCRequest represents a JSON-RPC 2.0 request.
+// --- JSON-RPC ---
+
 type jsonRPCRequest struct {
 	JSONRPC string `json:"jsonrpc"`
 	Method  string `json:"method"`
@@ -152,7 +157,6 @@ type jsonRPCRequest struct {
 	Params  any    `json:"params,omitempty"`
 }
 
-// jsonRPCResponse represents a JSON-RPC 2.0 response.
 type jsonRPCResponse struct {
 	JSONRPC string          `json:"jsonrpc"`
 	ID      int64           `json:"id"`
@@ -160,14 +164,14 @@ type jsonRPCResponse struct {
 	Error   *jsonRPCError   `json:"error,omitempty"`
 }
 
-// jsonRPCError represents a JSON-RPC 2.0 error.
 type jsonRPCError struct {
 	Code    int    `json:"code"`
 	Message string `json:"message"`
 }
 
-// rpcCall performs a JSON-RPC 2.0 call to the signal-cli daemon.
-func (c *SignalChannel) rpcCall(ctx context.Context, method string, params any) (json.RawMessage, error) {
+func (c *Channel) rpcCall(
+	ctx context.Context, method string, params any,
+) (json.RawMessage, error) {
 	reqID := c.rpcID.Add(1)
 
 	reqBody := jsonRPCRequest{
@@ -183,7 +187,9 @@ func (c *SignalChannel) rpcCall(ctx context.Context, method string, params any) 
 	}
 
 	url := c.baseURL + "/api/v1/rpc"
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(
+		ctx, http.MethodPost, url, bytes.NewReader(body),
+	)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -196,7 +202,9 @@ func (c *SignalChannel) rpcCall(ctx context.Context, method string, params any) 
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("rpc call returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf(
+			"rpc call returned status %d", resp.StatusCode,
+		)
 	}
 
 	var rpcResp jsonRPCResponse
@@ -205,8 +213,23 @@ func (c *SignalChannel) rpcCall(ctx context.Context, method string, params any) 
 	}
 
 	if rpcResp.Error != nil {
-		return nil, fmt.Errorf("rpc error %d: %s", rpcResp.Error.Code, rpcResp.Error.Message)
+		return nil, fmt.Errorf(
+			"rpc error %d: %s",
+			rpcResp.Error.Code, rpcResp.Error.Message,
+		)
 	}
 
 	return rpcResp.Result, nil
+}
+
+func (c *Channel) isAllowed(senderID string) bool {
+	if len(c.allowList) == 0 {
+		return c.allowAll
+	}
+	for _, a := range c.allowList {
+		if a == senderID {
+			return true
+		}
+	}
+	return false
 }

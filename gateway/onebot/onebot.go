@@ -1,4 +1,9 @@
-//go:build wip
+// Adapted from ottie's OneBot channel implementation.
+// Copyright (c) 2026 Ottie contributors — MIT License
+//
+// Stripped ottie-specific dependencies (bus, identity, media, config).
+// Wired to gateway.MessageHandler instead of bus.PublishInbound.
+// OneBot v11 protocol over WebSocket.
 
 package onebot
 
@@ -14,17 +19,22 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	gateway "github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/config"
-	"github.com/altcode-ai/altcode/gateway/identity"
-	"github.com/altcode-ai/altcode/gateway/logger"
-	"github.com/altcode-ai/altcode/gateway/media"
-	"github.com/altcode-ai/altcode/gateway/utils"
+	"github.com/altcode-ai/altcode/gateway"
 )
 
-type OneBotChannel struct {
+// Config holds OneBot WebSocket configuration.
+type Config struct {
+	WSUrl              string
+	AccessToken        string
+	ReconnectInterval  int // seconds, 0 = no reconnect
+	AllowFrom          []string
+	AllowAll           bool
+}
+
+// Channel implements gateway.Channel for OneBot.
+type Channel struct {
 	*gateway.BaseChannel
-	config        config.OneBotConfig
+	config        Config
 	conn          *websocket.Conn
 	ctx           context.Context
 	cancel        context.CancelFunc
@@ -38,6 +48,8 @@ type OneBotChannel struct {
 	pending       map[string]chan json.RawMessage
 	pendingMu     sync.Mutex
 	lastMessageID sync.Map
+	allowList     []string
+	allowAll      bool
 }
 
 type oneBotRawEvent struct {
@@ -60,24 +72,9 @@ type oneBotRawEvent struct {
 	Data          json.RawMessage `json:"data"`
 }
 
-type BotStatus struct {
+type botStatus struct {
 	Online bool `json:"online"`
 	Good   bool `json:"good"`
-}
-
-func isAPIResponse(raw json.RawMessage) bool {
-	if len(raw) == 0 {
-		return false
-	}
-	var s string
-	if json.Unmarshal(raw, &s) == nil {
-		return s == "ok" || s == "failed"
-	}
-	var bs BotStatus
-	if json.Unmarshal(raw, &bs) == nil {
-		return bs.Online || bs.Good
-	}
-	return false
 }
 
 type oneBotSender struct {
@@ -97,70 +94,33 @@ type oneBotMessageSegment struct {
 	Data map[string]any `json:"data"`
 }
 
-func NewOneBotChannel(cfg config.OneBotConfig, messageBus *gateway.MessageBus) (*OneBotChannel, error) {
-	base := gateway.NewBaseChannel("onebot", cfg, messageBus, cfg.AllowFrom,
-		gateway.WithGroupTrigger(cfg.GroupTrigger),
-		gateway.WithReasoningChannelID(cfg.ReasoningChannelID),
-	)
-
+// New creates a OneBot channel.
+func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	const dedupSize = 1024
-	return &OneBotChannel{
-		BaseChannel: base,
+	return &Channel{
+		BaseChannel: gateway.NewBaseChannel("onebot", handler),
 		config:      cfg,
 		dedup:       make(map[string]struct{}, dedupSize),
 		dedupRing:   make([]string, dedupSize),
-		dedupIdx:    0,
 		pending:     make(map[string]chan json.RawMessage),
+		allowList:   cfg.AllowFrom,
+		allowAll:    cfg.AllowAll,
 	}, nil
 }
 
-func (c *OneBotChannel) setMsgEmojiLike(messageID string, emojiID int, set bool) {
-	go func() {
-		_, err := c.sendAPIRequest("set_msg_emoji_like", map[string]any{
-			"message_id": messageID,
-			"emoji_id":   emojiID,
-			"set":        set,
-		}, 5*time.Second)
-		if err != nil {
-			logger.DebugCF("onebot", "Failed to set emoji like", map[string]any{
-				"message_id": messageID,
-				"error":      err.Error(),
-			})
-		}
-	}()
-}
-
-// ReactToMessage implements gateway.ReactionCapable.
-// It adds an emoji reaction (ID 289) to group messages and returns an undo function.
-// Private messages return a no-op since reactions are only meaningful in groups.
-func (c *OneBotChannel) ReactToMessage(ctx context.Context, chatID, messageID string) (func(), error) {
-	// Only react in group chats
-	if !strings.HasPrefix(chatID, "group:") {
-		return func() {}, nil
-	}
-
-	c.setMsgEmojiLike(messageID, 289, true)
-
-	return func() {
-		c.setMsgEmojiLike(messageID, 289, false)
-	}, nil
-}
-
-func (c *OneBotChannel) Start(ctx context.Context) error {
+func (c *Channel) Start(ctx context.Context) error {
 	if c.config.WSUrl == "" {
 		return fmt.Errorf("OneBot ws_url not configured")
 	}
 
-	logger.InfoCF("onebot", "Starting OneBot channel", map[string]any{
-		"ws_url": c.config.WSUrl,
-	})
-
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	if err := c.connect(); err != nil {
-		logger.WarnCF("onebot", "Initial connection failed, will retry in background", map[string]any{
-			"error": err.Error(),
-		})
+		if c.config.ReconnectInterval <= 0 {
+			return fmt.Errorf(
+				"failed to connect and reconnect disabled",
+			)
+		}
 	} else {
 		go c.listen()
 		c.fetchSelfID()
@@ -168,27 +128,21 @@ func (c *OneBotChannel) Start(ctx context.Context) error {
 
 	if c.config.ReconnectInterval > 0 {
 		go c.reconnectLoop()
-	} else {
-		if c.conn == nil {
-			return fmt.Errorf("failed to connect to OneBot and reconnect is disabled")
-		}
 	}
 
 	c.SetRunning(true)
-	logger.InfoC("onebot", "OneBot channel started successfully")
-
 	return nil
 }
 
-func (c *OneBotChannel) connect() error {
-	// Copy the default dialer instead of mutating the shared package-level
-	// pointer — concurrent connect() calls would race on HandshakeTimeout.
+func (c *Channel) connect() error {
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
 
 	header := make(map[string][]string)
 	if c.config.AccessToken != "" {
-		header["Authorization"] = []string{"Bearer " + c.config.AccessToken}
+		header["Authorization"] = []string{
+			"Bearer " + c.config.AccessToken,
+		}
 	}
 
 	conn, resp, err := dialer.Dial(c.config.WSUrl, header)
@@ -200,7 +154,9 @@ func (c *OneBotChannel) connect() error {
 	}
 
 	conn.SetPongHandler(func(appData string) error {
-		_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+		_ = conn.SetReadDeadline(
+			time.Now().Add(60 * time.Second),
+		)
 		return nil
 	})
 	_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -210,12 +166,10 @@ func (c *OneBotChannel) connect() error {
 	c.mu.Unlock()
 
 	go c.pinger(conn)
-
-	logger.InfoC("onebot", "WebSocket connected")
 	return nil
 }
 
-func (c *OneBotChannel) pinger(conn *websocket.Conn) {
+func (c *Channel) pinger(conn *websocket.Conn) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
 
@@ -225,24 +179,22 @@ func (c *OneBotChannel) pinger(conn *websocket.Conn) {
 			return
 		case <-ticker.C:
 			c.writeMu.Lock()
-			err := conn.WriteMessage(websocket.PingMessage, nil)
+			err := conn.WriteMessage(
+				websocket.PingMessage, nil,
+			)
 			c.writeMu.Unlock()
 			if err != nil {
-				logger.DebugCF("onebot", "Ping write failed, stopping pinger", map[string]any{
-					"error": err.Error(),
-				})
 				return
 			}
 		}
 	}
 }
 
-func (c *OneBotChannel) fetchSelfID() {
-	resp, err := c.sendAPIRequest("get_login_info", nil, 5*time.Second)
+func (c *Channel) fetchSelfID() {
+	resp, err := c.sendAPIRequest(
+		"get_login_info", nil, 5*time.Second,
+	)
 	if err != nil {
-		logger.WarnCF("onebot", "Failed to get_login_info", map[string]any{
-			"error": err.Error(),
-		})
 		return
 	}
 
@@ -250,6 +202,7 @@ func (c *OneBotChannel) fetchSelfID() {
 		UserID   json.RawMessage `json:"user_id"`
 		Nickname string          `json:"nickname"`
 	}
+
 	for _, extract := range []func() (*loginInfo, error){
 		func() (*loginInfo, error) {
 			var w struct {
@@ -270,20 +223,14 @@ func (c *OneBotChannel) fetchSelfID() {
 		}
 		if uid, err := parseJSONInt64(info.UserID); err == nil && uid > 0 {
 			atomic.StoreInt64(&c.selfID, uid)
-			logger.InfoCF("onebot", "Bot self ID retrieved", map[string]any{
-				"self_id":  uid,
-				"nickname": info.Nickname,
-			})
 			return
 		}
 	}
-
-	logger.WarnCF("onebot", "Could not parse self ID from get_login_info response", map[string]any{
-		"response": string(resp),
-	})
 }
 
-func (c *OneBotChannel) sendAPIRequest(action string, params any, timeout time.Duration) (json.RawMessage, error) {
+func (c *Channel) sendAPIRequest(
+	action string, params any, timeout time.Duration,
+) (json.RawMessage, error) {
 	c.mu.Lock()
 	conn := c.conn
 	c.mu.Unlock()
@@ -292,7 +239,11 @@ func (c *OneBotChannel) sendAPIRequest(action string, params any, timeout time.D
 		return nil, fmt.Errorf("WebSocket not connected")
 	}
 
-	echo := fmt.Sprintf("api_%d_%d", time.Now().UnixNano(), atomic.AddInt64(&c.echoCounter, 1))
+	echo := fmt.Sprintf(
+		"api_%d_%d",
+		time.Now().UnixNano(),
+		atomic.AddInt64(&c.echoCounter, 1),
+	)
 
 	ch := make(chan json.RawMessage, 1)
 	c.pendingMu.Lock()
@@ -306,14 +257,14 @@ func (c *OneBotChannel) sendAPIRequest(action string, params any, timeout time.D
 	}()
 
 	req := oneBotAPIRequest{
-		Action: action,
-		Params: params,
-		Echo:   echo,
+		Action: action, Params: params, Echo: echo,
 	}
 
 	data, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("failed to marshal API request: %w", err)
+		return nil, fmt.Errorf(
+			"failed to marshal API request: %w", err,
+		)
 	}
 
 	c.writeMu.Lock()
@@ -323,24 +274,33 @@ func (c *OneBotChannel) sendAPIRequest(action string, params any, timeout time.D
 	c.writeMu.Unlock()
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to write API request: %w", err)
+		return nil, fmt.Errorf(
+			"failed to write API request: %w", err,
+		)
 	}
 
 	select {
 	case resp := <-ch:
 		if resp == nil {
-			return nil, fmt.Errorf("API request %s: channel stopped", action)
+			return nil, fmt.Errorf(
+				"API request %s: channel stopped", action,
+			)
 		}
 		return resp, nil
 	case <-time.After(timeout):
-		return nil, fmt.Errorf("API request %s timed out after %v", action, timeout)
+		return nil, fmt.Errorf(
+			"API request %s timed out", action,
+		)
 	case <-c.ctx.Done():
 		return nil, fmt.Errorf("context canceled")
 	}
 }
 
-func (c *OneBotChannel) reconnectLoop() {
-	interval := max(time.Duration(c.config.ReconnectInterval)*time.Second, 5*time.Second)
+func (c *Channel) reconnectLoop() {
+	interval := max(
+		time.Duration(c.config.ReconnectInterval)*time.Second,
+		5*time.Second,
+	)
 
 	for {
 		select {
@@ -352,12 +312,7 @@ func (c *OneBotChannel) reconnectLoop() {
 			c.mu.Unlock()
 
 			if conn == nil {
-				logger.InfoC("onebot", "Attempting to reconnect...")
-				if err := c.connect(); err != nil {
-					logger.ErrorCF("onebot", "Reconnect failed", map[string]any{
-						"error": err.Error(),
-					})
-				} else {
+				if err := c.connect(); err == nil {
 					go c.listen()
 					c.fetchSelfID()
 				}
@@ -366,10 +321,8 @@ func (c *OneBotChannel) reconnectLoop() {
 	}
 }
 
-func (c *OneBotChannel) Stop(ctx context.Context) error {
-	logger.InfoC("onebot", "Stopping OneBot channel")
+func (c *Channel) Stop(ctx context.Context) error {
 	c.SetRunning(false)
-
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -377,7 +330,7 @@ func (c *OneBotChannel) Stop(ctx context.Context) error {
 	c.pendingMu.Lock()
 	for echo, ch := range c.pending {
 		select {
-		case ch <- nil: // non-blocking wake for blocked sendAPIRequest goroutines
+		case ch <- nil:
 		default:
 		}
 		delete(c.pending, echo)
@@ -394,12 +347,13 @@ func (c *OneBotChannel) Stop(ctx context.Context) error {
 	return nil
 }
 
-func (c *OneBotChannel) Send(ctx context.Context, msg gateway.OutboundMessage) error {
+func (c *Channel) Send(
+	ctx context.Context, msg gateway.OutboundMessage,
+) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
 
-	// Check ctx before entering write path
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -419,17 +373,19 @@ func (c *OneBotChannel) Send(ctx context.Context, msg gateway.OutboundMessage) e
 		return err
 	}
 
-	echo := fmt.Sprintf("send_%d", atomic.AddInt64(&c.echoCounter, 1))
+	echo := fmt.Sprintf(
+		"send_%d", atomic.AddInt64(&c.echoCounter, 1),
+	)
 
 	req := oneBotAPIRequest{
-		Action: action,
-		Params: params,
-		Echo:   echo,
+		Action: action, Params: params, Echo: echo,
 	}
 
 	data, err := json.Marshal(req)
 	if err != nil {
-		return fmt.Errorf("failed to marshal OneBot request: %w", err)
+		return fmt.Errorf(
+			"failed to marshal OneBot request: %w", err,
+		)
 	}
 
 	c.writeMu.Lock()
@@ -439,127 +395,16 @@ func (c *OneBotChannel) Send(ctx context.Context, msg gateway.OutboundMessage) e
 	c.writeMu.Unlock()
 
 	if err != nil {
-		logger.ErrorCF("onebot", "Failed to send message", map[string]any{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("onebot send: %w", gateway.ErrTemporary)
+		return fmt.Errorf(
+			"onebot send: %w", gateway.ErrTemporary,
+		)
 	}
-
 	return nil
 }
 
-// SendMedia implements the gateway.MediaSender interface.
-func (c *OneBotChannel) SendMedia(ctx context.Context, msg gateway.OutboundMediaMessage) error {
-	if !c.IsRunning() {
-		return gateway.ErrNotRunning
-	}
-
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
-	}
-
-	c.mu.Lock()
-	conn := c.conn
-	c.mu.Unlock()
-
-	if conn == nil {
-		return fmt.Errorf("OneBot WebSocket not connected")
-	}
-
-	store := c.GetMediaStore()
-	if store == nil {
-		return fmt.Errorf("no media store available: %w", gateway.ErrSendFailed)
-	}
-
-	// Build media segments
-	var segments []oneBotMessageSegment
-	for _, part := range msg.Parts {
-		localPath, err := store.Resolve(part.Ref)
-		if err != nil {
-			logger.ErrorCF("onebot", "Failed to resolve media ref", map[string]any{
-				"ref":   part.Ref,
-				"error": err.Error(),
-			})
-			continue
-		}
-
-		var segType string
-		switch part.Type {
-		case "image":
-			segType = "image"
-		case "video":
-			segType = "video"
-		case "audio":
-			segType = "record"
-		default:
-			segType = "file"
-		}
-
-		segments = append(segments, oneBotMessageSegment{
-			Type: segType,
-			Data: map[string]any{"file": "file://" + localPath},
-		})
-
-		if part.Caption != "" {
-			segments = append(segments, oneBotMessageSegment{
-				Type: "text",
-				Data: map[string]any{"text": part.Caption},
-			})
-		}
-	}
-
-	if len(segments) == 0 {
-		return nil
-	}
-
-	chatID := msg.ChatID
-	var action, idKey string
-	var rawID string
-	if rest, ok := strings.CutPrefix(chatID, "group:"); ok {
-		action, idKey, rawID = "send_group_msg", "group_id", rest
-	} else if rest, ok := strings.CutPrefix(chatID, "private:"); ok {
-		action, idKey, rawID = "send_private_msg", "user_id", rest
-	} else {
-		action, idKey, rawID = "send_private_msg", "user_id", chatID
-	}
-
-	id, err := strconv.ParseInt(rawID, 10, 64)
-	if err != nil {
-		return fmt.Errorf("invalid %s in chatID: %s: %w", idKey, chatID, gateway.ErrSendFailed)
-	}
-
-	echo := fmt.Sprintf("send_%d", atomic.AddInt64(&c.echoCounter, 1))
-
-	req := oneBotAPIRequest{
-		Action: action,
-		Params: map[string]any{idKey: id, "message": segments},
-		Echo:   echo,
-	}
-
-	data, err := json.Marshal(req)
-	if err != nil {
-		return fmt.Errorf("failed to marshal OneBot request: %w", err)
-	}
-
-	c.writeMu.Lock()
-	_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	err = conn.WriteMessage(websocket.TextMessage, data)
-	_ = conn.SetWriteDeadline(time.Time{})
-	c.writeMu.Unlock()
-
-	if err != nil {
-		logger.ErrorCF("onebot", "Failed to send media message", map[string]any{
-			"error": err.Error(),
-		})
-		return fmt.Errorf("onebot send media: %w", gateway.ErrTemporary)
-	}
-
-	return nil
-}
-
-func (c *OneBotChannel) buildMessageSegments(chatID, content string) []oneBotMessageSegment {
+func (c *Channel) buildMessageSegments(
+	chatID, content string,
+) []oneBotMessageSegment {
 	var segments []oneBotMessageSegment
 
 	if lastMsgID, ok := c.lastMessageID.Load(chatID); ok {
@@ -575,16 +420,16 @@ func (c *OneBotChannel) buildMessageSegments(chatID, content string) []oneBotMes
 		Type: "text",
 		Data: map[string]any{"text": content},
 	})
-
 	return segments
 }
 
-func (c *OneBotChannel) buildSendRequest(msg gateway.OutboundMessage) (string, any, error) {
+func (c *Channel) buildSendRequest(
+	msg gateway.OutboundMessage,
+) (string, any, error) {
 	chatID := msg.ChatID
-	segments := c.buildMessageSegments(chatID, msg.Content)
+	segments := c.buildMessageSegments(chatID, msg.Text)
 
-	var action, idKey string
-	var rawID string
+	var action, idKey, rawID string
 	if rest, ok := strings.CutPrefix(chatID, "group:"); ok {
 		action, idKey, rawID = "send_group_msg", "group_id", rest
 	} else if rest, ok := strings.CutPrefix(chatID, "private:"); ok {
@@ -595,18 +440,21 @@ func (c *OneBotChannel) buildSendRequest(msg gateway.OutboundMessage) (string, a
 
 	id, err := strconv.ParseInt(rawID, 10, 64)
 	if err != nil {
-		return "", nil, fmt.Errorf("invalid %s in chatID: %s", idKey, chatID)
+		return "", nil, fmt.Errorf(
+			"invalid %s in chatID: %s", idKey, chatID,
+		)
 	}
-	return action, map[string]any{idKey: id, "message": segments}, nil
+	return action, map[string]any{
+		idKey: id, "message": segments,
+	}, nil
 }
 
-func (c *OneBotChannel) listen() {
+func (c *Channel) listen() {
 	c.mu.Lock()
 	conn := c.conn
 	c.mu.Unlock()
 
 	if conn == nil {
-		logger.WarnC("onebot", "WebSocket connection is nil, listener exiting")
 		return
 	}
 
@@ -617,9 +465,6 @@ func (c *OneBotChannel) listen() {
 		default:
 			_, message, err := conn.ReadMessage()
 			if err != nil {
-				logger.ErrorCF("onebot", "WebSocket read error", map[string]any{
-					"error": err.Error(),
-				})
 				c.mu.Lock()
 				if c.conn == conn {
 					c.conn.Close()
@@ -629,46 +474,29 @@ func (c *OneBotChannel) listen() {
 				return
 			}
 
-			_ = conn.SetReadDeadline(time.Now().Add(60 * time.Second))
+			_ = conn.SetReadDeadline(
+				time.Now().Add(60 * time.Second),
+			)
 
 			var raw oneBotRawEvent
 			if err := json.Unmarshal(message, &raw); err != nil {
-				logger.WarnCF("onebot", "Failed to unmarshal raw event", map[string]any{
-					"error":   err.Error(),
-					"payload": string(message),
-				})
 				continue
 			}
-
-			logger.DebugCF("onebot", "WebSocket event", map[string]any{
-				"length":    len(message),
-				"post_type": raw.PostType,
-				"sub_type":  raw.SubType,
-			})
 
 			if raw.Echo != "" {
 				c.pendingMu.Lock()
 				ch, ok := c.pending[raw.Echo]
 				c.pendingMu.Unlock()
-
 				if ok {
 					select {
 					case ch <- message:
 					default:
 					}
-				} else {
-					logger.DebugCF("onebot", "Received API response (no waiter)", map[string]any{
-						"echo":   raw.Echo,
-						"status": string(raw.Status),
-					})
 				}
 				continue
 			}
 
 			if isAPIResponse(raw.Status) {
-				logger.DebugCF("onebot", "Received API response without echo, skipping", map[string]any{
-					"status": string(raw.Status),
-				})
 				continue
 			}
 
@@ -677,50 +505,125 @@ func (c *OneBotChannel) listen() {
 	}
 }
 
-func parseJSONInt64(raw json.RawMessage) (int64, error) {
+func isAPIResponse(raw json.RawMessage) bool {
 	if len(raw) == 0 {
-		return 0, nil
-	}
-
-	var n int64
-	if err := json.Unmarshal(raw, &n); err == nil {
-		return n, nil
-	}
-
-	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return strconv.ParseInt(s, 10, 64)
-	}
-	return 0, fmt.Errorf("cannot parse as int64: %s", string(raw))
-}
-
-func parseJSONString(raw json.RawMessage) string {
-	if len(raw) == 0 {
-		return ""
+		return false
 	}
 	var s string
-	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+	if json.Unmarshal(raw, &s) == nil {
+		return s == "ok" || s == "failed"
+	}
+	var bs botStatus
+	if json.Unmarshal(raw, &bs) == nil {
+		return bs.Online || bs.Good
+	}
+	return false
+}
+
+func (c *Channel) handleRawEvent(raw *oneBotRawEvent) {
+	switch raw.PostType {
+	case "message":
+		if userID, err := parseJSONInt64(raw.UserID); err == nil && userID > 0 {
+			senderID := strconv.FormatInt(userID, 10)
+			if !c.isAllowed(senderID) {
+				return
+			}
+		}
+		c.handleMessage(raw)
+	}
+}
+
+func (c *Channel) handleMessage(raw *oneBotRawEvent) {
+	userID, err := parseJSONInt64(raw.UserID)
+	if err != nil {
+		return
 	}
 
-	return string(raw)
+	groupID, _ := parseJSONInt64(raw.GroupID)
+	selfID, _ := parseJSONInt64(raw.SelfID)
+	messageID := parseJSONString(raw.MessageID)
+
+	if selfID == 0 {
+		selfID = atomic.LoadInt64(&c.selfID)
+	}
+
+	parsed := c.parseMessageSegments(raw.Message, selfID)
+	isBotMentioned := parsed.isBotMentioned
+
+	content := raw.RawMessage
+	if content == "" {
+		content = parsed.text
+	} else if selfID > 0 {
+		cqAt := fmt.Sprintf("[CQ:at,qq=%d]", selfID)
+		if strings.Contains(content, cqAt) {
+			isBotMentioned = true
+			content = strings.ReplaceAll(content, cqAt, "")
+			content = strings.TrimSpace(content)
+		}
+	}
+
+	if parsed.text != "" && content != parsed.text {
+		content = parsed.text
+	}
+
+	var sender oneBotSender
+	if len(raw.Sender) > 0 {
+		_ = json.Unmarshal(raw.Sender, &sender)
+	}
+
+	if c.isDuplicate(messageID) {
+		return
+	}
+
+	if content == "" {
+		return
+	}
+
+	senderID := strconv.FormatInt(userID, 10)
+	var chatID string
+
+	switch raw.MessageType {
+	case "private":
+		chatID = "private:" + senderID
+	case "group":
+		groupIDStr := strconv.FormatInt(groupID, 10)
+		chatID = "group:" + groupIDStr
+		// In groups, only respond when mentioned
+		if !isBotMentioned {
+			return
+		}
+	default:
+		return
+	}
+
+	c.lastMessageID.Store(chatID, messageID)
+
+	senderName := sender.Nickname
+	if sender.Card != "" {
+		senderName = sender.Card
+	}
+
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "onebot",
+		ChatID:      chatID,
+		SenderID:    senderID,
+		SenderName:  senderName,
+		Text:        content,
+		Timestamp:   time.Now(),
+		MessageID:   messageID,
+	})
 }
 
-type parseMessageResult struct {
-	Text           string
-	IsBotMentioned bool
-	Media          []string
-	ReplyTo        string
+type parseResult struct {
+	text           string
+	isBotMentioned bool
 }
 
-func (c *OneBotChannel) parseMessageSegments(
-	raw json.RawMessage,
-	selfID int64,
-	store media.MediaStore,
-	scope string,
-) parseMessageResult {
+func (c *Channel) parseMessageSegments(
+	raw json.RawMessage, selfID int64,
+) parseResult {
 	if len(raw) == 0 {
-		return parseMessageResult{}
+		return parseResult{}
 	}
 
 	var s string
@@ -734,33 +637,17 @@ func (c *OneBotChannel) parseMessageSegments(
 				s = strings.TrimSpace(s)
 			}
 		}
-		return parseMessageResult{Text: s, IsBotMentioned: mentioned}
+		return parseResult{text: s, isBotMentioned: mentioned}
 	}
 
 	var segments []map[string]any
 	if err := json.Unmarshal(raw, &segments); err != nil {
-		return parseMessageResult{}
+		return parseResult{}
 	}
 
 	var textParts []string
 	mentioned := false
 	selfIDStr := strconv.FormatInt(selfID, 10)
-	var mediaRefs []string
-	var replyTo string
-
-	// Helper to register a local file with the media store
-	storeFile := func(localPath, filename string) string {
-		if store != nil {
-			ref, err := store.Store(localPath, media.MediaMeta{
-				Filename: filename,
-				Source:   "onebot",
-			}, scope)
-			if err == nil {
-				return ref
-			}
-		}
-		return localPath // fallback
-	}
 
 	for _, seg := range segments {
 		segType, _ := seg["type"].(string)
@@ -773,7 +660,6 @@ func (c *OneBotChannel) parseMessageSegments(
 					textParts = append(textParts, t)
 				}
 			}
-
 		case "at":
 			if data != nil && selfID > 0 {
 				qqVal := fmt.Sprintf("%v", data["qq"])
@@ -781,303 +667,35 @@ func (c *OneBotChannel) parseMessageSegments(
 					mentioned = true
 				}
 			}
-
 		case "image", "video", "file":
 			if data != nil {
-				url, _ := data["url"].(string)
-				if url != "" {
-					defaults := map[string]string{"image": "image.jpg", "video": "video.mp4", "file": "file"}
-					filename := defaults[segType]
-					if f, ok := data["file"].(string); ok && f != "" {
-						filename = f
-					} else if n, ok := data["name"].(string); ok && n != "" {
-						filename = n
-					}
-					localPath := utils.DownloadFile(url, filename, utils.DownloadOptions{
-						LoggerPrefix: "onebot",
-					})
-					if localPath != "" {
-						mediaRefs = append(mediaRefs, storeFile(localPath, filename))
-						textParts = append(textParts, fmt.Sprintf("[%s]", segType))
-					}
-				}
+				textParts = append(
+					textParts,
+					fmt.Sprintf("[%s]", segType),
+				)
 			}
-
 		case "record":
-			if data != nil {
-				url, _ := data["url"].(string)
-				if url != "" {
-					localPath := utils.DownloadFile(url, "voice.amr", utils.DownloadOptions{
-						LoggerPrefix: "onebot",
-					})
-					if localPath != "" {
-						textParts = append(textParts, "[voice]")
-						mediaRefs = append(mediaRefs, storeFile(localPath, "voice.amr"))
-					}
-				}
-			}
-
-		case "reply":
-			if data != nil {
-				if id, ok := data["id"]; ok {
-					replyTo = fmt.Sprintf("%v", id)
-				}
-			}
-
+			textParts = append(textParts, "[voice]")
 		case "face":
 			if data != nil {
 				faceID, _ := data["id"]
-				textParts = append(textParts, fmt.Sprintf("[face:%v]", faceID))
+				textParts = append(
+					textParts,
+					fmt.Sprintf("[face:%v]", faceID),
+				)
 			}
-
 		case "forward":
 			textParts = append(textParts, "[forward message]")
-
-		default:
 		}
 	}
 
-	return parseMessageResult{
-		Text:           strings.TrimSpace(strings.Join(textParts, "")),
-		IsBotMentioned: mentioned,
-		Media:          mediaRefs,
-		ReplyTo:        replyTo,
+	return parseResult{
+		text:           strings.TrimSpace(strings.Join(textParts, "")),
+		isBotMentioned: mentioned,
 	}
 }
 
-func (c *OneBotChannel) handleRawEvent(raw *oneBotRawEvent) {
-	switch raw.PostType {
-	case "message":
-		if userID, err := parseJSONInt64(raw.UserID); err == nil && userID > 0 {
-			// Build minimal sender for allowlist check
-			sender := gateway.SenderInfo{
-				Platform:    "onebot",
-				PlatformID:  strconv.FormatInt(userID, 10),
-				CanonicalID: identity.BuildCanonicalID("onebot", strconv.FormatInt(userID, 10)),
-			}
-			if !c.IsAllowedSender(sender) {
-				logger.DebugCF("onebot", "Message rejected by allowlist", map[string]any{
-					"user_id": userID,
-				})
-				return
-			}
-		}
-		c.handleMessage(raw)
-
-	case "message_sent":
-		logger.DebugCF("onebot", "Bot sent message event", map[string]any{
-			"message_type": raw.MessageType,
-			"message_id":   parseJSONString(raw.MessageID),
-		})
-
-	case "meta_event":
-		c.handleMetaEvent(raw)
-
-	case "notice":
-		c.handleNoticeEvent(raw)
-
-	case "request":
-		logger.DebugCF("onebot", "Request event received", map[string]any{
-			"sub_type": raw.SubType,
-		})
-
-	case "":
-		logger.DebugCF("onebot", "Event with empty post_type (possibly API response)", map[string]any{
-			"echo":   raw.Echo,
-			"status": raw.Status,
-		})
-
-	default:
-		logger.DebugCF("onebot", "Unknown post_type", map[string]any{
-			"post_type": raw.PostType,
-		})
-	}
-}
-
-func (c *OneBotChannel) handleMetaEvent(raw *oneBotRawEvent) {
-	if raw.MetaEventType == "lifecycle" {
-		logger.InfoCF("onebot", "Lifecycle event", map[string]any{"sub_type": raw.SubType})
-	} else if raw.MetaEventType != "heartbeat" {
-		logger.DebugCF("onebot", "Meta event: "+raw.MetaEventType, nil)
-	}
-}
-
-func (c *OneBotChannel) handleNoticeEvent(raw *oneBotRawEvent) {
-	fields := map[string]any{
-		"notice_type": raw.NoticeType,
-		"sub_type":    raw.SubType,
-		"group_id":    parseJSONString(raw.GroupID),
-		"user_id":     parseJSONString(raw.UserID),
-		"message_id":  parseJSONString(raw.MessageID),
-	}
-	switch raw.NoticeType {
-	case "group_recall", "group_increase", "group_decrease",
-		"friend_add", "group_admin", "group_ban":
-		logger.InfoCF("onebot", "Notice: "+raw.NoticeType, fields)
-	default:
-		logger.DebugCF("onebot", "Notice: "+raw.NoticeType, fields)
-	}
-}
-
-func (c *OneBotChannel) handleMessage(raw *oneBotRawEvent) {
-	// Parse fields from raw event
-	userID, err := parseJSONInt64(raw.UserID)
-	if err != nil {
-		logger.WarnCF("onebot", "Failed to parse user_id", map[string]any{
-			"error": err.Error(),
-			"raw":   string(raw.UserID),
-		})
-		return
-	}
-
-	groupID, _ := parseJSONInt64(raw.GroupID)
-	selfID, _ := parseJSONInt64(raw.SelfID)
-	messageID := parseJSONString(raw.MessageID)
-
-	if selfID == 0 {
-		selfID = atomic.LoadInt64(&c.selfID)
-	}
-
-	// Compute scope for media store before parsing (parsing may download files)
-	var chatIDForScope string
-	switch raw.MessageType {
-	case "group":
-		chatIDForScope = "group:" + strconv.FormatInt(groupID, 10)
-	default:
-		chatIDForScope = "private:" + strconv.FormatInt(userID, 10)
-	}
-	scope := gateway.BuildMediaScope("onebot", chatIDForScope, messageID)
-
-	parsed := c.parseMessageSegments(raw.Message, selfID, c.GetMediaStore(), scope)
-	isBotMentioned := parsed.IsBotMentioned
-
-	content := raw.RawMessage
-	if content == "" {
-		content = parsed.Text
-	} else if selfID > 0 {
-		cqAt := fmt.Sprintf("[CQ:at,qq=%d]", selfID)
-		if strings.Contains(content, cqAt) {
-			isBotMentioned = true
-			content = strings.ReplaceAll(content, cqAt, "")
-			content = strings.TrimSpace(content)
-		}
-	}
-
-	if parsed.Text != "" && content != parsed.Text && (len(parsed.Media) > 0 || parsed.ReplyTo != "") {
-		content = parsed.Text
-	}
-
-	var sender oneBotSender
-	if len(raw.Sender) > 0 {
-		if err := json.Unmarshal(raw.Sender, &sender); err != nil {
-			logger.WarnCF("onebot", "Failed to parse sender", map[string]any{
-				"error":  err.Error(),
-				"sender": string(raw.Sender),
-			})
-		}
-	}
-
-	if c.isDuplicate(messageID) {
-		logger.DebugCF("onebot", "Duplicate message, skipping", map[string]any{
-			"message_id": messageID,
-		})
-		return
-	}
-
-	if content == "" {
-		logger.DebugCF("onebot", "Received empty message, ignoring", map[string]any{
-			"message_id": messageID,
-		})
-		return
-	}
-
-	senderID := strconv.FormatInt(userID, 10)
-	var chatID string
-
-	var peer gateway.Peer
-
-	metadata := map[string]string{}
-
-	if parsed.ReplyTo != "" {
-		metadata["reply_to_message_id"] = parsed.ReplyTo
-	}
-
-	switch raw.MessageType {
-	case "private":
-		chatID = "private:" + senderID
-		peer = gateway.Peer{Kind: "direct", ID: senderID}
-
-	case "group":
-		groupIDStr := strconv.FormatInt(groupID, 10)
-		chatID = "group:" + groupIDStr
-		peer = gateway.Peer{Kind: "group", ID: groupIDStr}
-		metadata["group_id"] = groupIDStr
-
-		senderUserID, _ := parseJSONInt64(sender.UserID)
-		if senderUserID > 0 {
-			metadata["sender_user_id"] = strconv.FormatInt(senderUserID, 10)
-		}
-
-		if sender.Card != "" {
-			metadata["sender_name"] = sender.Card
-		} else if sender.Nickname != "" {
-			metadata["sender_name"] = sender.Nickname
-		}
-
-		respond, strippedContent := c.ShouldRespondInGroup(isBotMentioned, content)
-		if !respond {
-			logger.DebugCF("onebot", "Group message ignored (no trigger)", map[string]any{
-				"sender":       senderID,
-				"group":        groupIDStr,
-				"is_mentioned": isBotMentioned,
-				"content":      truncate(content, 100),
-			})
-			return
-		}
-		content = strippedContent
-
-	default:
-		logger.WarnCF("onebot", "Unknown message type, cannot route", map[string]any{
-			"type":       raw.MessageType,
-			"message_id": messageID,
-			"user_id":    userID,
-		})
-		return
-	}
-
-	logger.InfoCF("onebot", "Received "+raw.MessageType+" message", map[string]any{
-		"sender":      senderID,
-		"chat_id":     chatID,
-		"message_id":  messageID,
-		"length":      len(content),
-		"content":     truncate(content, 100),
-		"media_count": len(parsed.Media),
-	})
-
-	if sender.Nickname != "" {
-		metadata["nickname"] = sender.Nickname
-	}
-
-	c.lastMessageID.Store(chatID, messageID)
-
-	senderInfo := gateway.SenderInfo{
-		Platform:    "onebot",
-		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("onebot", senderID),
-		DisplayName: sender.Nickname,
-	}
-
-	if !c.IsAllowedSender(senderInfo) {
-		logger.DebugCF("onebot", "Message rejected by allowlist (senderInfo)", map[string]any{
-			"sender": senderID,
-		})
-		return
-	}
-
-	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, parsed.Media, metadata, senderInfo)
-}
-
-func (c *OneBotChannel) isDuplicate(messageID string) bool {
+func (c *Channel) isDuplicate(messageID string) bool {
 	if messageID == "" || messageID == "0" {
 		return false
 	}
@@ -1099,10 +717,42 @@ func (c *OneBotChannel) isDuplicate(messageID string) bool {
 	return false
 }
 
-func truncate(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
+func (c *Channel) isAllowed(senderID string) bool {
+	if len(c.allowList) == 0 {
+		return c.allowAll
+	}
+	for _, a := range c.allowList {
+		if a == senderID {
+			return true
+		}
+	}
+	return false
+}
+
+func parseJSONInt64(raw json.RawMessage) (int64, error) {
+	if len(raw) == 0 {
+		return 0, nil
+	}
+	var n int64
+	if err := json.Unmarshal(raw, &n); err == nil {
+		return n, nil
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return strconv.ParseInt(s, 10, 64)
+	}
+	return 0, fmt.Errorf(
+		"cannot parse as int64: %s", string(raw),
+	)
+}
+
+func parseJSONString(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
 		return s
 	}
-	return string(runes[:n]) + "..."
+	return string(raw)
 }

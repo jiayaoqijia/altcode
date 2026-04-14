@@ -1,5 +1,3 @@
-//go:build wip
-
 package signal
 
 import (
@@ -11,8 +9,6 @@ import (
 	"time"
 
 	"github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/identity"
-	"github.com/altcode-ai/altcode/gateway/logger"
 )
 
 // SSE envelope types from signal-cli
@@ -62,9 +58,7 @@ type mention struct {
 	UUID   string `json:"uuid"`
 }
 
-// sseLoop connects to the signal-cli SSE endpoint and processes incoming messages.
-// It automatically reconnects with exponential backoff on failures.
-func (c *SignalChannel) sseLoop() {
+func (c *Channel) sseLoop() {
 	backoff := time.Second
 	maxBackoff := 30 * time.Second
 
@@ -80,10 +74,6 @@ func (c *SignalChannel) sseLoop() {
 			if c.ctx.Err() != nil {
 				return
 			}
-			logger.ErrorCF("signal", "SSE connection error", map[string]any{
-				"error":   err.Error(),
-				"backoff": backoff.String(),
-			})
 
 			select {
 			case <-c.ctx.Done():
@@ -98,23 +88,21 @@ func (c *SignalChannel) sseLoop() {
 			continue
 		}
 
-		// Reset backoff on successful connection
 		backoff = time.Second
 	}
 }
 
-// connectSSE establishes a single SSE connection and reads events until the
-// connection drops or the context is canceled.
-func (c *SignalChannel) connectSSE() error {
+func (c *Channel) connectSSE() error {
 	url := c.baseURL + "/api/v1/events"
 
-	req, err := http.NewRequestWithContext(c.ctx, http.MethodGet, url, nil)
+	req, err := http.NewRequestWithContext(
+		c.ctx, http.MethodGet, url, nil,
+	)
 	if err != nil {
 		return fmt.Errorf("create SSE request: %w", err)
 	}
 	req.Header.Set("Accept", "text/event-stream")
 
-	// Use a separate client with no timeout for the long-lived SSE connection
 	sseClient := &http.Client{Timeout: 0}
 	resp, err := sseClient.Do(req)
 	if err != nil {
@@ -123,10 +111,10 @@ func (c *SignalChannel) connectSSE() error {
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("SSE returned status %d", resp.StatusCode)
+		return fmt.Errorf(
+			"SSE returned status %d", resp.StatusCode,
+		)
 	}
-
-	logger.InfoC("signal", "SSE connection established")
 
 	scanner := bufio.NewScanner(resp.Body)
 	var dataLines []string
@@ -141,11 +129,9 @@ func (c *SignalChannel) connectSSE() error {
 			continue
 		}
 
-		// Empty line signals end of an event
 		if line == "" && len(dataLines) > 0 {
 			fullData := strings.Join(dataLines, "")
 			dataLines = nil
-
 			c.handleEnvelope(fullData)
 		}
 	}
@@ -157,37 +143,34 @@ func (c *SignalChannel) connectSSE() error {
 	return fmt.Errorf("SSE connection closed")
 }
 
-// handleEnvelope processes a single Signal envelope from the SSE stream.
-func (c *SignalChannel) handleEnvelope(data string) {
+func (c *Channel) handleEnvelope(data string) {
 	var env sseEnvelope
 	if err := json.Unmarshal([]byte(data), &env); err != nil {
-		logger.ErrorCF("signal", "Failed to parse envelope", map[string]any{
-			"error": err.Error(),
-		})
 		return
 	}
 
-	// Try dataMessage first (messages from others), then syncMessage (messages
-	// from the primary device seen by this linked device).
 	if env.Envelope.DataMessage != nil {
 		c.handleDataMessage(&env, env.Envelope.DataMessage)
 		return
 	}
 
-	if env.Envelope.SyncMessage != nil && env.Envelope.SyncMessage.SentMessage != nil {
-		c.handleSyncSentMessage(&env, env.Envelope.SyncMessage.SentMessage)
-		return
+	if env.Envelope.SyncMessage != nil &&
+		env.Envelope.SyncMessage.SentMessage != nil {
+		c.handleSyncSentMessage(
+			&env, env.Envelope.SyncMessage.SentMessage,
+		)
 	}
 }
 
-// handleDataMessage processes a direct dataMessage (from another user).
-func (c *SignalChannel) handleDataMessage(env *sseEnvelope, dm *dataMessage) {
+func (c *Channel) handleDataMessage(
+	env *sseEnvelope, dm *dataMessage,
+) {
 	if dm.Message == "" {
 		return
 	}
 
-	// Loop prevention: skip messages from our own account
-	if c.config.AccountUUID != "" && env.Envelope.SourceUUID == c.config.AccountUUID {
+	if c.config.AccountUUID != "" &&
+		env.Envelope.SourceUUID == c.config.AccountUUID {
 		return
 	}
 
@@ -196,67 +179,43 @@ func (c *SignalChannel) handleDataMessage(env *sseEnvelope, dm *dataMessage) {
 		senderID = env.Envelope.SourceUUID
 	}
 
-	sender := gateway.SenderInfo{
-		Platform:    "signal",
-		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("signal", senderID),
-		DisplayName: env.Envelope.SourceName,
-	}
-
-	if !c.IsAllowedSender(sender) {
+	if !c.isAllowed(senderID) {
 		return
 	}
 
 	var chatID string
-	var peer gateway.Peer
 	content := dm.Message
 
 	if dm.GroupInfo != nil && dm.GroupInfo.GroupID != "" {
 		chatID = "group:" + dm.GroupInfo.GroupID
-		peer = gateway.Peer{Kind: "group", ID: dm.GroupInfo.GroupID}
-
-		isMentioned := c.isBotMentioned(dm.Mentions)
-		shouldRespond, stripped := c.ShouldRespondInGroup(isMentioned, content)
-		if !shouldRespond {
+		// In groups, only respond if bot is mentioned
+		if !c.isBotMentioned(dm.Mentions) {
 			return
 		}
-		content = stripped
 	} else {
 		chatID = senderID
-		peer = gateway.Peer{Kind: "direct", ID: senderID}
 	}
 
 	messageID := fmt.Sprintf("%d", env.Envelope.Timestamp)
 
-	logger.InfoCF("signal", "Received message", map[string]any{
-		"sender":    senderID,
-		"chat_id":   chatID,
-		"peer_kind": peer.Kind,
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "signal",
+		ChatID:      chatID,
+		SenderID:    senderID,
+		SenderName:  env.Envelope.SourceName,
+		Text:        content,
+		Timestamp:   time.Now(),
+		MessageID:   messageID,
 	})
-
-	c.HandleMessage(c.ctx,
-		peer,
-		messageID,
-		senderID,
-		chatID,
-		content,
-		nil,
-		nil,
-		sender,
-	)
 }
 
-// handleSyncSentMessage processes a sync message — a message sent from the
-// primary device that the linked device observes. This allows the bot to
-// respond to messages sent from the user's own phone in groups.
-func (c *SignalChannel) handleSyncSentMessage(env *sseEnvelope, sm *sentMessage) {
+func (c *Channel) handleSyncSentMessage(
+	env *sseEnvelope, sm *sentMessage,
+) {
 	if sm.Message == "" {
 		return
 	}
 
-	// For sync messages, the source is the account itself (our own messages).
-	// We only process group sync messages — responding to your own DMs
-	// would create a loop.
 	if sm.GroupInfo == nil || sm.GroupInfo.GroupID == "" {
 		return
 	}
@@ -266,46 +225,27 @@ func (c *SignalChannel) handleSyncSentMessage(env *sseEnvelope, sm *sentMessage)
 		senderID = env.Envelope.SourceUUID
 	}
 
-	sender := gateway.SenderInfo{
-		Platform:    "signal",
-		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("signal", senderID),
-		DisplayName: env.Envelope.SourceName,
-	}
-
 	chatID := "group:" + sm.GroupInfo.GroupID
-	peer := gateway.Peer{Kind: "group", ID: sm.GroupInfo.GroupID}
 	content := sm.Message
 
-	isMentioned := c.isBotMentioned(sm.Mentions)
-	shouldRespond, stripped := c.ShouldRespondInGroup(isMentioned, content)
-	if !shouldRespond {
+	if !c.isBotMentioned(sm.Mentions) {
 		return
 	}
-	content = stripped
 
 	messageID := fmt.Sprintf("%d", env.Envelope.Timestamp)
 
-	logger.InfoCF("signal", "Received sync group message", map[string]any{
-		"sender":    senderID,
-		"chat_id":   chatID,
-		"peer_kind": peer.Kind,
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "signal",
+		ChatID:      chatID,
+		SenderID:    senderID,
+		SenderName:  env.Envelope.SourceName,
+		Text:        content,
+		Timestamp:   time.Now(),
+		MessageID:   messageID,
 	})
-
-	c.HandleMessage(c.ctx,
-		peer,
-		messageID,
-		senderID,
-		chatID,
-		content,
-		nil,
-		nil,
-		sender,
-	)
 }
 
-// isBotMentioned checks if any mention in the message refers to our account UUID.
-func (c *SignalChannel) isBotMentioned(mentions []mention) bool {
+func (c *Channel) isBotMentioned(mentions []mention) bool {
 	if c.config.AccountUUID == "" {
 		return false
 	}

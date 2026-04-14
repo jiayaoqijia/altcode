@@ -1,4 +1,8 @@
-//go:build wip
+// Adapted from ottie's IRC channel implementation.
+// Copyright (c) 2026 Ottie contributors — MIT License
+//
+// Stripped ottie-specific dependencies (bus, identity, media, config).
+// Wired to gateway.MessageHandler instead of bus.PublishInbound.
 
 package irc
 
@@ -7,26 +11,44 @@ import (
 	"crypto/tls"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/ergochat/irc-go/ircevent"
 	"github.com/ergochat/irc-go/ircmsg"
 
-	gateway "github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/config"
-	"github.com/altcode-ai/altcode/gateway/logger"
+	"github.com/altcode-ai/altcode/gateway"
 )
 
-// IRCChannel implements the Channel interface for IRC servers.
-type IRCChannel struct {
-	*gateway.BaseChannel
-	config config.IRCConfig
-	conn   *ircevent.Connection
-	ctx    context.Context
-	cancel context.CancelFunc
+// Config holds IRC connection configuration.
+type Config struct {
+	Server          string
+	Nick            string
+	User            string
+	RealName        string
+	Password        string
+	TLS             bool
+	Channels        []string // channels to join
+	SASLUser        string
+	SASLPassword    string
+	NickServPassword string
+	RequestCaps     []string
+	AllowFrom       []string
+	AllowAll        bool
 }
 
-// NewIRCChannel creates a new IRC channel.
-func NewIRCChannel(cfg config.IRCConfig, messageBus *gateway.MessageBus) (*IRCChannel, error) {
+// Channel implements gateway.Channel for IRC.
+type Channel struct {
+	*gateway.BaseChannel
+	config    Config
+	conn      *ircevent.Connection
+	ctx       context.Context
+	cancel    context.CancelFunc
+	allowList []string
+	allowAll  bool
+}
+
+// New creates an IRC channel.
+func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	if cfg.Server == "" {
 		return nil, fmt.Errorf("irc server is required")
 	}
@@ -34,21 +56,18 @@ func NewIRCChannel(cfg config.IRCConfig, messageBus *gateway.MessageBus) (*IRCCh
 		return nil, fmt.Errorf("irc nick is required")
 	}
 
-	base := gateway.NewBaseChannel("irc", cfg, messageBus, cfg.AllowFrom,
-		gateway.WithMaxMessageLength(400),
-		gateway.WithGroupTrigger(cfg.GroupTrigger),
-		gateway.WithReasoningChannelID(cfg.ReasoningChannelID),
-	)
-
-	return &IRCChannel{
-		BaseChannel: base,
+	return &Channel{
+		BaseChannel: gateway.NewBaseChannel("irc", handler),
 		config:      cfg,
+		allowList:   cfg.AllowFrom,
+		allowAll:    cfg.AllowAll,
 	}, nil
 }
 
-// Start connects to the IRC server and begins listening.
-func (c *IRCChannel) Start(ctx context.Context) error {
-	logger.InfoC("irc", "Starting IRC channel")
+// MaxMessageLength returns the max message length in runes.
+func (c *Channel) MaxMessageLength() int { return 400 }
+
+func (c *Channel) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
 	user := c.config.User
@@ -59,7 +78,7 @@ func (c *IRCChannel) Start(ctx context.Context) error {
 	if realName == "" {
 		realName = c.config.Nick
 	}
-	caps := []string(c.config.RequestCaps)
+	caps := c.config.RequestCaps
 	if len(caps) == 0 {
 		caps = []string{"server-time", "message-tags"}
 	}
@@ -83,13 +102,11 @@ func (c *IRCChannel) Start(ctx context.Context) error {
 		}
 	}
 
-	// SASL auth (takes priority over NickServ)
 	if c.config.SASLUser != "" && c.config.SASLPassword != "" {
 		conn.SASLLogin = c.config.SASLUser
 		conn.SASLPassword = c.config.SASLPassword
 	}
 
-	// Register event handlers
 	conn.AddConnectCallback(func(e ircmsg.Message) {
 		c.onConnect(conn)
 	})
@@ -102,51 +119,41 @@ func (c *IRCChannel) Start(ctx context.Context) error {
 	}
 
 	c.conn = conn
-
-	// ircevent.Connection.Loop() handles reconnection internally.
 	go conn.Loop()
 
 	c.SetRunning(true)
-	logger.InfoCF("irc", "IRC channel started", map[string]any{
-		"server": c.config.Server,
-		"nick":   c.config.Nick,
-	})
 	return nil
 }
 
-// Stop disconnects from the IRC server.
-func (c *IRCChannel) Stop(ctx context.Context) error {
-	logger.InfoC("irc", "Stopping IRC channel")
+func (c *Channel) Stop(ctx context.Context) error {
 	c.SetRunning(false)
-
 	if c.conn != nil {
 		c.conn.Quit()
 	}
 	if c.cancel != nil {
 		c.cancel()
 	}
-
-	logger.InfoC("irc", "IRC channel stopped")
 	return nil
 }
 
-// Send sends a message to an IRC channel or user.
-func (c *IRCChannel) Send(ctx context.Context, msg gateway.OutboundMessage) error {
+func (c *Channel) Send(
+	ctx context.Context, msg gateway.OutboundMessage,
+) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
 
 	target := msg.ChatID
 	if target == "" {
-		return fmt.Errorf("chat ID is empty: %w", gateway.ErrSendFailed)
+		return fmt.Errorf(
+			"chat ID is empty: %w", gateway.ErrSendFailed,
+		)
 	}
-
-	if strings.TrimSpace(msg.Content) == "" {
+	if strings.TrimSpace(msg.Text) == "" {
 		return nil
 	}
 
-	// Send each line separately (IRC is line-oriented)
-	lines := strings.Split(msg.Content, "\n")
+	lines := strings.Split(msg.Text, "\n")
 	for _, line := range lines {
 		line = strings.TrimRight(line, "\r")
 		if line == "" {
@@ -154,42 +161,137 @@ func (c *IRCChannel) Send(ctx context.Context, msg gateway.OutboundMessage) erro
 		}
 		c.conn.Privmsg(target, line)
 	}
-
-	logger.DebugCF("irc", "Message sent", map[string]any{
-		"target": target,
-		"lines":  len(lines),
-	})
 	return nil
 }
 
-// StartTyping implements gateway.TypingCapable using IRCv3 +typing client tag.
-// Requires typing.enabled in config and server support for message-tags capability.
-func (c *IRCChannel) StartTyping(ctx context.Context, chatID string) (func(), error) {
-	noop := func() {}
-
-	if !c.config.Typing.Enabled || !c.IsRunning() || c.conn == nil {
-		return noop, nil
+func (c *Channel) onConnect(conn *ircevent.Connection) {
+	if c.config.NickServPassword != "" &&
+		c.config.SASLUser == "" {
+		conn.Privmsg(
+			"NickServ", "IDENTIFY "+c.config.NickServPassword,
+		)
 	}
 
-	// Check if server supports message-tags (required for TAGMSG)
-	if _, ok := c.conn.AcknowledgedCaps()["message-tags"]; !ok {
-		return noop, nil
+	for _, ch := range c.config.Channels {
+		conn.Join(ch)
 	}
-
-	c.conn.SendWithTags(map[string]string{"+typing": "active"}, "TAGMSG", chatID)
-
-	return func() {
-		if c.IsRunning() && c.conn != nil {
-			c.conn.SendWithTags(map[string]string{"+typing": "done"}, "TAGMSG", chatID)
-		}
-	}, nil
 }
 
-// extractHost returns the hostname portion of a host:port string.
+func (c *Channel) onPrivmsg(
+	conn *ircevent.Connection, e ircmsg.Message,
+) {
+	if len(e.Params) < 2 {
+		return
+	}
+
+	nick := e.Nick()
+	currentNick := conn.CurrentNick()
+
+	if strings.EqualFold(nick, currentNick) {
+		return
+	}
+
+	target := e.Params[0]
+	content := e.Params[1]
+
+	isDM := !strings.HasPrefix(target, "#") &&
+		!strings.HasPrefix(target, "&")
+
+	if !c.isAllowed(nick) {
+		return
+	}
+
+	var chatID string
+	if isDM {
+		chatID = nick
+	} else {
+		chatID = target
+		// For channel messages, check bot mention
+		isMentioned := isBotMentioned(content, currentNick)
+		if isMentioned {
+			content = stripBotMention(content, currentNick)
+		} else {
+			return // In groups, only respond to mentions
+		}
+	}
+
+	if strings.TrimSpace(content) == "" {
+		return
+	}
+
+	messageID := fmt.Sprintf(
+		"%s-%d", nick, time.Now().UnixNano(),
+	)
+
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "irc",
+		ChatID:      chatID,
+		SenderID:    nick,
+		SenderName:  nick,
+		Text:        content,
+		Timestamp:   time.Now(),
+		MessageID:   messageID,
+		Metadata: map[string]string{
+			"server": c.config.Server,
+		},
+	})
+}
+
+func (c *Channel) isAllowed(nick string) bool {
+	if len(c.allowList) == 0 {
+		return c.allowAll
+	}
+	for _, a := range c.allowList {
+		if a == nick {
+			return true
+		}
+	}
+	return false
+}
+
 func extractHost(server string) string {
 	host, _, found := strings.Cut(server, ":")
 	if found {
 		return host
 	}
 	return server
+}
+
+func isBotMentioned(content, botNick string) bool {
+	lower := strings.ToLower(content)
+	lowerNick := strings.ToLower(botNick)
+
+	if strings.HasPrefix(lower, lowerNick+":") ||
+		strings.HasPrefix(lower, lowerNick+",") {
+		return true
+	}
+
+	idx := strings.Index(lower, lowerNick)
+	if idx < 0 {
+		return false
+	}
+	endIdx := idx + len(lowerNick)
+	before := idx == 0 || (lower[idx-1] != '_' &&
+		!isAlphaNum(lower[idx-1]))
+	after := endIdx >= len(lower) || (lower[endIdx] != '_' &&
+		!isAlphaNum(lower[endIdx]))
+	return before && after
+}
+
+func stripBotMention(content, botNick string) string {
+	lower := strings.ToLower(content)
+	lowerNick := strings.ToLower(botNick)
+	for _, sep := range []string{":", ","} {
+		prefix := lowerNick + sep
+		if strings.HasPrefix(lower, prefix) {
+			return strings.TrimSpace(content[len(prefix):])
+		}
+	}
+	return content
+}
+
+func isAlphaNum(b byte) bool {
+	return (b >= 'a' && b <= 'z') ||
+		(b >= 'A' && b <= 'Z') ||
+		(b >= '0' && b <= '9')
 }

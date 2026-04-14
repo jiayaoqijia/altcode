@@ -1,4 +1,9 @@
-//go:build wip
+// Adapted from ottie's WhatsApp channel implementation.
+// Copyright (c) 2026 Ottie contributors — MIT License
+//
+// Stripped ottie-specific dependencies (bus, identity, media, config).
+// Wired to gateway.MessageHandler instead of bus.PublishInbound.
+// Uses WebSocket bridge for WhatsApp connectivity.
 
 package whatsapp
 
@@ -11,51 +16,49 @@ import (
 
 	"github.com/gorilla/websocket"
 
-	gateway "github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/config"
-	"github.com/altcode-ai/altcode/gateway/identity"
-	"github.com/altcode-ai/altcode/gateway/logger"
-	"github.com/altcode-ai/altcode/gateway/utils"
+	"github.com/altcode-ai/altcode/gateway"
 )
 
-type WhatsAppChannel struct {
+// Config holds WhatsApp bridge configuration.
+type Config struct {
+	BridgeURL string // WebSocket URL to a WhatsApp bridge
+	AllowFrom []string
+	AllowAll  bool
+}
+
+// Channel implements gateway.Channel for WhatsApp (via bridge).
+type Channel struct {
 	*gateway.BaseChannel
 	conn      *websocket.Conn
-	config    config.WhatsAppConfig
 	url       string
 	ctx       context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
 	connected bool
+	allowList []string
+	allowAll  bool
 }
 
-func NewWhatsAppChannel(cfg config.WhatsAppConfig, bus *gateway.MessageBus) (*WhatsAppChannel, error) {
-	base := gateway.NewBaseChannel(
-		"whatsapp",
-		cfg,
-		bus,
-		cfg.AllowFrom,
-		gateway.WithMaxMessageLength(65536),
-		gateway.WithReasoningChannelID(cfg.ReasoningChannelID),
-	)
+// New creates a WhatsApp channel.
+func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
+	if cfg.BridgeURL == "" {
+		return nil, fmt.Errorf("whatsapp bridge_url is required")
+	}
 
-	return &WhatsAppChannel{
-		BaseChannel: base,
-		config:      cfg,
+	return &Channel{
+		BaseChannel: gateway.NewBaseChannel("whatsapp", handler),
 		url:         cfg.BridgeURL,
-		connected:   false,
+		allowList:   cfg.AllowFrom,
+		allowAll:    cfg.AllowAll,
 	}, nil
 }
 
-func (c *WhatsAppChannel) Start(ctx context.Context) error {
-	logger.InfoCF("whatsapp", "Starting WhatsApp channel", map[string]any{
-		"bridge_url": c.url,
-	})
+// MaxMessageLength returns the max message length in runes.
+func (c *Channel) MaxMessageLength() int { return 65536 }
 
+func (c *Channel) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Copy the default dialer instead of mutating the shared package-level
-	// pointer — concurrent Start() calls would race on HandshakeTimeout.
 	dialer := *websocket.DefaultDialer
 	dialer.HandshakeTimeout = 10 * time.Second
 
@@ -65,7 +68,9 @@ func (c *WhatsAppChannel) Start(ctx context.Context) error {
 	}
 	if err != nil {
 		c.cancel()
-		return fmt.Errorf("failed to connect to WhatsApp bridge: %w", err)
+		return fmt.Errorf(
+			"failed to connect to WhatsApp bridge: %w", err,
+		)
 	}
 
 	c.mu.Lock()
@@ -74,17 +79,11 @@ func (c *WhatsAppChannel) Start(ctx context.Context) error {
 	c.mu.Unlock()
 
 	c.SetRunning(true)
-	logger.InfoC("whatsapp", "WhatsApp channel connected")
-
 	go c.listen()
-
 	return nil
 }
 
-func (c *WhatsAppChannel) Stop(ctx context.Context) error {
-	logger.InfoC("whatsapp", "Stopping WhatsApp channel...")
-
-	// Cancel context first to signal listen goroutine to exit
+func (c *Channel) Stop(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
@@ -93,26 +92,22 @@ func (c *WhatsAppChannel) Stop(ctx context.Context) error {
 	defer c.mu.Unlock()
 
 	if c.conn != nil {
-		if err := c.conn.Close(); err != nil {
-			logger.ErrorCF("whatsapp", "Error closing WhatsApp connection", map[string]any{
-				"error": err.Error(),
-			})
-		}
+		c.conn.Close()
 		c.conn = nil
 	}
 
 	c.connected = false
 	c.SetRunning(false)
-
 	return nil
 }
 
-func (c *WhatsAppChannel) Send(ctx context.Context, msg gateway.OutboundMessage) error {
+func (c *Channel) Send(
+	ctx context.Context, msg gateway.OutboundMessage,
+) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
 
-	// Check ctx before acquiring lock
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
@@ -123,13 +118,16 @@ func (c *WhatsAppChannel) Send(ctx context.Context, msg gateway.OutboundMessage)
 	defer c.mu.Unlock()
 
 	if c.conn == nil {
-		return fmt.Errorf("whatsapp connection not established: %w", gateway.ErrTemporary)
+		return fmt.Errorf(
+			"whatsapp connection not established: %w",
+			gateway.ErrTemporary,
+		)
 	}
 
 	payload := map[string]any{
 		"type":    "message",
 		"to":      msg.ChatID,
-		"content": msg.Content,
+		"content": msg.Text,
 	}
 
 	data, err := json.Marshal(payload)
@@ -138,16 +136,17 @@ func (c *WhatsAppChannel) Send(ctx context.Context, msg gateway.OutboundMessage)
 	}
 
 	_ = c.conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
-	if err := c.conn.WriteMessage(websocket.TextMessage, data); err != nil {
+	if err := c.conn.WriteMessage(
+		websocket.TextMessage, data,
+	); err != nil {
 		_ = c.conn.SetWriteDeadline(time.Time{})
 		return fmt.Errorf("whatsapp send: %w", gateway.ErrTemporary)
 	}
 	_ = c.conn.SetWriteDeadline(time.Time{})
-
 	return nil
 }
 
-func (c *WhatsAppChannel) listen() {
+func (c *Channel) listen() {
 	for {
 		select {
 		case <-c.ctx.Done():
@@ -164,34 +163,26 @@ func (c *WhatsAppChannel) listen() {
 
 			_, message, err := conn.ReadMessage()
 			if err != nil {
-				logger.ErrorCF("whatsapp", "WhatsApp read error", map[string]any{
-					"error": err.Error(),
-				})
 				time.Sleep(2 * time.Second)
 				continue
 			}
 
 			var msg map[string]any
 			if err := json.Unmarshal(message, &msg); err != nil {
-				logger.ErrorCF("whatsapp", "Failed to unmarshal WhatsApp message", map[string]any{
-					"error": err.Error(),
-				})
 				continue
 			}
 
 			msgType, ok := msg["type"].(string)
-			if !ok {
+			if !ok || msgType != "message" {
 				continue
 			}
 
-			if msgType == "message" {
-				c.handleIncomingMessage(msg)
-			}
+			c.handleIncomingMessage(msg)
 		}
 	}
 }
 
-func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]any) {
+func (c *Channel) handleIncomingMessage(msg map[string]any) {
 	senderID, ok := msg["from"].(string)
 	if !ok {
 		return
@@ -202,54 +193,44 @@ func (c *WhatsAppChannel) handleIncomingMessage(msg map[string]any) {
 		chatID = senderID
 	}
 
-	content, ok := msg["content"].(string)
-	if !ok {
-		content = ""
+	content, _ := msg["content"].(string)
+	if content == "" {
+		return
 	}
 
-	var mediaPaths []string
-	if mediaData, ok := msg["media"].([]any); ok {
-		mediaPaths = make([]string, 0, len(mediaData))
-		for _, m := range mediaData {
-			if path, ok := m.(string); ok {
-				mediaPaths = append(mediaPaths, path)
-			}
-		}
+	if !c.isAllowed(senderID) {
+		return
 	}
 
-	metadata := make(map[string]string)
 	var messageID string
 	if mid, ok := msg["id"].(string); ok {
 		messageID = mid
 	}
+
+	senderName := senderID
 	if userName, ok := msg["from_name"].(string); ok {
-		metadata["user_name"] = userName
+		senderName = userName
 	}
 
-	var peer gateway.Peer
-	if chatID == senderID {
-		peer = gateway.Peer{Kind: "direct", ID: senderID}
-	} else {
-		peer = gateway.Peer{Kind: "group", ID: chatID}
-	}
-
-	logger.InfoCF("whatsapp", "WhatsApp message received", map[string]any{
-		"sender":  senderID,
-		"preview": utils.Truncate(content, 50),
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "whatsapp",
+		ChatID:      chatID,
+		SenderID:    senderID,
+		SenderName:  senderName,
+		Text:        content,
+		Timestamp:   time.Now(),
+		MessageID:   messageID,
 	})
+}
 
-	sender := gateway.SenderInfo{
-		Platform:    "whatsapp",
-		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("whatsapp", senderID),
+func (c *Channel) isAllowed(senderID string) bool {
+	if len(c.allowList) == 0 {
+		return c.allowAll
 	}
-	if display, ok := metadata["user_name"]; ok {
-		sender.DisplayName = display
+	for _, a := range c.allowList {
+		if a == senderID {
+			return true
+		}
 	}
-
-	if !c.IsAllowedSender(sender) {
-		return
-	}
-
-	c.HandleMessage(c.ctx, peer, messageID, senderID, chatID, content, mediaPaths, metadata, sender)
+	return false
 }

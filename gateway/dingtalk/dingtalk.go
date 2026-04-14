@@ -1,7 +1,8 @@
-//go:build wip
-
-// Ottie - Ultra-lightweight personal AI agent
-// DingTalk channel implementation using Stream Mode
+// Adapted from ottie's DingTalk channel implementation.
+// Copyright (c) 2026 Ottie contributors — MIT License
+//
+// Stripped ottie-specific dependencies (bus, identity, media, config).
+// Wired to gateway.MessageHandler instead of bus.PublishInbound.
 
 package dingtalk
 
@@ -9,224 +10,184 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
-	dinglog "github.com/open-dingtalk/dingtalk-stream-sdk-go/logger"
 
-	gateway "github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/config"
-	"github.com/altcode-ai/altcode/gateway/identity"
-	"github.com/altcode-ai/altcode/gateway/logger"
-	"github.com/altcode-ai/altcode/gateway/utils"
+	"github.com/altcode-ai/altcode/gateway"
 )
 
-// DingTalkChannel implements the Channel interface for DingTalk (钉钉)
-// It uses WebSocket for receiving messages via stream mode and API for sending
-type DingTalkChannel struct {
+// Config holds DingTalk bot configuration.
+type Config struct {
+	ClientID     string
+	ClientSecret string
+	AllowFrom    []string
+	AllowAll     bool
+}
+
+// Channel implements gateway.Channel for DingTalk.
+type Channel struct {
 	*gateway.BaseChannel
-	config       config.DingTalkConfig
-	clientID     string
-	clientSecret string
-	streamClient *client.StreamClient
-	ctx          context.Context
-	cancel       context.CancelFunc
-	// Map to store session webhooks for each chat
+	clientID        string
+	clientSecret    string
+	streamClient    *client.StreamClient
+	ctx             context.Context
+	cancel          context.CancelFunc
+	allowList       []string
+	allowAll        bool
 	sessionWebhooks sync.Map // chatID -> sessionWebhook
 }
 
-// NewDingTalkChannel creates a new DingTalk channel instance
-func NewDingTalkChannel(cfg config.DingTalkConfig, messageBus *gateway.MessageBus) (*DingTalkChannel, error) {
+// New creates a DingTalk channel.
+func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	if cfg.ClientID == "" || cfg.ClientSecret == "" {
-		return nil, fmt.Errorf("dingtalk client_id and client_secret are required")
+		return nil, fmt.Errorf(
+			"dingtalk client_id and client_secret are required",
+		)
 	}
 
-	// Set the logger for the Stream SDK
-	dinglog.SetLogger(logger.NewLogger("dingtalk"))
-
-	base := gateway.NewBaseChannel("dingtalk", cfg, messageBus, cfg.AllowFrom,
-		gateway.WithMaxMessageLength(20000),
-		gateway.WithGroupTrigger(cfg.GroupTrigger),
-		gateway.WithReasoningChannelID(cfg.ReasoningChannelID),
-	)
-
-	return &DingTalkChannel{
-		BaseChannel:  base,
-		config:       cfg,
+	return &Channel{
+		BaseChannel:  gateway.NewBaseChannel("dingtalk", handler),
 		clientID:     cfg.ClientID,
 		clientSecret: cfg.ClientSecret,
+		allowList:    cfg.AllowFrom,
+		allowAll:     cfg.AllowAll,
 	}, nil
 }
 
-// Start initializes the DingTalk channel with Stream Mode
-func (c *DingTalkChannel) Start(ctx context.Context) error {
-	logger.InfoC("dingtalk", "Starting DingTalk channel (Stream Mode)...")
+// MaxMessageLength returns the max message length in runes.
+func (c *Channel) MaxMessageLength() int { return 20000 }
 
+func (c *Channel) Start(ctx context.Context) error {
 	c.ctx, c.cancel = context.WithCancel(ctx)
 
-	// Create credential config
 	cred := client.NewAppCredentialConfig(c.clientID, c.clientSecret)
 
-	// Create the stream client with options
 	c.streamClient = client.NewStreamClient(
 		client.WithAppCredential(cred),
 		client.WithAutoReconnect(true),
 	)
 
-	// Register chatbot callback handler (IChatBotMessageHandler is a function type)
-	c.streamClient.RegisterChatBotCallbackRouter(c.onChatBotMessageReceived)
+	c.streamClient.RegisterChatBotCallbackRouter(
+		c.onChatBotMessageReceived,
+	)
 
-	// Start the stream client
 	if err := c.streamClient.Start(c.ctx); err != nil {
 		return fmt.Errorf("failed to start stream client: %w", err)
 	}
 
 	c.SetRunning(true)
-	logger.InfoC("dingtalk", "DingTalk channel started (Stream Mode)")
 	return nil
 }
 
-// Stop gracefully stops the DingTalk channel
-func (c *DingTalkChannel) Stop(ctx context.Context) error {
-	logger.InfoC("dingtalk", "Stopping DingTalk channel...")
-
+func (c *Channel) Stop(ctx context.Context) error {
 	if c.cancel != nil {
 		c.cancel()
 	}
-
 	if c.streamClient != nil {
 		c.streamClient.Close()
 	}
-
 	c.SetRunning(false)
-	logger.InfoC("dingtalk", "DingTalk channel stopped")
 	return nil
 }
 
-// Send sends a message to DingTalk via the chatbot reply API
-func (c *DingTalkChannel) Send(ctx context.Context, msg gateway.OutboundMessage) error {
+func (c *Channel) Send(
+	ctx context.Context, msg gateway.OutboundMessage,
+) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
 
-	// Get session webhook from storage
 	sessionWebhookRaw, ok := c.sessionWebhooks.Load(msg.ChatID)
 	if !ok {
-		return fmt.Errorf("no session_webhook found for chat %s, cannot send message", msg.ChatID)
+		return fmt.Errorf(
+			"no session_webhook found for chat %s", msg.ChatID,
+		)
 	}
 
 	sessionWebhook, ok := sessionWebhookRaw.(string)
 	if !ok {
-		return fmt.Errorf("invalid session_webhook type for chat %s", msg.ChatID)
+		return fmt.Errorf(
+			"invalid session_webhook type for chat %s", msg.ChatID,
+		)
 	}
 
-	logger.DebugCF("dingtalk", "Sending message", map[string]any{
-		"chat_id": msg.ChatID,
-		"preview": utils.Truncate(msg.Content, 100),
-	})
-
-	// Use the session webhook to send the reply
-	return c.SendDirectReply(ctx, sessionWebhook, msg.Content)
+	return c.sendDirectReply(ctx, sessionWebhook, msg.Text)
 }
 
-// onChatBotMessageReceived implements the IChatBotMessageHandler function signature
-// This is called by the Stream SDK when a new message arrives
-// IChatBotMessageHandler is: func(c context.Context, data *chatbot.BotCallbackDataModel) ([]byte, error)
-func (c *DingTalkChannel) onChatBotMessageReceived(
+func (c *Channel) onChatBotMessageReceived(
 	ctx context.Context,
 	data *chatbot.BotCallbackDataModel,
 ) ([]byte, error) {
-	// Extract message content from Text field
 	content := data.Text.Content
 	if content == "" {
-		// Try to extract from Content interface{} if Text is empty
 		if contentMap, ok := data.Content.(map[string]any); ok {
 			if textContent, ok := contentMap["content"].(string); ok {
 				content = textContent
 			}
 		}
 	}
-
 	if content == "" {
-		return nil, nil // Ignore empty messages
+		return nil, nil
 	}
 
 	senderID := data.SenderStaffId
 	senderNick := data.SenderNick
-	chatID := senderID
-	if data.ConversationType != "1" {
-		// For group chats
-		chatID = data.ConversationId
-	}
 
-	// Store the session webhook for this chat so we can reply later
-	c.sessionWebhooks.Store(chatID, data.SessionWebhook)
-
-	metadata := map[string]string{
-		"sender_name":       senderNick,
-		"conversation_id":   data.ConversationId,
-		"conversation_type": data.ConversationType,
-		"platform":          "dingtalk",
-		"session_webhook":   data.SessionWebhook,
-	}
-
-	var peer gateway.Peer
-	if data.ConversationType == "1" {
-		peer = gateway.Peer{Kind: "direct", ID: senderID}
-	} else {
-		peer = gateway.Peer{Kind: "group", ID: data.ConversationId}
-		// In group chats, apply unified group trigger filtering
-		respond, cleaned := c.ShouldRespondInGroup(false, content)
-		if !respond {
-			return nil, nil
-		}
-		content = cleaned
-	}
-
-	logger.DebugCF("dingtalk", "Received message", map[string]any{
-		"sender_nick": senderNick,
-		"sender_id":   senderID,
-		"preview":     utils.Truncate(content, 50),
-	})
-
-	// Build sender info
-	sender := gateway.SenderInfo{
-		Platform:    "dingtalk",
-		PlatformID:  senderID,
-		CanonicalID: identity.BuildCanonicalID("dingtalk", senderID),
-		DisplayName: senderNick,
-	}
-
-	if !c.IsAllowedSender(sender) {
+	if !c.isAllowed(senderID) {
 		return nil, nil
 	}
 
-	// Handle the message through the base channel
-	c.HandleMessage(ctx, peer, "", senderID, chatID, content, nil, metadata, sender)
+	chatID := senderID
+	if data.ConversationType != "1" {
+		chatID = data.ConversationId
+	}
 
-	// Return nil to indicate we've handled the message asynchronously
-	// The response will be sent through the message bus
+	c.sessionWebhooks.Store(chatID, data.SessionWebhook)
+
+	c.Handler()(c.ctx, gateway.InboundMessage{
+		ChannelName: "dingtalk",
+		ChatID:      chatID,
+		SenderID:    senderID,
+		SenderName:  senderNick,
+		Text:        content,
+		Timestamp:   time.Now(),
+		Metadata: map[string]string{
+			"conversation_id":   data.ConversationId,
+			"conversation_type": data.ConversationType,
+			"session_webhook":   data.SessionWebhook,
+		},
+	})
+
 	return nil, nil
 }
 
-// SendDirectReply sends a direct reply using the session webhook
-func (c *DingTalkChannel) SendDirectReply(ctx context.Context, sessionWebhook, content string) error {
+func (c *Channel) sendDirectReply(
+	ctx context.Context, sessionWebhook, content string,
+) error {
 	replier := chatbot.NewChatbotReplier()
 
-	// Convert string content to []byte for the API
-	contentBytes := []byte(content)
-	titleBytes := []byte("Ottie")
-
-	// Send markdown formatted reply
 	err := replier.SimpleReplyMarkdown(
 		ctx,
 		sessionWebhook,
-		titleBytes,
-		contentBytes,
+		[]byte("altcode"),
+		[]byte(content),
 	)
 	if err != nil {
 		return fmt.Errorf("dingtalk send: %w", gateway.ErrTemporary)
 	}
-
 	return nil
+}
+
+func (c *Channel) isAllowed(senderID string) bool {
+	if len(c.allowList) == 0 {
+		return c.allowAll
+	}
+	for _, a := range c.allowList {
+		if a == senderID {
+			return true
+		}
+	}
+	return false
 }
