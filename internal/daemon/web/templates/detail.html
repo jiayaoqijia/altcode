@@ -42,7 +42,7 @@
   <div id="earlier-container" style="display:none;padding:8px 16px;text-align:center">
     <button id="show-earlier" class="text-sm text-blue-600 hover:underline cursor-pointer" style="background:none;border:none">Show earlier...</button>
   </div>
-  <div id="activity-feed" style="max-height:60vh;overflow-y:auto">
+  <div id="activity-feed" style="max-height:60vh;overflow-y:auto;min-height:2rem">
     {{range .Events}}
       {{template "event_item" .}}
     {{end}}
