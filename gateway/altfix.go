@@ -119,6 +119,11 @@ func (b *AltFixBridge) HandleMessage(
 		reply = helpText()
 	default:
 		// Normal chat — run through altcode CLI subprocess.
+		// Rate limit chat the same as commands (costs money per turn).
+		if b.rateLimiter != nil && !b.rateLimiter.Allow("chat", msg.SenderID) {
+			reply = "Chat rate limited. Please wait before sending more messages."
+			break
+		}
 		b.sendTyping(ctx, msg)
 		reply, err = b.chat(ctx, text)
 	}
@@ -746,19 +751,35 @@ func (b *AltFixBridge) chat(
 	ctx, cancel := context.WithTimeout(ctx, cfg.Timeout)
 	defer cancel()
 
+	// Reject prompts starting with "-" to prevent flag injection
+	// (e.g. "--file /etc/passwd" would be parsed as an altcode flag).
+	if strings.HasPrefix(prompt, "-") {
+		return "Prompts cannot start with '-'. Please rephrase.", nil
+	}
+
 	args := []string{"--model", cfg.Model}
 	if cfg.MaxTurns > 0 {
 		args = append(args, "--max-turns", strconv.Itoa(cfg.MaxTurns))
 	}
-	args = append(args, prompt)
+	// "--" separates flags from positional args, preventing prompt
+	// content from being interpreted as flags even if it contains "--".
+	args = append(args, "--", prompt)
 
 	cmd := exec.CommandContext(ctx, cfg.Binary, args...)
 	cmd.Env = filterEnv(os.Environ())
 
-	output, err := cmd.CombinedOutput()
+	// Use Output (stdout only), not CombinedOutput — stderr may contain
+	// logs, panics, or stack traces that should not be sent to chat users.
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	output, err := cmd.Output()
 	if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			return "Response timed out. Try a simpler question or use /fix for complex tasks.", nil
+		}
+		// Log stderr for debugging, don't expose to user
+		if stderr.Len() > 0 {
+			log.Printf("chat stderr: %s", stderr.String())
 		}
 		return "", fmt.Errorf("chat failed: %w", err)
 	}

@@ -521,3 +521,54 @@ func TestHandleMessage_ChatFallback(t *testing.T) {
 		t.Errorf("expected chat response, got: %s", sent[0])
 	}
 }
+
+func TestChat_RejectDashPrompt(t *testing.T) {
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{Timeout: 5 * time.Second},
+	}
+	reply, err := bridge.chat(context.Background(), "--file /etc/passwd")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "cannot start with") {
+		t.Errorf("expected rejection, got: %s", reply)
+	}
+}
+
+func TestChat_DoubleDashSeparator(t *testing.T) {
+	tmpDir := t.TempDir()
+	fake := filepath.Join(tmpDir, "altcode")
+	// Print all args to verify "--" is present
+	os.WriteFile(fake, []byte("#!/bin/sh\necho \"$@\""), 0o755)
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{Binary: fake, Timeout: 5 * time.Second},
+	}
+	reply, err := bridge.chat(context.Background(), "normal prompt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(reply, "-- normal prompt") {
+		t.Errorf("expected '--' separator in args: %s", reply)
+	}
+}
+
+func TestChat_StderrNotLeaked(t *testing.T) {
+	tmpDir := t.TempDir()
+	fake := filepath.Join(tmpDir, "altcode")
+	os.WriteFile(fake, []byte("#!/bin/sh\necho 'visible' && echo 'SECRET_PANIC_TRACE' >&2"), 0o755)
+
+	bridge := &AltFixBridge{
+		chatCfg: ChatConfig{Binary: fake, Timeout: 5 * time.Second},
+	}
+	reply, err := bridge.chat(context.Background(), "test stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(reply, "SECRET_PANIC_TRACE") {
+		t.Error("stderr should NOT appear in reply")
+	}
+	if !strings.Contains(reply, "visible") {
+		t.Errorf("stdout should appear in reply: %s", reply)
+	}
+}
