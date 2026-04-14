@@ -229,7 +229,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		// Height: header(1) + sep(1) + body + HUD(2) + input(3) = 7 lines overhead
 		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
-		a.mdRenderer = NewMarkdownRenderer(mainWidth - 4)
+		a.mdRenderer = NewMarkdownRenderer(max(10, mainWidth-4))
 		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
 		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
 		if a.wsView != nil {
@@ -238,8 +238,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.wfHeader != nil {
 			a.wfHeader.SetWidth(msg.Width)
 		}
-		a.input.SetWidth(msg.Width - 2)
-		a.setupInput.Width = msg.Width - 2
+		a.input.SetWidth(max(1, msg.Width-2))
+		a.setupInput.Width = max(1, msg.Width-2)
 		// Overlays (palette + session switcher) render into mainBody,
 		// which lives inside mainWidth — NOT the full terminal width.
 		// Passing msg.Width makes the rounded border spill into the
@@ -453,7 +453,7 @@ func (a *App) updateViewport() {
 	}
 	// Show live tool tree during tool execution — NO collapsing to prevent height jumps
 	if len(a.tools.entries) > 0 {
-		sb.WriteString(a.tools.RenderLive(a.theme, a.width-6))
+		sb.WriteString(a.tools.RenderLive(a.theme, max(10, a.width-6)))
 	}
 	// CC-style thinking indicator — show whenever busy and not streaming.
 	// Using a.busy (not a.thinking) prevents the indicator from flickering

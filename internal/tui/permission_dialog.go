@@ -39,7 +39,7 @@ func (d *PermissionDialog) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(d.theme.Warning).
 		Padding(1, 2).
-		Width(d.width - 4)
+		Width(max(1, d.width-4))
 
 	title := lipgloss.NewStyle().
 		Foreground(d.theme.Warning).

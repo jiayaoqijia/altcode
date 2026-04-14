@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const switcherMaxVisible = 10
@@ -165,7 +166,7 @@ func (s *SessionSwitcher) View() string {
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(s.theme.Secondary).
 		Padding(0, 1).
-		Width(s.width - 4)
+		Width(max(1, s.width-4))
 
 	var sb strings.Builder
 	sb.WriteString(s.input.View())
@@ -204,13 +205,17 @@ func (s *SessionSwitcher) View() string {
 // truncateStr is rune-safe. The previous version sliced by byte
 // offset, which split multi-byte UTF-8 characters mid-rune and
 // produced replacement glyphs in the rendered display.
+//
+// ANSI-aware: uses lipgloss.Width (display columns) for the length
+// check and ansi.Truncate to cut without breaking escape sequences.
+// Raw len([]rune) over-counts when the string contains ANSI escapes
+// (e.g. colored bash output) and causes premature truncation.
 func truncateStr(s string, n int) string {
-	runes := []rune(s)
-	if len(runes) <= n {
-		return s
-	}
 	if n < 1 {
 		return "~"
 	}
-	return string(runes[:n-1]) + "~"
+	if lipgloss.Width(s) <= n {
+		return s
+	}
+	return ansi.Truncate(s, n-1, "") + "~"
 }

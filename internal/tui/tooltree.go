@@ -369,7 +369,7 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
 				if e.status == "error" {
 					connColor = theme.Error // red connector for errors
 				}
-				outputLines := formatToolOutput(e.name, e.output, theme, width-6)
+				outputLines := formatToolOutput(e.name, e.output, theme, max(10, width-6))
 				for _, ol := range outputLines {
 					sb.WriteString("   " + lipgloss.NewStyle().Foreground(connColor).Render("⎿") + "  " + ol + "\n")
 				}

@@ -198,7 +198,7 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 	// otherwise the final snapshot shows a stale ⟳ next to the real results.
 	a.tools.SweepRunning()
 	if len(a.tools.entries) > 0 {
-		tree := a.tools.Render(a.theme, a.width-6)
+		tree := a.tools.Render(a.theme, max(10, a.width-6))
 		a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
 		// Clear immediately to avoid tools appearing TWICE (in messages + live tree)
 		// which causes them to physically jump positions on screen.

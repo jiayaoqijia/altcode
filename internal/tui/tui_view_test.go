@@ -1651,3 +1651,123 @@ func readOutput(t *testing.T, tm *teatest.TestModel) string {
 	}
 	return string(out)
 }
+
+// --- Corner-case regression tests ---
+
+func TestTUIView_NarrowWidth_NoNegative(t *testing.T) {
+	// Fix #1: width < 20 must not produce negative widths in any
+	// rendering path (tool tree, messages, markdown, input).
+	a := testApp()
+	// Simulate extremely narrow terminal
+	a.Update(tea.WindowSizeMsg{Width: 10, Height: 20})
+	a.messages = append(a.messages, chatMessage{
+		role: roleAssistant, content: "hello",
+	})
+	a.tools.Start("bash", "echo test")
+	a.tools.Done("echo test", 100)
+
+	// Must not panic
+	out := a.View()
+	if out == "" {
+		t.Error("empty view at width=10")
+	}
+
+	// Width=1
+	a.Update(tea.WindowSizeMsg{Width: 1, Height: 20})
+	out = a.View()
+	if out == "" {
+		t.Error("empty view at width=1")
+	}
+}
+
+func TestTUIView_Height1_Fallback(t *testing.T) {
+	// Fix #5: height < 4 must show a fallback, not garbled layout.
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 1})
+	out := a.View()
+	if !strings.Contains(out, "too small") {
+		t.Errorf("expected 'too small' fallback at height=1, got: %q", out)
+	}
+
+	// Height=3 is still too small
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 3})
+	out = a.View()
+	if !strings.Contains(out, "too small") {
+		t.Errorf("expected 'too small' fallback at height=3, got: %q", out)
+	}
+
+	// Height=4 should render normally
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 4})
+	out = a.View()
+	if strings.Contains(out, "too small") {
+		t.Error("should render normally at height=4")
+	}
+}
+
+func TestTUIView_TruncateStr_ANSI(t *testing.T) {
+	// Fix #2: truncateStr must not over-truncate ANSI-escaped strings.
+	// An ANSI-colored "hello" is 5 display columns despite having ~15
+	// bytes of escape sequences.
+	colored := "\033[31mhello\033[0m"
+	got := truncateStr(colored, 10)
+	// Should NOT truncate — display width is 5 which is <= 10
+	if strings.Contains(got, "~") {
+		t.Errorf("truncateStr over-truncated ANSI string: %q", got)
+	}
+
+	// Plain string still truncates correctly
+	plain := "abcdefghij"
+	got = truncateStr(plain, 5)
+	if got != "abcd~" {
+		t.Errorf("truncateStr plain = %q, want %q", got, "abcd~")
+	}
+}
+
+func TestTUIView_CtrlL_ClearsToolTree(t *testing.T) {
+	// Fix #3: Ctrl+L must clear the tool tree so stale entries don't
+	// linger on the "cleared" screen.
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+	a.busy = true
+	a.tools.Start("bash", "echo test")
+
+	if len(a.tools.entries) != 1 {
+		t.Fatal("expected 1 tool entry before Ctrl+L")
+	}
+
+	a.handleKey(tea.KeyMsg{Type: tea.KeyCtrlL})
+
+	if len(a.tools.entries) != 0 {
+		t.Errorf("tool tree not cleared after Ctrl+L: %d entries",
+			len(a.tools.entries))
+	}
+	if len(a.messages) != 0 {
+		t.Error("messages not cleared after Ctrl+L")
+	}
+}
+
+func TestTUIView_EscapeThenSubmit(t *testing.T) {
+	// Fix #4 (false positive verification): Escape cancels the current
+	// context but submit() creates a FRESH context.Background(), so
+	// the next submission must not be affected.
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	// Verify cancel is set to a non-nil func after submit machinery
+	// would create it. We can't call submit() without an engine, so
+	// just verify the code path: handleEscKey sets busy=false and
+	// a new submit would create a fresh context.
+	a.busy = true
+	called := false
+	a.cancel = func() { called = true }
+	a.handleEscKey()
+
+	if called != true {
+		t.Error("Escape should call cancel()")
+	}
+	if a.busy {
+		t.Error("Escape should set busy=false")
+	}
+	// After escape, cancel is still the old one — but submit() will
+	// overwrite it with a new one from context.WithCancel.
+}

@@ -198,9 +198,16 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			return a, nil, true
 		}
 	case "ctrl+l":
-		// Ctrl+L = clear screen (like CC and bash)
+		// Ctrl+L = clear screen (like CC and bash).
+		// Reset visual-only state so the viewport is truly blank.
+		// The engine/busy state is NOT cancelled — any in-flight turn
+		// continues and its output will appear fresh. Without clearing
+		// the tool tree and thinking text here, stale ⟳ entries and
+		// the thinking indicator would linger on the "cleared" screen.
 		a.messages = a.messages[:0]
 		a.streaming = ""
+		a.thinkingText = ""
+		a.tools.Clear()
 		a.updateViewport()
 		return a, nil, true
 	case "ctrl+r":

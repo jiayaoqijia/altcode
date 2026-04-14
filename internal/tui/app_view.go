@@ -10,8 +10,13 @@ import (
 
 // View renders the full TUI. Delegates to sub-renderers.
 func (a *App) View() string {
-	if a.width == 0 {
+	if a.width == 0 || a.height == 0 {
 		return "Loading..."
+	}
+	// Degenerate terminal: not enough room for header+sep+body+status+input.
+	// Render a single-line fallback so we don't garble the display or panic.
+	if a.height < 4 {
+		return "altcode (terminal too small)"
 	}
 	header := a.renderHeader()
 	sep := lipgloss.NewStyle().Foreground(a.theme.Border).
