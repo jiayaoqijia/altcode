@@ -18,6 +18,7 @@ import (
 	"github.com/altcode-ai/altcode/internal/hooks"
 	"github.com/altcode-ai/altcode/internal/permission"
 	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/altcode-ai/altcode/internal/schema"
 	"github.com/altcode-ai/altcode/internal/tool"
 )
 
@@ -168,11 +169,22 @@ type Params struct {
 	// warning at startup.
 	CommitDirty bool
 
+	// SchemaFile is a path to a JSON Schema file. When set, the
+	// final agent response text is parsed as JSON and validated
+	// against the schema. Validation errors are printed to stderr
+	// and cause a non-zero exit. Works with all output formats.
+	SchemaFile string
+
 	// preRunDirty captures `git status --porcelain` output at
 	// the entry to Run(). Used by the commit path to detect
 	// whether the working tree was dirty before the run started.
 	// Populated by Run(), not the caller.
 	preRunDirty string
+
+	// responseText accumulates the final agent response text
+	// across all drain functions. Used by --schema validation
+	// after the drain completes. Populated by drain*, not caller.
+	responseText string
 
 	// --- Phase 6: hooks + extension ---
 	// Hooks is a list of "<event>:<shell-command>" strings.
@@ -1054,6 +1066,105 @@ func writeArtifacts(ctx context.Context, p *Params, eng *engine.Engine) error {
 	// covers cost + diff; transcript writing happens after
 	// acc.observe() has captured every event.
 	return nil
+}
+
+// validateResponseSchema loads the JSON Schema from p.SchemaFile,
+// extracts JSON from the response text, and validates it. Returns
+// an error if the response is not valid JSON or fails validation.
+func validateResponseSchema(p *Params) error {
+	s, err := schema.LoadSchema(p.SchemaFile)
+	if err != nil {
+		return fmt.Errorf("--schema: %w", err)
+	}
+	jsonStr := extractJSON(p.responseText)
+	if jsonStr == "" {
+		fmt.Fprintln(os.Stderr,
+			"altcode: --schema: response contains no JSON")
+		return &UsageError{
+			Msg:      "response contains no JSON to validate",
+			ExitCode: 1,
+		}
+	}
+	errs, parseErr := s.ValidateJSON(jsonStr)
+	if parseErr != nil {
+		fmt.Fprintf(os.Stderr,
+			"altcode: --schema: %v\n", parseErr)
+		return &UsageError{
+			Msg: fmt.Sprintf(
+				"schema validation parse error: %v", parseErr),
+			ExitCode: 1,
+		}
+	}
+	if len(errs) > 0 {
+		fmt.Fprintln(os.Stderr,
+			"altcode: --schema validation errors:")
+		for _, e := range errs {
+			fmt.Fprintf(os.Stderr, "  - %s\n", e)
+		}
+		return &UsageError{
+			Msg: fmt.Sprintf(
+				"schema validation failed (%d errors)", len(errs)),
+			ExitCode: 1,
+		}
+	}
+	return nil
+}
+
+// extractJSON finds the first JSON object or array in text.
+// Agent responses often wrap JSON in markdown prose; this
+// extracts the outermost balanced { } or [ ] sequence.
+func extractJSON(text string) string {
+	text = strings.TrimSpace(text)
+	if json.Valid([]byte(text)) {
+		return text
+	}
+	for i, c := range text {
+		if c != '{' && c != '[' {
+			continue
+		}
+		closeCh := matchingClose(c)
+		depth := 0
+		inStr := false
+		esc := false
+		for j := i; j < len(text); j++ {
+			ch := text[j]
+			if esc {
+				esc = false
+				continue
+			}
+			if ch == '\\' && inStr {
+				esc = true
+				continue
+			}
+			if ch == '"' {
+				inStr = !inStr
+				continue
+			}
+			if inStr {
+				continue
+			}
+			if ch == byte(c) {
+				depth++
+			} else if ch == closeCh {
+				depth--
+				if depth == 0 {
+					candidate := text[i : j+1]
+					if json.Valid([]byte(candidate)) {
+						return candidate
+					}
+					break
+				}
+			}
+		}
+	}
+	return ""
+}
+
+func matchingClose(open rune) byte {
+	if open == '{' {
+		return '}'
+	}
+	return ']'
 }
 
 // commitChanges runs `git commit -m <message>` after a successful

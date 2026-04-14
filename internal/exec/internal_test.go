@@ -1226,3 +1226,63 @@ func (b *brokenWriter) Write(p []byte) (int, error) {
 	}
 	return n, nil
 }
+
+// --- extractJSON tests ---
+
+func TestExtractJSON(t *testing.T) {
+	cases := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{
+			name:  "pure JSON object",
+			input: `{"key": "value"}`,
+			want:  `{"key": "value"}`,
+		},
+		{
+			name:  "pure JSON array",
+			input: `[1, 2, 3]`,
+			want:  `[1, 2, 3]`,
+		},
+		{
+			name:  "JSON in markdown prose",
+			input: "Here is the result:\n{\"status\": \"ok\"}\nDone.",
+			want:  `{"status": "ok"}`,
+		},
+		{
+			name:  "JSON with nested braces",
+			input: `prefix {"a": {"b": 1}} suffix`,
+			want:  `{"a": {"b": 1}}`,
+		},
+		{
+			name:  "JSON with string containing braces",
+			input: `text {"msg": "hello {world}"} end`,
+			want:  `{"msg": "hello {world}"}`,
+		},
+		{
+			name:  "no JSON at all",
+			input: "just plain text",
+			want:  "",
+		},
+		{
+			name:  "empty string",
+			input: "",
+			want:  "",
+		},
+		{
+			name:  "array in prose",
+			input: `Results: [{"a":1},{"b":2}] done`,
+			want:  `[{"a":1},{"b":2}]`,
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := extractJSON(tc.input)
+			if got != tc.want {
+				t.Errorf("extractJSON(%q) = %q, want %q",
+					tc.input, got, tc.want)
+			}
+		})
+	}
+}

@@ -89,6 +89,9 @@ type cliFlags struct {
 	commit      bool // --commit after successful run
 	commitDirty bool // --commit-dirty bypass clean-tree guard
 
+	// Schema validation
+	schemaFile string // --schema <path> JSON schema for response validation
+
 	// Phase 3: permission-prompt-tool
 	permPromptTool string // --permission-prompt-tool mcp__<server>__<tool>
 
@@ -210,6 +213,11 @@ func main() {
 	root.Flags().BoolVar(&flags.commitDirty, "commit-dirty", false,
 		"Allow --commit even when the pre-run working tree was dirty "+
 			"(mixes human + agent changes in the commit)")
+
+	// --- Schema validation ---
+	root.Flags().StringVar(&flags.schemaFile, "schema", "",
+		"Validate final response JSON against a JSON Schema file. "+
+			"Prints errors to stderr and exits 1 if invalid.")
 
 	// --- Phase 6: hooks + extensions ---
 	root.Flags().StringArrayVar(&flags.cliHooks, "hook", nil,
@@ -663,6 +671,7 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			MaxCost:        flags.maxCost,
 			Commit:         flags.commit,
 			CommitDirty:    flags.commitDirty,
+			SchemaFile:     flags.schemaFile,
 			Hooks:          flags.cliHooks,
 			MCPServers:     flags.cliMCP,
 			Skills:         flags.cliSkill,
