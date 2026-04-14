@@ -234,3 +234,20 @@ test.describe('SSE rendering edge cases', () => {
     expect(resp.status()).toBe(400);
   });
 });
+
+// ---- Group 7: Double-submit idempotency ----
+
+test.describe('Double-submit', () => {
+  test('two identical task creates produce two distinct tasks', async ({ request }) => {
+    const payload = { repo_url: 'https://github.com/test/dblsub', task: 'double submit test' };
+    const [r1, r2] = await Promise.all([
+      request.post(`${BASE}/tasks`, { headers: apiHeaders, data: payload }),
+      request.post(`${BASE}/tasks`, { headers: apiHeaders, data: payload }),
+    ]);
+    expect(r1.status()).toBe(201);
+    expect(r2.status()).toBe(201);
+    const id1 = (await r1.json()).id;
+    const id2 = (await r2.json()).id;
+    expect(id1).not.toBe(id2); // unique IDs
+  });
+});
