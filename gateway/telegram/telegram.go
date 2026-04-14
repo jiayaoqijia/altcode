@@ -295,17 +295,19 @@ func (c *Channel) isMentioned(message *telego.Message) bool {
 	}
 
 	username := c.bot.Username()
-	runes := []rune(text)
+	// Telegram entity offsets are UTF-16 code units, not rune indices.
+	// Convert text to UTF-16 for correct offset handling with non-BMP chars (emoji).
+	utf16Text := utf16Encode(text)
 
 	for _, e := range entities {
 		if e.Offset < 0 || e.Length <= 0 {
 			continue
 		}
 		end := e.Offset + e.Length
-		if e.Offset >= len(runes) || end > len(runes) {
+		if e.Offset >= len(utf16Text) || end > len(utf16Text) {
 			continue
 		}
-		entityText := string(runes[e.Offset:end])
+		entityText := utf16Decode(utf16Text[e.Offset:end])
 
 		switch e.Type {
 		case telego.EntityTypeMention:
@@ -442,4 +444,36 @@ func escapeHTML(text string) string {
 	text = strings.ReplaceAll(text, "<", "&lt;")
 	text = strings.ReplaceAll(text, ">", "&gt;")
 	return text
+}
+
+// utf16Encode converts a Go string to a UTF-16 code unit slice.
+// Telegram entity offsets/lengths are in UTF-16 code units.
+func utf16Encode(s string) []uint16 {
+	var out []uint16
+	for _, r := range s {
+		if r >= 0x10000 {
+			// Supplementary plane: encode as surrogate pair
+			r -= 0x10000
+			out = append(out, uint16(0xD800+(r>>10)), uint16(0xDC00+(r&0x3FF)))
+		} else {
+			out = append(out, uint16(r))
+		}
+	}
+	return out
+}
+
+// utf16Decode converts a UTF-16 code unit slice back to a Go string.
+func utf16Decode(units []uint16) string {
+	var runes []rune
+	for i := 0; i < len(units); i++ {
+		if units[i] >= 0xD800 && units[i] <= 0xDBFF && i+1 < len(units) && units[i+1] >= 0xDC00 && units[i+1] <= 0xDFFF {
+			hi := rune(units[i] - 0xD800)
+			lo := rune(units[i+1] - 0xDC00)
+			runes = append(runes, 0x10000+hi<<10+lo)
+			i++
+		} else {
+			runes = append(runes, rune(units[i]))
+		}
+	}
+	return string(runes)
 }

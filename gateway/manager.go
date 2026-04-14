@@ -20,12 +20,11 @@ import (
 )
 
 const (
-	defaultQueueSize = 16
-	defaultRate      = 10.0
-	maxRetries       = 3
-	rateLimitDelay   = 1 * time.Second
-	baseBackoff      = 500 * time.Millisecond
-	maxBackoffDur    = 8 * time.Second
+	defaultRate    = 10.0
+	maxRetries     = 3
+	rateLimitDelay = 1 * time.Second
+	baseBackoff    = 500 * time.Millisecond
+	maxBackoffDur  = 8 * time.Second
 )
 
 // channelRateDefaults maps channel name to per-second rate limit.
@@ -36,8 +35,6 @@ var channelRateDefaults = map[string]float64{
 
 type worker struct {
 	ch      Channel
-	queue   chan OutboundMessage
-	done    chan struct{}
 	limiter *rate.Limiter
 }
 
@@ -80,7 +77,6 @@ func (m *Manager) StartAll(ctx context.Context) error {
 		}
 		w := newWorker(name, ch)
 		m.workers[name] = w
-		go m.runWorker(ctx, name, w)
 	}
 
 	m.logger.Info("all channels started",
@@ -88,17 +84,10 @@ func (m *Manager) StartAll(ctx context.Context) error {
 	return nil
 }
 
-// StopAll stops all channels and drains outbound queues.
+// StopAll stops all registered channels.
 func (m *Manager) StopAll(ctx context.Context) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	for _, w := range m.workers {
-		close(w.queue)
-	}
-	for _, w := range m.workers {
-		<-w.done
-	}
 
 	for name, ch := range m.channels {
 		if err := ch.Stop(ctx); err != nil {
@@ -147,26 +136,7 @@ func newWorker(name string, ch Channel) *worker {
 
 	return &worker{
 		ch:      ch,
-		queue:   make(chan OutboundMessage, defaultQueueSize),
-		done:    make(chan struct{}),
 		limiter: rate.NewLimiter(rate.Limit(rateVal), burst),
-	}
-}
-
-func (m *Manager) runWorker(
-	ctx context.Context, name string, w *worker,
-) {
-	defer close(w.done)
-	for {
-		select {
-		case msg, ok := <-w.queue:
-			if !ok {
-				return
-			}
-			m.sendWithRetry(ctx, name, w, msg)
-		case <-ctx.Done():
-			return
-		}
 	}
 }
 
