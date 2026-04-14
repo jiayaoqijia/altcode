@@ -1,4 +1,4 @@
-// Copied from github.com/jiayaoqijia/ottie/pkg/gateway/ratelimit.go
+// Copied from github.com/altcode-ai/altcode/gateway/ratelimit.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 
 package gateway

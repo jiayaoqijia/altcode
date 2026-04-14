@@ -1,4 +1,4 @@
-// Copied from github.com/jiayaoqijia/ottie/pkg/channels/split.go
+// Copied from github.com/altcode-ai/altcode/gateway/split.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 
 package gateway

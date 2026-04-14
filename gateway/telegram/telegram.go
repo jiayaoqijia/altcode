@@ -1,4 +1,4 @@
-// Adapted from github.com/jiayaoqijia/ottie/pkg/channels/telegram/telegram.go
+// Adapted from github.com/altcode-ai/altcode/gateway/telegram/telegram.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 //
 // Stripped ottie-specific dependencies (bus, identity, media, config, swarm).

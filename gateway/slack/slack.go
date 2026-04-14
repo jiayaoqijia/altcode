@@ -1,4 +1,4 @@
-// Adapted from github.com/jiayaoqijia/ottie/pkg/channels/slack/slack.go
+// Adapted from github.com/altcode-ai/altcode/gateway/slack/slack.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 //
 // Stripped ottie-specific dependencies (bus, identity, media, config).
