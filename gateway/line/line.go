@@ -21,6 +21,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/altcode-ai/altcode/gateway"
 )
 
@@ -56,6 +58,7 @@ type Channel struct {
 	webhookPath        string
 	apiClient          *http.Client
 	infoClient         *http.Client
+	limiter            *rate.Limiter
 	botUserID          string
 	botDisplayName     string
 	replyTokens        sync.Map // chatID -> replyTokenEntry
@@ -85,6 +88,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		webhookPath:        webhookPath,
 		apiClient:          &http.Client{Timeout: 30 * time.Second},
 		infoClient:         &http.Client{Timeout: 10 * time.Second},
+		limiter:            rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		allowList:          cfg.AllowFrom,
 		allowAll:           cfg.AllowAll,
 	}, nil
@@ -162,6 +166,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	// Try reply token first (free)

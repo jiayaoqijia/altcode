@@ -27,6 +27,7 @@ import (
 	"go.mau.fi/whatsmeow/types"
 	"go.mau.fi/whatsmeow/types/events"
 	waLog "go.mau.fi/whatsmeow/util/log"
+	"golang.org/x/time/rate"
 	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 
@@ -55,6 +56,7 @@ type NativeChannel struct {
 	storePath    string
 	client       *whatsmeow.Client
 	container    *sqlstore.Container
+	limiter      *rate.Limiter
 	mu           sync.Mutex
 	runCtx       context.Context
 	runCancel    context.CancelFunc
@@ -80,6 +82,7 @@ func NewNative(
 			"whatsapp_native", handler,
 		),
 		storePath: storePath,
+		limiter:   rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		allowList: cfg.AllowFrom,
 		allowAll:  cfg.AllowAll,
 	}, nil
@@ -348,10 +351,9 @@ func (c *NativeChannel) Send(
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
 	}
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	c.mu.Lock()

@@ -15,6 +15,7 @@ import (
 	"github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -32,6 +33,7 @@ type Channel struct {
 	*gateway.BaseChannel
 	api          *slack.Client
 	socketClient *socketmode.Client
+	limiter      *rate.Limiter
 	botUserID    string
 	allowList    []string
 	allowAll     bool
@@ -55,6 +57,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		BaseChannel:  gateway.NewBaseChannel("slack", handler),
 		api:          api,
 		socketClient: socketClient,
+		limiter:      rate.NewLimiter(rate.Limit(1), 1), // 1 msg/sec
 		allowList:    cfg.AllowFrom,
 		allowAll:     cfg.AllowAll,
 	}, nil
@@ -100,6 +103,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	channelID, threadTS := parseChatID(msg.ChatID)

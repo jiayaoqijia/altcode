@@ -14,6 +14,7 @@ import (
 
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -32,6 +33,7 @@ type Channel struct {
 	clientID        string
 	clientSecret    string
 	streamClient    *client.StreamClient
+	limiter         *rate.Limiter
 	ctx             context.Context
 	cancel          context.CancelFunc
 	allowList       []string
@@ -51,6 +53,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		BaseChannel:  gateway.NewBaseChannel("dingtalk", handler),
 		clientID:     cfg.ClientID,
 		clientSecret: cfg.ClientSecret,
+		limiter:      rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		allowList:    cfg.AllowFrom,
 		allowAll:     cfg.AllowAll,
 	}, nil
@@ -99,6 +102,10 @@ func (c *Channel) Send(
 		return gateway.ErrNotRunning
 	}
 
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
+	}
+
 	sessionWebhookRaw, ok := c.sessionWebhooks.Load(msg.ChatID)
 	if !ok {
 		return fmt.Errorf(
@@ -116,6 +123,12 @@ func (c *Channel) Send(
 	return c.sendDirectReply(ctx, sessionWebhook, msg.Text)
 }
 
+// TODO(security): The DingTalk stream SDK authenticates at the transport
+// layer (client_id + client_secret during WebSocket handshake), so individual
+// callback payloads are not HMAC-signed. If the SDK is ever replaced with a
+// raw HTTP webhook receiver, inbound requests MUST verify the DingTalk
+// signature header (X-DingTalk-Signature) using HMAC-SHA256 with the
+// app secret. Without this, an attacker could forge inbound messages.
 func (c *Channel) onChatBotMessageReceived(
 	ctx context.Context,
 	data *chatbot.BotCallbackDataModel,

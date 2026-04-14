@@ -21,6 +21,7 @@ import (
 	"github.com/tencent-connect/botgo/openapi"
 	"github.com/tencent-connect/botgo/token"
 	"golang.org/x/oauth2"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -47,6 +48,7 @@ type Channel struct {
 	config         Config
 	api            openapi.OpenAPI
 	tokenSource    oauth2.TokenSource
+	limiter        *rate.Limiter
 	ctx            context.Context
 	cancel         context.CancelFunc
 	sessionManager botgo.SessionManager
@@ -72,6 +74,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	return &Channel{
 		BaseChannel: gateway.NewBaseChannel("qq", handler),
 		config:      cfg,
+		limiter:     rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		dedup:       make(map[string]time.Time),
 		done:        make(chan struct{}),
 		allowList:   cfg.AllowFrom,
@@ -162,6 +165,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	chatKind := c.getChatKind(msg.ChatID)

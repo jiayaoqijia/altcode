@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -31,6 +32,7 @@ type Channel struct {
 	*gateway.BaseChannel
 	conn      *websocket.Conn
 	url       string
+	limiter   *rate.Limiter
 	ctx       context.Context
 	cancel    context.CancelFunc
 	mu        sync.Mutex
@@ -48,6 +50,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	return &Channel{
 		BaseChannel: gateway.NewBaseChannel("whatsapp", handler),
 		url:         cfg.BridgeURL,
+		limiter:     rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		allowList:   cfg.AllowFrom,
 		allowAll:    cfg.AllowAll,
 	}, nil
@@ -108,10 +111,8 @@ func (c *Channel) Send(
 		return gateway.ErrNotRunning
 	}
 
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	default:
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	c.mu.Lock()
@@ -157,13 +158,20 @@ func (c *Channel) listen() {
 			c.mu.Unlock()
 
 			if conn == nil {
-				time.Sleep(1 * time.Second)
+				c.reconnect()
 				continue
 			}
 
 			_, message, err := conn.ReadMessage()
 			if err != nil {
-				time.Sleep(2 * time.Second)
+				c.mu.Lock()
+				if c.conn != nil {
+					c.conn.Close()
+					c.conn = nil
+				}
+				c.connected = false
+				c.mu.Unlock()
+				c.reconnect()
 				continue
 			}
 
@@ -179,6 +187,37 @@ func (c *Channel) listen() {
 
 			c.handleIncomingMessage(msg)
 		}
+	}
+}
+
+func (c *Channel) reconnect() {
+	backoff := time.Second
+	const maxBackoff = 30 * time.Second
+
+	for {
+		select {
+		case <-c.ctx.Done():
+			return
+		case <-time.After(backoff):
+		}
+
+		dialer := *websocket.DefaultDialer
+		dialer.HandshakeTimeout = 10 * time.Second
+
+		conn, resp, err := dialer.Dial(c.url, nil)
+		if resp != nil {
+			resp.Body.Close()
+		}
+		if err != nil {
+			backoff = min(backoff*2, maxBackoff)
+			continue
+		}
+
+		c.mu.Lock()
+		c.conn = conn
+		c.connected = true
+		c.mu.Unlock()
+		return
 	}
 }
 

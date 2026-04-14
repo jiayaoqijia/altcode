@@ -17,6 +17,8 @@ import (
 	"strings"
 	"time"
 
+	"golang.org/x/time/rate"
+
 	"github.com/altcode-ai/altcode/gateway"
 )
 
@@ -71,6 +73,7 @@ type Channel struct {
 	*gateway.BaseChannel
 	config        Config
 	client        *http.Client
+	limiter       *rate.Limiter
 	ctx           context.Context
 	cancel        context.CancelFunc
 	processedMsgs *MessageDeduplicator
@@ -95,6 +98,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		BaseChannel:   gateway.NewBaseChannel("wecom", handler),
 		config:        cfg,
 		client:        &http.Client{Timeout: clientTimeout},
+		limiter:       rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		processedMsgs: NewMessageDeduplicator(wecomMaxProcessedMessages),
 		allowList:     cfg.AllowFrom,
 		allowAll:      cfg.AllowAll,
@@ -120,6 +124,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	return c.sendWebhookReply(ctx, msg.ChatID, msg.Text)

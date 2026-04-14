@@ -19,6 +19,7 @@ import (
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/gorilla/websocket"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -46,6 +47,7 @@ type Config struct {
 type Channel struct {
 	*gateway.BaseChannel
 	session    *discordgo.Session
+	limiter    *rate.Limiter
 	allowList  []string
 	allowAll   bool
 	ctx        context.Context
@@ -69,6 +71,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	return &Channel{
 		BaseChannel: gateway.NewBaseChannel("discord", handler),
 		session:     session,
+		limiter:     rate.NewLimiter(rate.Limit(5), 3), // 5 msg/sec
 		allowList:   cfg.AllowFrom,
 		allowAll:    cfg.AllowAll,
 		typingStop:  make(map[string]chan struct{}),
@@ -122,6 +125,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	channelID := msg.ChatID

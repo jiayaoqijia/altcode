@@ -20,6 +20,7 @@ import (
 	"maunium.net/go/mautrix"
 	"maunium.net/go/mautrix/event"
 	"maunium.net/go/mautrix/id"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -60,6 +61,7 @@ type Channel struct {
 	client    *mautrix.Client
 	config    Config
 	syncer    *mautrix.DefaultSyncer
+	limiter   *rate.Limiter
 	ctx       context.Context
 	cancel    context.CancelFunc
 	startTime time.Time
@@ -110,6 +112,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		client:         client,
 		config:         cfg,
 		syncer:         syncer,
+		limiter:        rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		typingSessions: make(map[string]*typingSession),
 		startTime:      time.Now(),
 		allowList:      cfg.AllowFrom,
@@ -159,6 +162,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	roomID := id.RoomID(strings.TrimSpace(msg.ChatID))

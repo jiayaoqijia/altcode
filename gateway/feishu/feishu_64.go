@@ -22,6 +22,7 @@ import (
 	larkdispatcher "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -42,6 +43,7 @@ type Channel struct {
 	config    Config
 	client    *lark.Client
 	wsClient  *larkws.Client
+	limiter   *rate.Limiter
 	botOpenID atomic.Value
 	mu        sync.Mutex
 	cancel    context.CancelFunc
@@ -64,6 +66,7 @@ func New(
 		BaseChannel: gateway.NewBaseChannel("feishu", handler),
 		config:      cfg,
 		client:      lark.NewClient(cfg.AppID, cfg.AppSecret),
+		limiter:     rate.NewLimiter(rate.Limit(10), 5), // 10 msg/sec
 		allowList:   cfg.AllowFrom,
 		allowAll:    cfg.AllowAll,
 	}, nil
@@ -117,6 +120,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	if msg.ChatID == "" {

@@ -29,8 +29,20 @@ const (
 
 // channelRateDefaults maps channel name to per-second rate limit.
 var channelRateDefaults = map[string]float64{
-	"telegram": 20,
-	"slack":    1,
+	"telegram":        30,
+	"slack":           1,
+	"discord":         5,
+	"whatsapp":        10,
+	"whatsapp_native": 10,
+	"matrix":          10,
+	"irc":             2,
+	"onebot":          10,
+	"qq":              10,
+	"signal":          10,
+	"feishu":          10,
+	"dingtalk":        10,
+	"wecom":           10,
+	"line":            10,
 }
 
 type worker struct {

@@ -20,6 +20,7 @@ import (
 	"github.com/mymmrac/telego"
 	th "github.com/mymmrac/telego/telegohandler"
 	tu "github.com/mymmrac/telego/telegoutil"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -51,6 +52,7 @@ type Channel struct {
 	*gateway.BaseChannel
 	bot       *telego.Bot
 	bh        *th.BotHandler
+	limiter   *rate.Limiter
 	allowList []string
 	allowAll  bool
 	ctx       context.Context
@@ -90,6 +92,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	return &Channel{
 		BaseChannel: gateway.NewBaseChannel("telegram", handler),
 		bot:         bot,
+		limiter:     rate.NewLimiter(rate.Limit(30), 10), // 30 msg/sec
 		allowList:   cfg.AllowFrom,
 		allowAll:    cfg.AllowAll,
 	}, nil
@@ -145,6 +148,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	chatID, threadID, err := parseChatID(msg.ChatID)

@@ -15,6 +15,7 @@ import (
 
 	"github.com/ergochat/irc-go/ircevent"
 	"github.com/ergochat/irc-go/ircmsg"
+	"golang.org/x/time/rate"
 
 	"github.com/altcode-ai/altcode/gateway"
 )
@@ -41,6 +42,7 @@ type Channel struct {
 	*gateway.BaseChannel
 	config    Config
 	conn      *ircevent.Connection
+	limiter   *rate.Limiter
 	ctx       context.Context
 	cancel    context.CancelFunc
 	allowList []string
@@ -59,6 +61,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 	return &Channel{
 		BaseChannel: gateway.NewBaseChannel("irc", handler),
 		config:      cfg,
+		limiter:     rate.NewLimiter(rate.Limit(2), 2), // 2 msg/sec
 		allowList:   cfg.AllowFrom,
 		allowAll:    cfg.AllowAll,
 	}, nil
@@ -141,6 +144,10 @@ func (c *Channel) Send(
 ) error {
 	if !c.IsRunning() {
 		return gateway.ErrNotRunning
+	}
+
+	if err := c.limiter.Wait(ctx); err != nil {
+		return err
 	}
 
 	target := msg.ChatID
