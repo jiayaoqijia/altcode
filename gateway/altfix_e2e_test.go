@@ -252,7 +252,10 @@ func TestE2E_FullLifecycle(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	// The list shows first 8 chars of each ID
-	shortID := taskID[:8]
+	shortID := taskID
+	if len(shortID) > 8 {
+		shortID = shortID[:8]
+	}
 	if !strings.Contains(listReply, shortID) {
 		t.Errorf("list should contain task %s: %s",
 			shortID, listReply)

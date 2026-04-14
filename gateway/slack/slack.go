@@ -24,6 +24,7 @@ type Config struct {
 	BotToken  string
 	AppToken  string
 	AllowFrom []string
+	AllowAll  bool // must be explicitly true to allow all senders
 }
 
 // Channel implements gateway.Channel for Slack.
@@ -33,6 +34,7 @@ type Channel struct {
 	socketClient *socketmode.Client
 	botUserID    string
 	allowList    []string
+	allowAll     bool
 	ctx          context.Context
 	cancel       context.CancelFunc
 }
@@ -54,6 +56,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		api:          api,
 		socketClient: socketClient,
 		allowList:    cfg.AllowFrom,
+		allowAll:     cfg.AllowAll,
 	}, nil
 }
 
@@ -269,7 +272,7 @@ func (c *Channel) handleSlashCommand(event socketmode.Event) {
 
 func (c *Channel) isAllowed(userID string) bool {
 	if len(c.allowList) == 0 {
-		return true
+		return c.allowAll // deny by default unless AllowAll is explicit
 	}
 	for _, a := range c.allowList {
 		if a == userID {

@@ -43,6 +43,7 @@ type Config struct {
 	Proxy     string // optional HTTP proxy URL
 	BaseURL   string // optional custom API server
 	AllowFrom []string
+	AllowAll  bool // must be explicitly true to allow all senders
 }
 
 // Channel implements gateway.Channel for Telegram.
@@ -51,6 +52,7 @@ type Channel struct {
 	bot       *telego.Bot
 	bh        *th.BotHandler
 	allowList []string
+	allowAll  bool
 	ctx       context.Context
 	cancel    context.CancelFunc
 }
@@ -89,6 +91,7 @@ func New(cfg Config, handler gateway.MessageHandler) (*Channel, error) {
 		BaseChannel: gateway.NewBaseChannel("telegram", handler),
 		bot:         bot,
 		allowList:   cfg.AllowFrom,
+		allowAll:    cfg.AllowAll,
 	}, nil
 }
 
@@ -270,7 +273,7 @@ func (c *Channel) handleMessage(message *telego.Message) error {
 
 func (c *Channel) isAllowed(senderID string) bool {
 	if len(c.allowList) == 0 {
-		return true
+		return c.allowAll // deny by default unless AllowAll is explicit
 	}
 	for _, a := range c.allowList {
 		if a == senderID || strings.TrimPrefix(a, "@") == senderID {

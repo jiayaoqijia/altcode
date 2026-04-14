@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -13,11 +14,12 @@ import (
 
 // AltFixBridge translates channel messages into altcode daemon API calls.
 type AltFixBridge struct {
-	daemonURL string
-	authToken string
-	repoURL   string // default repo for /fix commands
-	client    *http.Client
-	manager   *Manager
+	daemonURL   string
+	authToken   string
+	repoURL     string // default repo for /fix commands
+	client      *http.Client
+	manager     *Manager
+	rateLimiter *RateLimiter
 }
 
 // BridgeConfig configures the AltFix bridge.
@@ -35,6 +37,11 @@ func NewAltFixBridge(cfg BridgeConfig, mgr *Manager) *AltFixBridge {
 		repoURL:   cfg.RepoURL,
 		client:    &http.Client{Timeout: 30 * time.Second},
 		manager:   mgr,
+		rateLimiter: NewRateLimiter(RateLimitConfig{
+			MaxAttempts:    5,
+			WindowSeconds:  60,
+			LockoutSeconds: 60,
+		}),
 	}
 }
 
@@ -45,6 +52,12 @@ func (b *AltFixBridge) HandleMessage(
 ) {
 	text := strings.TrimSpace(msg.Text)
 	if text == "" {
+		return
+	}
+
+	// Rate limit per sender.
+	if b.rateLimiter != nil && !b.rateLimiter.Allow("msg", msg.SenderID) {
+		b.reply(ctx, msg, "Rate limited. Please wait before sending more commands.")
 		return
 	}
 
@@ -72,17 +85,37 @@ func (b *AltFixBridge) HandleMessage(
 	}
 
 	if err != nil {
-		reply = "Error: " + err.Error()
+		log.Printf("gateway error: %v", err)
+		reply = "Error: " + sanitizeError(err)
 	}
 
 	if reply != "" {
-		_ = b.manager.Send(ctx, OutboundMessage{
-			Channel: msg.ChannelName,
-			ChatID:  msg.ChatID,
-			Text:    reply,
-			ReplyTo: msg.MessageID,
-		})
+		b.reply(ctx, msg, reply)
 	}
+}
+
+func (b *AltFixBridge) reply(
+	ctx context.Context, msg InboundMessage, text string,
+) {
+	_ = b.manager.Send(ctx, OutboundMessage{
+		Channel: msg.ChannelName,
+		ChatID:  msg.ChatID,
+		Text:    text,
+		ReplyTo: msg.MessageID,
+	})
+}
+
+// sanitizeError strips internal details (URLs, paths, response bodies)
+// from daemon errors before they reach chat users.
+func sanitizeError(err error) string {
+	msg := err.Error()
+	if strings.Contains(msg, "daemon returned") {
+		// Extract just the status code portion, e.g. "daemon returned 404"
+		if idx := strings.Index(msg, ":"); idx > 0 {
+			return msg[:idx]
+		}
+	}
+	return "internal error"
 }
 
 func (b *AltFixBridge) createTask(
@@ -144,7 +177,7 @@ func (b *AltFixBridge) listTasks(
 		}
 		sb.WriteString(fmt.Sprintf(
 			"\n[%s] %s\n  %s ($%.4f)\n",
-			t.Status, t.ID[:8], desc, t.APICostUSD,
+			t.Status, safeTrunc(t.ID, 8), desc, t.APICostUSD,
 		))
 	}
 	return sb.String(), nil
@@ -258,4 +291,13 @@ func helpText() string {
 /help               - Show this help
 
 Or just send a message to create a task.`
+}
+
+// safeTrunc returns s truncated to n characters, or s itself if
+// len(s) <= n. Prevents panics on short IDs.
+func safeTrunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
 }
