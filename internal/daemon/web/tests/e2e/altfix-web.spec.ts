@@ -414,7 +414,7 @@ test.describe('Authenticated pages', () => {
 
   test('new task form has CSRF hidden field', async ({ page }) => {
     await page.goto(`${BASE}/ui/tasks/new`);
-    const csrfField = page.locator('input[name="_csrf"]');
+    const csrfField = page.locator('form[action="/api/tasks"] input[name="_csrf"]');
     await expect(csrfField).toHaveCount(1);
     const val = await csrfField.getAttribute('value');
     expect(val).toBeTruthy();
