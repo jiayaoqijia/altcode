@@ -287,7 +287,7 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 	sessions := cfg.Sessions
 	h := &WebHandler{
 		tmpl:     tmpl,
-		store:    nil,
+		store:    cfg.Store,
 		sessions: sessions,
 		cfg:      cfg,
 		orgCache: NewOrgCache(15 * time.Minute),

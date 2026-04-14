@@ -1,6 +1,7 @@
 package web
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -8,7 +9,7 @@ import (
 	"time"
 )
 
-// mockFullStore implements DashboardStore, RepoStore, and IssueStore
+// mockFullStore implements StoreIface, RepoStore, and IssueStore
 // for testing the new handlers.
 type mockFullStore struct {
 	tasks  []*TaskView
@@ -18,6 +19,21 @@ type mockFullStore struct {
 
 func (m *mockFullStore) ListTasks() ([]*TaskView, error) {
 	return m.tasks, nil
+}
+
+func (m *mockFullStore) GetTask(id string) (*TaskView, error) {
+	for _, t := range m.tasks {
+		if t.ID == id {
+			return t, nil
+		}
+	}
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockFullStore) ListEvents(
+	_ string, _ int64,
+) ([]*EventView, error) {
+	return nil, nil
 }
 
 func (m *mockFullStore) ListRepos() ([]string, error) {

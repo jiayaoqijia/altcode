@@ -20,9 +20,14 @@ import (
 // http.DefaultClient so that a stalled upstream can't block forever.
 var githubHTTPClient = &http.Client{Timeout: 10 * time.Second}
 
-// StoreIface is a placeholder for the daemon.Store dependency.
-// Task 8 wires the real implementation.
-type StoreIface interface{}
+// StoreIface is the dependency interface for the daemon store.
+// Concrete implementations must satisfy DashboardStore and
+// EventStore via type assertion in the handlers.
+type StoreIface interface {
+	ListTasks() ([]*TaskView, error)
+	GetTask(id string) (*TaskView, error)
+	ListEvents(taskID string, afterID int64) ([]*EventView, error)
+}
 
 // WebConfig holds OAuth and access-control settings.
 type WebConfig struct {
@@ -34,6 +39,8 @@ type WebConfig struct {
 	AdminUsers     []string
 	SigningKey      []byte
 	BaseURL        string
+	// Store is the backing data store for tasks and events.
+	Store StoreIface
 	// TrustProxy controls whether X-Forwarded-Proto is trusted for
 	// determining TLS status. Only enable behind a known reverse proxy.
 	TrustProxy bool

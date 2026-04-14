@@ -84,6 +84,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 			AllowedUsers:   cfg.AllowedUsers,
 			AdminUsers:     cfg.AdminUsers,
 			SigningKey:      []byte(cfg.SigningKey),
+			Store:          &storeAdapter{s: store},
 			BaseURL: fmt.Sprintf(
 				"http://localhost:%d", cfg.Port,
 			),
@@ -116,6 +117,68 @@ func (s *Server) registerRoutes() {
 	s.mux.HandleFunc("POST /tasks/{id}/restore", s.handleRestoreCheckpoint)
 	s.mux.HandleFunc("GET /tasks/{id}/sse", s.handleSSE)
 	s.mux.HandleFunc("GET /ws/{id}", s.handleWebSocket)
+}
+
+// storeAdapter wraps *Store and implements web.StoreIface,
+// converting daemon types to web view types.
+type storeAdapter struct {
+	s *Store
+}
+
+func (a *storeAdapter) ListTasks() ([]*web.TaskView, error) {
+	tasks, err := a.s.ListTasks()
+	if err != nil {
+		return nil, err
+	}
+	views := make([]*web.TaskView, len(tasks))
+	for i, t := range tasks {
+		views[i] = taskToView(t)
+	}
+	return views, nil
+}
+
+func (a *storeAdapter) GetTask(id string) (*web.TaskView, error) {
+	t, err := a.s.GetTask(id)
+	if err != nil {
+		return nil, err
+	}
+	return taskToView(t), nil
+}
+
+func (a *storeAdapter) ListEvents(
+	taskID string, afterID int64,
+) ([]*web.EventView, error) {
+	events, err := a.s.ListEvents(taskID, afterID)
+	if err != nil {
+		return nil, err
+	}
+	views := make([]*web.EventView, len(events))
+	for i, e := range events {
+		views[i] = &web.EventView{
+			ID:        e.ID,
+			TaskID:    e.TaskID,
+			EventType: e.EventType,
+			Data:      e.Data,
+			CreatedAt: e.CreatedAt,
+		}
+	}
+	return views, nil
+}
+
+func taskToView(t *Task) *web.TaskView {
+	return &web.TaskView{
+		ID:              t.ID,
+		RepoURL:         t.RepoURL,
+		TaskDescription: t.TaskDescription,
+		Status:          t.Status,
+		RepoOwner:       t.RepoOwner,
+		RepoName:        t.RepoName,
+		IssueNumber:     t.IssueNumber,
+		APICostUSD:      t.APICostUSD,
+		PRNumber:        t.PRNumber,
+		PRURL:           t.PRURL,
+		CreatedAt:       t.CreatedAt,
+	}
 }
 
 // Run starts the HTTP server and blocks until shutdown.

@@ -4,13 +4,9 @@ import { test, expect, type Page } from '@playwright/test';
 // Agent orchestration E2E tests.
 //
 // Tests the full task lifecycle via the daemon REST API (bearer auth)
-// and web UI pages (session auth).
-//
-// NOTE: The web handler's DashboardStore / EventStore are not yet
-// wired to the daemon store (Task 8 pending), so the dashboard and
-// task detail pages cannot display API-created tasks. These tests
-// validate both the API surface AND the web UI skeleton, plus SSE
-// streaming via the raw API endpoint.
+// and web UI pages (session auth). The web handler's store is wired
+// to the daemon store, so dashboard and task detail pages display
+// API-created tasks.
 // -------------------------------------------------------------------
 
 const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9100}`;
@@ -94,8 +90,7 @@ test.describe('Task lifecycle via API', () => {
       headers: apiHeaders,
       data: { message: 'Focus on error handling' },
     });
-    // Steer should succeed (200 or 202)
-    expect([200, 202]).toContain(steerResp.status());
+    expect(steerResp.status()).toBe(202);
   });
 
   test('stop a task via API', async ({ request }) => {
@@ -185,7 +180,7 @@ test.describe('SSE streaming via API', () => {
         const { value, done } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
-        if (buf.includes(': heartbeat')) {
+        if (/^:\s*heartbeat/m.test(buf)) {
           hasHeartbeat = true;
           break;
         }
@@ -196,12 +191,76 @@ test.describe('SSE streaming via API', () => {
     expect(hasHeartbeat).toBe(true);
   });
 
+  test('SSE reconnects after disconnect', async ({ page, request }) => {
+    const { id } = await createTask(request, 'SSE reconnect test');
+
+    // Navigate to a page so we have a valid page context.
+    await page.goto(`${BASE}/ui/login`);
+
+    // First connection: verify heartbeat arrives.
+    const firstHeartbeat = await page.evaluate(
+      async ([url, token]) => {
+        const ctrl = new AbortController();
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+        });
+        const reader = resp.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        const deadline = Date.now() + 5000;
+        let found = false;
+        while (Date.now() < deadline) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          if (/^:\s*heartbeat/m.test(buf)) {
+            found = true;
+            break;
+          }
+        }
+        ctrl.abort();
+        return found;
+      },
+      [`${BASE}/tasks/${id}/sse`, API_TOKEN] as [string, string],
+    );
+    expect(firstHeartbeat).toBe(true);
+
+    // Second connection (simulates reconnect): verify heartbeat again.
+    const secondHeartbeat = await page.evaluate(
+      async ([url, token]) => {
+        const ctrl = new AbortController();
+        const resp = await fetch(url, {
+          headers: { 'Authorization': `Bearer ${token}` },
+          signal: ctrl.signal,
+        });
+        const reader = resp.body!.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        const deadline = Date.now() + 5000;
+        let found = false;
+        while (Date.now() < deadline) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          if (/^:\s*heartbeat/m.test(buf)) {
+            found = true;
+            break;
+          }
+        }
+        ctrl.abort();
+        return found;
+      },
+      [`${BASE}/tasks/${id}/sse`, API_TOKEN] as [string, string],
+    );
+    expect(secondHeartbeat).toBe(true);
+  });
+
   test('SSE for nonexistent task returns 404', async ({ request }) => {
     const resp = await request.get(`${BASE}/tasks/nonexistent-id/sse`, {
       headers: apiHeaders,
     });
-    // SSE endpoint should reject unknown task IDs
-    expect([404, 200]).toContain(resp.status());
+    expect(resp.status()).toBe(404);
   });
 });
 
@@ -236,19 +295,21 @@ test.describe('Web UI orchestration pages', () => {
     await expect(submitBtn).toContainText('Create Task');
   });
 
-  test('dashboard shows empty state (store not yet wired)', async ({ page }) => {
+  test('dashboard shows API-created tasks', async ({ page, request }) => {
+    const { id } = await createTask(request, 'Dashboard visibility test');
     await login(page);
-    // Until Task 8 wires the web store, dashboard shows empty state.
-    await expect(page.locator('#task-list')).toContainText('No tasks yet');
+    // Store is wired, so API-created tasks appear on the dashboard.
+    await expect(page.locator('#task-list')).toContainText('Dashboard visibility test');
   });
 
-  test('task detail returns 404 for API-created task (store not wired)', async ({ page, request }) => {
+  test('task detail renders for API-created task', async ({ page, request }) => {
+    const { id } = await createTask(request, 'Detail page render test');
     await login(page);
-    const { id } = await createTask(request, 'Detail page 404 test');
 
     const resp = await page.goto(`${BASE}/ui/tasks/${id}`);
-    // Web handler's eventStore is nil, so detail returns 404
-    expect(resp?.status()).toBe(404);
+    // Store is wired, so detail page renders with task content.
+    expect(resp?.status()).toBe(200);
+    await expect(page.locator('body')).toContainText('Detail page render test');
   });
 
   test('navigation flow: dashboard -> new task -> back', async ({ page }) => {
@@ -290,7 +351,7 @@ test.describe('Full orchestration journey', () => {
       headers: apiHeaders,
       data: { message: 'Prioritize test coverage' },
     });
-    expect([200, 202]).toContain(steerResp.status());
+    expect(steerResp.status()).toBe(202);
 
     // 4. Stop the task
     const stopResp = await request.post(`${BASE}/tasks/${id}/stop`, {
@@ -330,7 +391,7 @@ test.describe('Full orchestration journey', () => {
       headers: apiHeaders,
       data: { message: 'Focus on error handling, skip UI' },
     });
-    expect([200, 202]).toContain(steerResp.status());
+    expect(steerResp.status()).toBe(202);
 
     // Stop
     const stopResp = await request.post(`${BASE}/tasks/${id}/stop`, {

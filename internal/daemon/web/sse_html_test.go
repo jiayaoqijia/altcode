@@ -10,11 +10,18 @@ import (
 	"time"
 )
 
-// mockEventStore implements EventStore for testing.
+// mockEventStore implements StoreIface for testing.
 type mockEventStore struct {
 	task   *TaskView
 	events []*EventView
 	err    error
+}
+
+func (m *mockEventStore) ListTasks() ([]*TaskView, error) {
+	if m.task == nil {
+		return nil, nil
+	}
+	return []*TaskView{m.task}, nil
 }
 
 func (m *mockEventStore) GetTask(id string) (*TaskView, error) {
@@ -154,9 +161,9 @@ func TestHandleSSEHTML_NoStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pass a non-EventStore value.
+	// Pass nil store to test the unconnected path.
 	sessions := NewSessionStore(time.Hour)
-	h := NewWebHandler(tmpl, "not-an-event-store", sessions, WebConfig{}, NewOrgCache(time.Hour))
+	h := NewWebHandler(tmpl, nil, sessions, WebConfig{}, NewOrgCache(time.Hour))
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /ui/tasks/{id}/events", h.HandleSSEHTML)
