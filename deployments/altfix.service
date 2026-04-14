@@ -1,0 +1,36 @@
+[Unit]
+Description=AltFix Coding Agent Daemon
+Documentation=https://altcode.io
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=altfix
+Group=altfix
+WorkingDirectory=/home/altfix
+ExecStart=/usr/local/bin/altcode daemon \
+    --port 9100 \
+    --data-dir /home/altfix/.altcode/daemon \
+    --max-concurrent 2
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=altfix
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/home/altfix/.altcode /home/altfix/repos /home/altfix/workspaces /tmp
+
+# Resource limits
+LimitNOFILE=65536
+MemoryMax=4G
+
+# Environment
+EnvironmentFile=-/home/altfix/.altcode/env
+
+[Install]
+WantedBy=multi-user.target
