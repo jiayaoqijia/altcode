@@ -68,6 +68,10 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.logger.Info("task created", "id", task.ID, "repo", req.RepoURL)
+
+	// Dispatch task execution in the background.
+	go s.dispatchTask(task)
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 	json.NewEncoder(w).Encode(map[string]any{
@@ -139,6 +143,12 @@ func (s *Server) handleStopTask(w http.ResponseWriter, r *http.Request) {
 	if isTerminal(task.Status) {
 		http.Error(w, `{"error":"task already completed"}`, 409)
 		return
+	}
+
+	// Cancel the running task if a runner exists.
+	if v, ok := s.runners.Load(id); ok {
+		runner := v.(*TaskRunner)
+		runner.Stop()
 	}
 
 	s.logger.Info("stop requested", "id", id)
