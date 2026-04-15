@@ -84,7 +84,7 @@ test.describe('Real user interactions', () => {
     await login(page);
     await page.goto(`${BASE}/ui/tasks/${taskId}`);
 
-    // The steering form uses htmx to POST to /api/tasks/{id}/steer
+    // The steering form uses htmx to POST to /tasks/{id}/steer
     // with a CSRF token header. The API route requires bearer auth,
     // so htmx from the browser gets a 401. We verify the form
     // interaction (fill + click) exercises the UI without crashing.
@@ -161,18 +161,18 @@ test.describe('Real user interactions', () => {
     await expect(textarea).toHaveValue('E2E form submit test task');
 
     // Verify the CSRF hidden field is populated
-    const csrfField = page.locator('form[action="/api/tasks"] input[name="_csrf"]');
+    const csrfField = page.locator('form[action="/tasks"] input[name="_csrf"]');
     const csrfVal = await csrfField.getAttribute('value');
     expect(csrfVal).toBeTruthy();
     expect(csrfVal!.length).toBeGreaterThan(10);
 
     // Click Create Task button
-    const submitBtn = page.locator('form[action="/api/tasks"] button[type="submit"]');
+    const submitBtn = page.locator('form[action="/tasks"] button[type="submit"]');
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toContainText('Create Task');
     await submitBtn.click();
 
-    // The form POSTs to /api/tasks which requires bearer auth,
+    // The form POSTs to /tasks which requires bearer auth,
     // so the browser gets a 401. Verify no 500 crash.
     await page.waitForTimeout(1000);
     const body = await page.textContent('body');
@@ -211,11 +211,11 @@ test.describe('Real user interactions', () => {
     await page.goto(`${BASE}/ui/tasks/${taskId}`);
 
     // The Cancel button is inside a form that POSTs to
-    // /api/tasks/{id}/stop. It's only rendered when IsActive is true.
+    // /tasks/{id}/stop. It's only rendered when IsActive is true.
     const cancelBtn = page.locator('button').filter({ hasText: 'Cancel' });
     if (await cancelBtn.count() > 0) {
       await cancelBtn.click();
-      // The form POSTs to /api/tasks/{id}/stop which requires bearer
+      // The form POSTs to /tasks/{id}/stop which requires bearer
       // auth, so this will get a 401 from the browser. Verify the page
       // doesn't crash (no 500).
       await page.waitForTimeout(1000);

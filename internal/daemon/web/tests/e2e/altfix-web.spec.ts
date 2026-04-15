@@ -307,7 +307,7 @@ test.describe('Authenticated pages', () => {
     await page.goto(`${BASE}/ui/tasks/new`);
     await expect(page.locator('h1')).toContainText('New Task');
     // The task creation form (not the nav logout form).
-    await expect(page.locator('form[action="/api/tasks"]')).toBeVisible();
+    await expect(page.locator('form[action*="/tasks"]')).toBeVisible();
     // Description textarea present.
     await expect(page.locator('textarea[name="description"]')).toBeVisible();
   });
@@ -414,7 +414,7 @@ test.describe('Authenticated pages', () => {
 
   test('new task form has CSRF hidden field', async ({ page }) => {
     await page.goto(`${BASE}/ui/tasks/new`);
-    const csrfField = page.locator('form[action="/api/tasks"] input[name="_csrf"]');
+    const csrfField = page.locator('form[action*="/tasks"] input[name="_csrf"]');
     await expect(csrfField).toHaveCount(1);
     const val = await csrfField.getAttribute('value');
     expect(val).toBeTruthy();
@@ -561,7 +561,7 @@ test.describe('Task lifecycle', () => {
     await page.goto(`${BASE}/ui/tasks/new`);
 
     // The task creation form (scoped to exclude nav logout form)
-    const taskForm = page.locator('form[action="/api/tasks"]');
+    const taskForm = page.locator('form[action*="/tasks"]');
     await expect(taskForm).toBeVisible();
 
     // Description textarea

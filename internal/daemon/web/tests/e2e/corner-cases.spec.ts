@@ -37,7 +37,7 @@ test.describe('Real user journeys', () => {
     );
 
     // 5. Verify form has submit button (scoped to task form, not nav logout)
-    const taskForm = page.locator('form[action="/api/tasks"]');
+    const taskForm = page.locator('form[action*="/tasks"]');
     const submitBtn = taskForm.locator('button[type="submit"]');
     await expect(submitBtn).toBeVisible();
 
@@ -173,7 +173,7 @@ test.describe('Route resolution', () => {
     await login(page);
     await page.goto(`${BASE}/ui/tasks/new`);
     // Should show the task form, not a 404
-    await expect(page.locator('form[action="/api/tasks"]')).toBeVisible();
+    await expect(page.locator('form[action*="/tasks"]')).toBeVisible();
     await expect(page.locator('textarea[name="description"]')).toBeVisible();
   });
 });

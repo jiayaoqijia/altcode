@@ -289,7 +289,7 @@ test.describe('Web UI orchestration pages', () => {
 
     // Submit button is present
     const submitBtn = page.locator(
-      'form[action="/api/tasks"] button[type="submit"]',
+      'form[action="/tasks"] button[type="submit"]',
     );
     await expect(submitBtn).toBeVisible();
     await expect(submitBtn).toContainText('Create Task');
