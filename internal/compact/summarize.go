@@ -40,6 +40,9 @@ func NewSummarizer(p provider.Provider, model string) *Summarizer {
 // then returns a minimal message list: [system context, summary, recent turns].
 // keepRecent controls how many recent user turns to preserve verbatim.
 func (s *Summarizer) Compact(ctx context.Context, messages []provider.Message, keepRecent int) ([]provider.Message, error) {
+	if s.provider == nil {
+		return messages, fmt.Errorf("compact: provider is nil")
+	}
 	// Defensive: a negative keepRecent used to make cutoff = len+|n|
 	// and panic with slice-bounds-out-of-range on messages[:cutoff].
 	// Clamp to at least 1 so the compaction always preserves at least

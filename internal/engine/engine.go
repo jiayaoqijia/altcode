@@ -754,7 +754,9 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 
 			// Fire Stop hooks — may block completion
 			if reason := e.fireStopHooks(ctx); reason != "" {
-				e.appendMessageLocked(provider.TextMessage("user", reason))
+				stopMsg := provider.TextMessage("user", reason)
+				e.appendMessageLocked(stopMsg)
+				e.persistMessage("user", stopMsg)
 				continue // loop back for another turn
 			}
 			return
