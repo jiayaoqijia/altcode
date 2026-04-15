@@ -192,9 +192,10 @@ func TestHookCommand_NonJSONOutput(t *testing.T) {
 	if len(results) != 1 {
 		t.Fatalf("Expected 1 result, got %d", len(results))
 	}
-	// Non-JSON output should be treated as allow with message
-	if results[0].Decision != "allow" {
-		t.Errorf("Expected allow for non-JSON, got %q", results[0].Decision)
+	// Non-JSON output should NOT default to allow — empty decision
+	// lets the next layer (permission evaluator) decide policy.
+	if results[0].Decision != "" {
+		t.Errorf("Expected empty decision for non-JSON, got %q", results[0].Decision)
 	}
 }
 

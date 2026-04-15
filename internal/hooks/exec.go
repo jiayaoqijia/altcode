@@ -132,7 +132,7 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 	var result Result
 	if err := json.Unmarshal(stdout.Bytes(), &result); err != nil {
 		return &Result{
-			Decision: "allow",
+			Decision: "",
 			Message:  stdout.String(),
 		}, nil
 	}

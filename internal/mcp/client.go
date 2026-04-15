@@ -21,14 +21,16 @@ type callResult struct {
 
 // Client communicates with an MCP server via JSON-RPC 2.0 over stdio.
 type Client struct {
-	cmd      *exec.Cmd
-	stdin    io.WriteCloser
-	stdinMu  sync.Mutex // serializes JSON-RPC line writes
-	scanner  *bufio.Scanner
-	nextID   atomic.Int64
-	pending  map[int64]chan callResult
-	mu       sync.Mutex
-	done     chan struct{}
+	cmd       *exec.Cmd
+	stdin     io.WriteCloser
+	stdinMu   sync.Mutex // serializes JSON-RPC line writes
+	scanner   *bufio.Scanner
+	nextID    atomic.Int64
+	pending   map[int64]chan callResult
+	mu        sync.Mutex
+	done      chan struct{}
+	closeOnce sync.Once
+	closeErr  error
 }
 
 type jsonRPCRequest struct {
@@ -72,10 +74,13 @@ func Connect(ctx context.Context, command string, args []string, env []string) (
 	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
+		stdin.Close()
 		return nil, fmt.Errorf("mcp: stdout pipe: %w", err)
 	}
 
 	if err := cmd.Start(); err != nil {
+		stdin.Close()
+		// stdout is closed by cmd on Start failure
 		return nil, fmt.Errorf("mcp: start %q: %w", command, err)
 	}
 
@@ -251,22 +256,26 @@ func (c *Client) Call(ctx context.Context, method string, params any) (json.RawM
 // the server a chance to shut down cleanly, then waits with a timeout
 // before SIGKILLing the process group. Without the timeout + kill,
 // servers that ignore EOF would hang Close forever.
+// Safe to call multiple times concurrently.
 func (c *Client) Close() error {
-	if c.stdin != nil {
-		c.stdin.Close()
-	}
-	if c.cmd == nil || c.cmd.Process == nil {
-		return nil
-	}
-	done := make(chan error, 1)
-	go func() { done <- c.cmd.Wait() }()
-	select {
-	case err := <-done:
-		return err
-	case <-time.After(5 * time.Second):
-		// Server didn't exit cleanly — kill the whole group.
-		_ = killMCPProcessGroup(c.cmd)
-		<-done
-		return fmt.Errorf("mcp: server did not exit cleanly, killed")
-	}
+	c.closeOnce.Do(func() {
+		if c.stdin != nil {
+			c.stdin.Close()
+		}
+		if c.cmd == nil || c.cmd.Process == nil {
+			return
+		}
+		done := make(chan error, 1)
+		go func() { done <- c.cmd.Wait() }()
+		select {
+		case err := <-done:
+			c.closeErr = err
+		case <-time.After(5 * time.Second):
+			// Server didn't exit cleanly — kill the whole group.
+			_ = killMCPProcessGroup(c.cmd)
+			<-done
+			c.closeErr = fmt.Errorf("mcp: server did not exit cleanly, killed")
+		}
+	})
+	return c.closeErr
 }

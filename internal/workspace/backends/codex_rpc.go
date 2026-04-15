@@ -19,6 +19,7 @@ type CodexRPCClient struct {
 	stdout     io.ReadCloser
 	scanner    *bufio.Scanner
 	mu         sync.Mutex
+	writeMu    sync.Mutex // serializes JSON-RPC writes to stdin
 	nextID     int
 	pending    map[int]chan rpcResult
 	threadID   string
@@ -365,6 +366,21 @@ func (c *CodexRPCClient) handleItemNotification(
 	}
 }
 
+// writeJSON serializes v as JSON + newline to stdin under writeMu.
+// All stdin writes go through this method to prevent concurrent
+// JSON-RPC messages from interleaving at the byte level.
+func (c *CodexRPCClient) writeJSON(v any) error {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return err
+	}
+	data = append(data, '\n')
+	c.writeMu.Lock()
+	_, err = c.stdin.Write(data)
+	c.writeMu.Unlock()
+	return err
+}
+
 // request sends a JSON-RPC request and blocks until the response.
 func (c *CodexRPCClient) request(
 	ctx context.Context, method string, params any,
@@ -382,16 +398,7 @@ func (c *CodexRPCClient) request(
 		"method":  method,
 		"params":  params,
 	}
-	data, err := json.Marshal(msg)
-	if err != nil {
-		c.mu.Lock()
-		delete(c.pending, id)
-		c.mu.Unlock()
-		return nil, err
-	}
-	data = append(data, '\n')
-
-	if _, err := c.stdin.Write(data); err != nil {
+	if err := c.writeJSON(msg); err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
 		c.mu.Unlock()
@@ -415,9 +422,7 @@ func (c *CodexRPCClient) notify(method string) {
 		"jsonrpc": "2.0",
 		"method":  method,
 	}
-	data, _ := json.Marshal(msg)
-	data = append(data, '\n')
-	_, _ = c.stdin.Write(data)
+	_ = c.writeJSON(msg)
 }
 
 // respond sends a JSON-RPC response to a server-initiated request.
@@ -427,9 +432,7 @@ func (c *CodexRPCClient) respond(id int, result any) {
 		"id":      id,
 		"result":  result,
 	}
-	data, _ := json.Marshal(msg)
-	data = append(data, '\n')
-	_, _ = c.stdin.Write(data)
+	_ = c.writeJSON(msg)
 }
 
 // closeAllPending unblocks all pending request callers with an error.

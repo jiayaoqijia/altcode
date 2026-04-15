@@ -137,7 +137,9 @@ func ParseEvent(name string) (Event, error) {
 // Fire executes all hooks matching the event and tool name.
 // Returns results from all hooks. Hooks run sequentially within a matcher.
 func (r *Runner) Fire(ctx context.Context, ev Event, input Input) ([]Result, error) {
+	r.mu.RLock()
 	matchers, ok := r.configs[ev]
+	r.mu.RUnlock()
 	if !ok {
 		return nil, nil
 	}
@@ -154,8 +156,8 @@ func (r *Runner) Fire(ctx context.Context, ev Event, input Input) ([]Result, err
 			result, err := r.executeHookEntry(ctx, entry, input)
 			if err != nil {
 				results = append(results, Result{
-					Decision: "allow",
-					Message:  "Hook error: " + err.Error(),
+					Decision: "",
+					Message:  "hook error: " + err.Error(),
 				})
 				continue
 			}
