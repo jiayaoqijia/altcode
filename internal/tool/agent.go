@@ -24,7 +24,7 @@ func (t *agentTool) Description() string {
 		"The agent has access to Read, Grep, Glob, Bash tools but not Edit/Write."
 }
 func (t *agentTool) IsConcurrencySafe() bool { return true }
-func (t *agentTool) IsReadOnly() bool        { return true }
+func (t *agentTool) IsReadOnly() bool        { return false }
 func (t *agentTool) PermissionPattern(input json.RawMessage) string {
 	var p struct{ Prompt string `json:"prompt"` }
 	json.Unmarshal(input, &p)

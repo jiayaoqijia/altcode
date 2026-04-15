@@ -17,10 +17,14 @@ func runOne(ctx context.Context, call Call) (out Result) {
 	}
 	defer func() {
 		if r := recover(); r != nil {
+			name := "unknown"
+			if call.Tool != nil {
+				name = call.Tool.Name()
+			}
 			out = Result{
-				Title: call.Tool.Name(),
+				Title:  name,
 				Output: fmt.Sprintf("Error: tool panicked: %v", r),
-				Error:  fmt.Errorf("tool %q panicked: %v\n%s", call.Tool.Name(), r, debug.Stack()),
+				Error:  fmt.Errorf("tool %q panicked: %v\n%s", name, r, debug.Stack()),
 			}
 		}
 	}()

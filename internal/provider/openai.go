@@ -86,7 +86,7 @@ func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan Strea
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		return nil, fmt.Errorf("openai status %d: %s", resp.StatusCode, string(b))
 	}
@@ -448,7 +448,7 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 			if *choice.FinishReason == "stop" {
 				ch <- StreamEvent{Type: StreamTextDone}
 			}
-			stopReason = *choice.FinishReason
+			stopReason = normalizeFinishReason(*choice.FinishReason)
 		}
 	}
 
@@ -467,4 +467,21 @@ type openaiToolState struct {
 	id   string
 	name string
 	args string
+}
+
+// normalizeFinishReason maps OpenAI finish_reason values to the
+// Anthropic-style stop reasons used internally by the engine. The
+// non-streaming path already normalized these; the streaming path
+// forwarded raw values, causing inconsistent StopReason on StreamDone.
+func normalizeFinishReason(reason string) string {
+	switch reason {
+	case "stop":
+		return "end_turn"
+	case "tool_calls":
+		return "tool_use"
+	case "length":
+		return "max_tokens"
+	default:
+		return reason
+	}
 }

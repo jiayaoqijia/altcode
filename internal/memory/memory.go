@@ -223,8 +223,8 @@ func (s *Store) updateIndexLocked() error {
 		if summary == "" {
 			summary = firstLine(m.Content)
 		}
-		if len(summary) > 120 {
-			summary = summary[:120] + "..."
+		if runes := []rune(summary); len(runes) > 120 {
+			summary = string(runes[:120]) + "..."
 		}
 		sb.WriteString(fmt.Sprintf("- [%s](%s.md) — %s\n", m.Title, m.ID, summary))
 	}

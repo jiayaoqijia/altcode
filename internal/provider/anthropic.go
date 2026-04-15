@@ -59,7 +59,7 @@ func (a *anthropicProvider) Stream(ctx context.Context, req *Request) (<-chan St
 		return nil, fmt.Errorf("http request: %w", err)
 	}
 	if resp.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(resp.Body)
+		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
 		resp.Body.Close()
 		return nil, fmt.Errorf("anthropic status %d: %s", resp.StatusCode, string(b))
 	}
@@ -153,11 +153,13 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 	blocks := make(map[int]*blockState)
 	var stopReason string
 
+	var hadError bool
 	for {
 		evtType, data, err := decoder.Next()
 		if err != nil {
 			if err != io.EOF {
 				ch <- StreamEvent{Type: StreamError, Error: err}
+				hadError = true
 			}
 			break
 		}
@@ -167,13 +169,16 @@ func processSSE(body io.ReadCloser, ch chan<- StreamEvent) {
 		reason, err := dispatchSSEEvent(evtType, data, ch, blocks)
 		if err != nil {
 			ch <- StreamEvent{Type: StreamError, Error: err}
+			hadError = true
 			break
 		}
 		if reason != "" {
 			stopReason = reason
 		}
 	}
-	ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
+	if !hadError {
+		ch <- StreamEvent{Type: StreamDone, StopReason: stopReason}
+	}
 }
 
 // blockState tracks a single content block. Each Anthropic message may
