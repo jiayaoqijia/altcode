@@ -47,6 +47,7 @@ type TaskRunner struct {
 	logger   *slog.Logger
 	timeout  time.Duration
 	stopped  atomic.Bool
+	steerCh  chan string // buffered channel for steer messages
 }
 
 // NewTaskRunner creates a runner for a task.
@@ -57,6 +58,18 @@ func NewTaskRunner(task *Task, store *Store, orch *Orchestrator, logger *slog.Lo
 		orch:    orch,
 		logger:  logger,
 		timeout: 2 * time.Hour,
+		steerCh: make(chan string, 10),
+	}
+}
+
+// Steer sends a user guidance message to the running task.
+// Non-blocking: drops the message if the channel buffer is full.
+func (r *TaskRunner) Steer(message string) {
+	select {
+	case r.steerCh <- message:
+	default:
+		r.logger.Warn("steer channel full, dropping message",
+			"task", r.task.ID)
 	}
 }
 
@@ -85,7 +98,7 @@ func (r *TaskRunner) Run(ctx context.Context) {
 		r.logger.Warn("mark started", "task", r.task.ID, "err", err)
 	}
 
-	err := r.orch.RunTask(ctx, r.task)
+	err := r.orch.RunTask(ctx, r.task, r.steerCh)
 
 	// Check stop flag first — user cancellation takes priority.
 	if r.stopped.Load() {

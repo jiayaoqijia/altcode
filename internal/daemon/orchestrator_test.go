@@ -36,7 +36,7 @@ func TestOrchestrator_PhasesTransition(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 
@@ -157,7 +157,7 @@ func TestOrchestrator_RetryOnFailure(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask should succeed after retry: %v", err)
 	}
 
@@ -205,7 +205,7 @@ func TestOrchestrator_AllAttemptsExhausted(t *testing.T) {
 		},
 	})
 
-	err = o.RunTask(context.Background(), task)
+	err = o.RunTask(context.Background(), task, nil)
 	if err == nil {
 		t.Fatal("RunTask should fail when all attempts exhausted")
 	}
@@ -265,7 +265,7 @@ func TestOrchestrator_MalformedPlanJSON(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask should succeed with fallback plan: %v", err)
 	}
 
@@ -317,7 +317,7 @@ func TestOrchestrator_ContextCancellation(t *testing.T) {
 		},
 	})
 
-	err = o.RunTask(ctx, task)
+	err = o.RunTask(ctx, task, nil)
 	if err == nil {
 		t.Fatal("RunTask should fail on cancelled context")
 	}
@@ -359,7 +359,7 @@ func TestOrchestrator_EmptyPlan(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 
@@ -412,7 +412,7 @@ func TestOrchestrator_ValidJSONNoSteps(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 
@@ -464,7 +464,7 @@ func TestOrchestrator_SpecEventEmitted(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 
@@ -542,7 +542,7 @@ func TestOrchestrator_ModelConfigPropagation(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 	if len(calls) != 3 {
@@ -620,7 +620,7 @@ func TestOrchestrator_DefaultModels(t *testing.T) {
 		},
 	})
 
-	if err := o.RunTask(context.Background(), task); err != nil {
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
 		t.Fatalf("RunTask: %v", err)
 	}
 
