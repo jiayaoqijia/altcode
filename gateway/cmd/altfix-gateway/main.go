@@ -40,7 +40,7 @@ func main() {
 	)
 
 	flag.StringVar(&daemonURL, "daemon-url",
-		env("ALTFIX_DAEMON_URL", "http://localhost:4080"),
+		env("ALTFIX_DAEMON_URL", "http://localhost:9200"),
 		"altcode daemon URL")
 	flag.StringVar(&authToken, "auth-token",
 		env("ALTFIX_AUTH_TOKEN", ""),
