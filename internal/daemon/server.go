@@ -275,23 +275,27 @@ func defaultSpawnFunc(
 // task. If no slot is available the task stays pending for the
 // background poller to pick up later.
 func (s *Server) dispatchTask(task *Task) {
+	// Atomically claim this task ID to prevent double-dispatch
+	// from concurrent poller ticks or handleCreateTask goroutines.
+	if _, loaded := s.runners.LoadOrStore(task.ID, (*TaskRunner)(nil)); loaded {
+		return // already dispatched
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 
-	runner := NewTaskRunner(task, s.store, s.orch, s.logger)
-
-	// Register runner so handleStopTask can cancel it.
-	s.runners.Store(task.ID, runner)
-	defer s.runners.Delete(task.ID)
-
 	if !s.cm.TryAcquire(task.ID, cancel) {
-		// No slot available — cancel the unused context and let
-		// the background poller retry later.
+		// No slot — remove claim, cancel unused context, let poller retry.
+		s.runners.Delete(task.ID)
 		cancel()
 		s.logger.Info("task queued — no slot available",
 			"id", task.ID,
 			"queue", s.cm.QueuePosition())
 		return
 	}
+
+	runner := NewTaskRunner(task, s.store, s.orch, s.logger)
+	s.runners.Store(task.ID, runner) // upgrade nil placeholder to real runner
+	defer s.runners.Delete(task.ID)
 	defer s.cm.Release(task.ID)
 
 	runner.Run(ctx)
