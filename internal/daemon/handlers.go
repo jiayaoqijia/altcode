@@ -72,11 +72,13 @@ func (s *Server) handleCreateTask(w http.ResponseWriter, r *http.Request) {
 	// Dispatch task execution in the background.
 	go s.dispatchTask(task)
 
+	queuePos := s.cm.QueuePosition()
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(201)
 	json.NewEncoder(w).Encode(map[string]any{
-		"id":     task.ID,
-		"status": "pending",
+		"id":             task.ID,
+		"status":         "pending",
+		"queue_position": queuePos,
 	})
 }
 

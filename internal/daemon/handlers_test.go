@@ -328,6 +328,33 @@ func TestHandler_CreateTask_WhitespaceFields(t *testing.T) {
 	}
 }
 
+func TestHandler_CreateTask_IncludesQueuePosition(t *testing.T) {
+	s := testServer(t)
+
+	payload := `{"repo_url":"https://github.com/t/r","task":"fix bug"}`
+	req := httptest.NewRequest("POST", "/tasks", strings.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	s.mux.ServeHTTP(rec, req)
+
+	if rec.Code != 201 {
+		t.Fatalf("create: got %d, body: %s", rec.Code, rec.Body.String())
+	}
+	var body map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	// queue_position must be present in the response.
+	qp, ok := body["queue_position"]
+	if !ok {
+		t.Fatal("expected queue_position in create response")
+	}
+	pos := int(qp.(float64))
+	if pos < 0 {
+		t.Errorf("queue_position = %d, want >= 0", pos)
+	}
+}
+
 func TestHandler_QueuePosition_PendingTask(t *testing.T) {
 	s := testServer(t)
 

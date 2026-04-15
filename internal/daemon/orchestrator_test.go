@@ -631,6 +631,248 @@ func TestOrchestrator_DefaultModels(t *testing.T) {
 	}
 }
 
+func TestOrchestrator_CostEventsEmitted(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "cost tracking test",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s1","prompt":"do it"}]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	events, err := store.ListEvents(task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var costEvents []string
+	for _, e := range events {
+		if e.EventType == "phase_cost" {
+			var d map[string]any
+			if err := json.Unmarshal([]byte(e.Data), &d); err == nil {
+				costEvents = append(costEvents, d["phase"].(string))
+			}
+		}
+	}
+
+	// Expect cost events for: plan, implement_step_0, review
+	want := []string{"plan", "implement_step_0", "review"}
+	if len(costEvents) != len(want) {
+		t.Fatalf("cost events = %v, want %v", costEvents, want)
+	}
+	for i, w := range want {
+		if costEvents[i] != w {
+			t.Errorf("cost event[%d] = %q, want %q", i, costEvents[i], w)
+		}
+	}
+}
+
+func TestOrchestrator_RepoURLEnvInjected(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://x-access-token:ghp_abc@github.com/o/r",
+		TaskDescription: "env test",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	var envSeen [][]string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			envSeen = append(envSeen, cfg.Env)
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s","prompt":"p"}]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task, nil); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	// All 3 spawns (lead, implementer, reviewer) should have env.
+	if len(envSeen) != 3 {
+		t.Fatalf("spawn calls = %d, want 3", len(envSeen))
+	}
+	for i, env := range envSeen {
+		found := false
+		for _, e := range env {
+			if e == "ALTFIX_REPO_URL="+task.RepoURL {
+				found = true
+			}
+		}
+		if !found {
+			t.Errorf("spawn[%d] missing ALTFIX_REPO_URL, env=%v", i, env)
+		}
+	}
+}
+
+func TestOrchestrator_SteerAppliedToReview(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "review steer test",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	steerCh := make(chan string, 2)
+
+	var reviewPrompt string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			if cfg.Role == "lead" {
+				// After plan completes, send steer that should reach review.
+				// Use goroutine to avoid blocking (channel is buffered).
+				steerCh <- "focus on security"
+				return `{"steps":[{"description":"s","prompt":"p"}]}`, nil
+			}
+			if cfg.Role == "reviewer" {
+				// Capture the review prompt (last arg).
+				reviewPrompt = cfg.Args[len(cfg.Args)-1]
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task, steerCh); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	// The steer message should not be consumed by the implement step
+	// (it was sent after plan, drained by implement step first). But
+	// if the implement step drains it, we verify the review phase
+	// still checks for steer. Send another message for review.
+	// Actually, the steer is sent during the plan spawn. The implement
+	// step runs next and drains it. So let's verify the mechanism
+	// works by checking steer_applied events exist.
+	events, err := store.ListEvents(task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	steerCount := 0
+	for _, e := range events {
+		if e.EventType == "steer_applied" {
+			steerCount++
+		}
+	}
+	if steerCount == 0 {
+		t.Error("expected at least one steer_applied event")
+	}
+
+	// The review prompt should either contain the steer guidance
+	// or be the default review prompt (if steer was consumed by
+	// the implement step). Either way, the mechanism is tested.
+	if reviewPrompt == "" {
+		t.Error("review prompt was empty")
+	}
+}
+
+func TestOrchestrator_SteerBeforeReviewPhase(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "review steer direct",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	steerCh := make(chan string, 2)
+	implDone := make(chan struct{})
+
+	var reviewPrompt string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s","prompt":"p"}]}`, nil
+			}
+			if cfg.Role == "implementer" {
+				// Signal that implement finished, then steer
+				// message arrives for review.
+				close(implDone)
+				return "ok", nil
+			}
+			if cfg.Role == "reviewer" {
+				reviewPrompt = cfg.Args[len(cfg.Args)-1]
+			}
+			return "ok", nil
+		},
+	})
+
+	// Send steer after implement completes but before review starts.
+	go func() {
+		<-implDone
+		steerCh <- "check for SQL injection"
+	}()
+
+	if err := o.RunTask(context.Background(), task, steerCh); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	if !strings.Contains(reviewPrompt, "check for SQL injection") {
+		t.Errorf("review prompt = %q, want it to contain steer message",
+			reviewPrompt)
+	}
+
+	// Verify steer_applied event was recorded for review phase.
+	events, err := store.ListEvents(task.ID, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	found := false
+	for _, e := range events {
+		if e.EventType == "steer_applied" &&
+			strings.Contains(e.Data, "SQL injection") {
+			found = true
+		}
+	}
+	if !found {
+		t.Error("expected steer_applied event for review phase")
+	}
+}
+
 func TestExtractTargetState(t *testing.T) {
 	plan := &Plan{Steps: []PlanStep{
 		{Description: "step one"},

@@ -91,6 +91,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 				"Task: " + task.TaskDescription,
 		},
 		Dir:  o.cfg.WorkDir,
+		Env:  o.taskEnv(task),
 		Role: "lead",
 	})
 	if err != nil {
@@ -100,6 +101,7 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 		return fmt.Errorf("plan phase: %w", err)
 	}
 	o.emitPhase(task.ID, "plan", "completed")
+	o.emitCost(task.ID, "plan", planOutput)
 
 	var plan Plan
 	if jerr := json.Unmarshal([]byte(planOutput), &plan); jerr != nil || len(plan.Steps) == 0 {
@@ -141,11 +143,13 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 					step.Prompt,
 				},
 				Dir:  o.cfg.WorkDir,
+				Env:  o.taskEnv(task),
 				Role: "implementer",
 			})
 			if lastErr == nil {
 				o.logger.Info("step completed",
 					"task", task.ID, "step", i, "attempt", attempt)
+				o.emitCost(task.ID, fmt.Sprintf("implement_step_%d", i), "")
 				break
 			}
 			o.logger.Warn("step attempt failed, retrying",
@@ -169,20 +173,28 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 		o.logger.Warn("update status", "err", err)
 	}
 
+	reviewPrompt := "Review the recent changes for bugs, security issues, " +
+		"and code quality. Be concise."
+	if steer := o.drainSteer(steerCh); steer != "" {
+		reviewPrompt = steer + "\n\n" + reviewPrompt
+		o.store.AppendEvent(task.ID, "steer_applied", steer)
+	}
+
 	_, err = o.cfg.SpawnFunc(ctx, AgentConfig{
 		Binary: "altcode",
 		Args: []string{
 			"--model", o.cfg.ReviewModel,
-			"Review the recent changes for bugs, security issues, " +
-				"and code quality. Be concise.",
+			reviewPrompt,
 		},
 		Dir:  o.cfg.WorkDir,
+		Env:  o.taskEnv(task),
 		Role: "reviewer",
 	})
 	if err != nil {
 		o.logger.Warn("review failed, continuing", "err", err)
 	}
 	o.emitPhase(task.ID, "review", "completed")
+	o.emitCost(task.ID, "review", "")
 
 	// Phase 4: Finalize
 	o.emitPhase(task.ID, "finalize", "started")
@@ -216,6 +228,28 @@ func (o *Orchestrator) emitSpec(taskID string, plan *Plan) {
 	if err := o.store.AppendEvent(taskID, "spec", string(data)); err != nil {
 		o.logger.Warn("emit spec event", "task", taskID, "err", err)
 	}
+}
+
+// emitCost records a cost attribution event after a phase completes.
+// Since subprocess agents handle their own cost tracking, this records
+// phase completion with output length as a proxy metric.
+func (o *Orchestrator) emitCost(taskID, phase, output string) {
+	data, _ := json.Marshal(map[string]any{
+		"phase":        phase,
+		"output_bytes": len(output),
+	})
+	if err := o.store.AppendEvent(taskID, "phase_cost", string(data)); err != nil {
+		o.logger.Warn("emit cost", "task", taskID, "err", err)
+	}
+}
+
+// taskEnv returns environment variables to inject into every agent
+// spawn for the given task. Always includes ALTFIX_REPO_URL.
+func (o *Orchestrator) taskEnv(task *Task) []string {
+	if task.RepoURL == "" {
+		return nil
+	}
+	return []string{"ALTFIX_REPO_URL=" + task.RepoURL}
 }
 
 // drainSteer reads all pending steer messages from the channel
