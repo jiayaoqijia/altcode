@@ -24,7 +24,7 @@ func (c *Microcompactor) Apply(messages []provider.Message) []provider.Message {
 	turnCount := 0
 	protectFrom := len(messages)
 	for i := len(messages) - 1; i >= 0; i-- {
-		if messages[i].Role == "user" {
+		if messages[i].Role == "user" && !hasToolResultParts(messages[i]) {
 			turnCount++
 			if turnCount >= c.keepTurns {
 				protectFrom = i
@@ -46,4 +46,16 @@ func (c *Microcompactor) Apply(messages []provider.Message) []provider.Message {
 	}
 
 	return result
+}
+
+// hasToolResultParts checks if a message contains tool_result content parts.
+// Anthropic stores tool results as role="user" + tool_result parts, which
+// should NOT count as user turns for compaction purposes.
+func hasToolResultParts(m provider.Message) bool {
+	for _, p := range m.Parts {
+		if p.Type == "tool_result" {
+			return true
+		}
+	}
+	return false
 }
