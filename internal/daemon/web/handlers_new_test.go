@@ -45,7 +45,7 @@ func (m *mockFullStore) ListIssues(repo string) ([]*IssueView, error) {
 }
 
 func TestHandleNewTask_Renders(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestHandleNewTask_Renders(t *testing.T) {
 }
 
 func TestHandleNewTask_NoRepos(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -124,7 +124,7 @@ func TestHandleNewTask_NoRepos(t *testing.T) {
 }
 
 func TestHandleNewTask_NoStore(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestHandleNewTask_NoStore(t *testing.T) {
 }
 
 func TestHandlePartialRepoIssues_WithIssues(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestHandlePartialRepoIssues_WithIssues(t *testing.T) {
 }
 
 func TestHandlePartialRepoIssues_NoRepo(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,7 +231,7 @@ func TestHandlePartialRepoIssues_NoRepo(t *testing.T) {
 }
 
 func TestHandlePRs_Renders(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,7 +311,7 @@ func TestHandlePRs_Renders(t *testing.T) {
 }
 
 func TestHandlePRs_FilterByStatus(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -367,7 +367,7 @@ func TestHandlePRs_FilterByStatus(t *testing.T) {
 }
 
 func TestHandlePRs_EmptyState(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -398,7 +398,7 @@ func TestHandlePRs_EmptyState(t *testing.T) {
 }
 
 func TestHandleSettings_AdminRenders(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -460,7 +460,7 @@ func TestHandleSettings_AdminRenders(t *testing.T) {
 }
 
 func TestHandleSettings_NonAdminReadOnly(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -493,7 +493,7 @@ func TestHandleSettings_NonAdminReadOnly(t *testing.T) {
 }
 
 func TestHandleSettings_NoSession(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -576,7 +576,7 @@ func TestPRStatusMatch(t *testing.T) {
 }
 
 func TestHandlePartialPRList(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -618,7 +618,7 @@ func TestHandlePartialPRList(t *testing.T) {
 }
 
 func TestLoadTemplates_NewPages(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}

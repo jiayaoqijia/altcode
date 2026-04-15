@@ -11,7 +11,7 @@ import (
 )
 
 func TestOAuthRedirect_SetsStateAndPKCE(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -162,7 +162,7 @@ func TestIsAuthorized(t *testing.T) {
 		},
 	}
 
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -184,7 +184,7 @@ func TestIsAuthorized(t *testing.T) {
 }
 
 func TestHandleLogout(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -236,7 +236,7 @@ func TestHandleLogout(t *testing.T) {
 }
 
 func TestHandleLogout_NoCookie(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -260,7 +260,7 @@ func TestHandleLogout_NoCookie(t *testing.T) {
 }
 
 func TestHandleLoginPage(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -300,7 +300,7 @@ func TestHandleLoginPage(t *testing.T) {
 }
 
 func TestOAuthCallback_StateMismatch(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -338,7 +338,7 @@ func TestOAuthCallback_StateMismatch(t *testing.T) {
 }
 
 func TestOAuthCallback_MissingCookie(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -401,7 +401,7 @@ func TestOAuthCallback_FullFlow(t *testing.T) {
 		gitHubTokenURL = origToken
 	}()
 
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -519,7 +519,7 @@ func TestPKCE(t *testing.T) {
 }
 
 func TestHandleTestLogin_Enabled(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestHandleTestLogin_Enabled(t *testing.T) {
 }
 
 func TestHandleTestLogin_Disabled(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -594,7 +594,7 @@ func TestHandleTestLogin_Disabled(t *testing.T) {
 }
 
 func TestIsAdmin(t *testing.T) {
-	tmpl, _ := LoadTemplates()
+	tmpl, _ := LoadTemplates("")
 	h := NewWebHandler(
 		tmpl, nil,
 		NewSessionStore(time.Hour),

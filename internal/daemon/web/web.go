@@ -22,6 +22,7 @@ type PageData struct {
 	IsAdmin   bool
 	User      *SessionUser
 	Content   any
+	BasePath  string
 }
 
 // Templates holds the parsed template set.
@@ -31,12 +32,17 @@ type Templates struct {
 	layout string
 }
 
-// templateFuncs returns the shared function map.
-func templateFuncs() template.FuncMap {
+// templateFuncs returns the shared function map. The basePath
+// parameter is captured in a closure by absPath so templates
+// can write {{absPath "/ui/"}} instead of {{.BasePath}}/ui/.
+func templateFuncs(basePath string) template.FuncMap {
 	return template.FuncMap{
 		"truncate":   truncate,
 		"statusDot":  statusDot,
 		"phaseClass": phaseClass,
+		"absPath": func(path string) string {
+			return basePath + path
+		},
 	}
 }
 
@@ -113,8 +119,9 @@ func phaseClass(current, phase string) string {
 // LoadTemplates reads the embedded filesystem, parses layout.html,
 // discovers partials, then builds each page template as
 // layout + partials + page. Error pages are keyed as "error-NNN".
-func LoadTemplates() (*Templates, error) {
-	funcs := templateFuncs()
+// basePath is captured by the absPath template function.
+func LoadTemplates(basePath string) (*Templates, error) {
+	funcs := templateFuncs(basePath)
 
 	// Read layout.
 	layoutBytes, err := fs.ReadFile(content, "templates/layout.html")
@@ -263,6 +270,27 @@ func RenderPartial(
 	return err
 }
 
+// ValidateBasePath checks that basePath is a clean URL path
+// segment with no query params, fragments, percent-encoding,
+// semicolons, or whitespace.
+func ValidateBasePath(bp string) error {
+	if bp == "" {
+		return nil
+	}
+	if !strings.HasPrefix(bp, "/") {
+		return fmt.Errorf("base path must start with /")
+	}
+	for _, ch := range bp {
+		if ch == '%' || ch == ';' || ch == '?' ||
+			ch == '#' || ch == ' ' || ch == '\t' {
+			return fmt.Errorf(
+				"base path contains invalid character %q", string(ch),
+			)
+		}
+	}
+	return nil
+}
+
 // RegisterRoutes mounts all web UI routes on the provided mux.
 func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 	// Reject short signing keys — an HMAC with fewer than 32 bytes
@@ -271,7 +299,13 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 		return fmt.Errorf("signing key must be at least 32 bytes")
 	}
 
-	tmpl, err := LoadTemplates()
+	// Normalize and validate BasePath.
+	cfg.BasePath = strings.TrimRight(cfg.BasePath, "/")
+	if err := ValidateBasePath(cfg.BasePath); err != nil {
+		return fmt.Errorf("invalid base path: %w", err)
+	}
+
+	tmpl, err := LoadTemplates(cfg.BasePath)
 	if err != nil {
 		return err
 	}
@@ -294,38 +328,93 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 	}
 
 	// Auth routes (no session required).
-	mux.HandleFunc("GET /auth/github", h.HandleOAuthRedirect)
+	if cfg.CloudMode {
+		mux.HandleFunc(
+			"GET /auth/session", h.HandleSessionTicket,
+		)
+		// In cloud mode, GitHub OAuth is not used.
+		mux.HandleFunc("GET /auth/github", func(
+			w http.ResponseWriter, r *http.Request,
+		) {
+			http.NotFound(w, r)
+		})
+	} else {
+		mux.HandleFunc(
+			"GET /auth/github", h.HandleOAuthRedirect,
+		)
+	}
 	mux.HandleFunc("GET /auth/callback", h.HandleOAuthCallback)
 	mux.HandleFunc("GET /ui/login", h.HandleLoginPage)
 
 	// Test-mode auth bypass (never in production).
 	if cfg.TestMode {
-		log.Println("WARNING: test mode enabled — /auth/test-login bypass is active. DO NOT use in production.")
-		mux.HandleFunc("GET /auth/test-login", h.HandleTestLogin)
+		log.Println(
+			"WARNING: test mode enabled — " +
+				"/auth/test-login bypass is active. " +
+				"DO NOT use in production.",
+		)
+		mux.HandleFunc(
+			"GET /auth/test-login", h.HandleTestLogin,
+		)
 	}
 
 	// Shared view (no session required).
 	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
 
 	// Auth + CSRF middleware.
-	auth := RequireAuth(sessions)
+	auth := RequireAuth(sessions, cfg.BasePath)
 	csrf := CSRFCheck()
 
 	// Authenticated page routes.
-	mux.Handle("GET /ui/", auth(http.HandlerFunc(h.HandleDashboard)))
-	mux.Handle("GET /ui/tasks/new", auth(http.HandlerFunc(h.HandleNewTask)))
-	mux.Handle("GET /ui/tasks/{id}", auth(http.HandlerFunc(h.HandleTaskDetail)))
-	mux.Handle("GET /ui/prs", auth(http.HandlerFunc(h.HandlePRs)))
-	mux.Handle("GET /ui/settings", auth(http.HandlerFunc(h.HandleSettings)))
-	mux.Handle("GET /ui/tasks/{id}/events", auth(http.HandlerFunc(h.HandleSSEHTML)))
+	mux.Handle(
+		"GET /ui/",
+		auth(http.HandlerFunc(h.HandleDashboard)),
+	)
+	mux.Handle(
+		"GET /ui/tasks/new",
+		auth(http.HandlerFunc(h.HandleNewTask)),
+	)
+	mux.Handle(
+		"GET /ui/tasks/{id}",
+		auth(http.HandlerFunc(h.HandleTaskDetail)),
+	)
+	mux.Handle(
+		"GET /ui/prs",
+		auth(http.HandlerFunc(h.HandlePRs)),
+	)
+	mux.Handle(
+		"GET /ui/settings",
+		auth(http.HandlerFunc(h.HandleSettings)),
+	)
+	mux.Handle(
+		"GET /ui/tasks/{id}/events",
+		auth(http.HandlerFunc(h.HandleSSEHTML)),
+	)
 
 	// Partial endpoints for htmx polling.
-	mux.Handle("GET /ui/partials/task-list", auth(http.HandlerFunc(h.HandlePartialTaskList)))
-	mux.Handle("GET /ui/partials/kpi-cards", auth(http.HandlerFunc(h.HandlePartialKPICards)))
-	mux.Handle("GET /ui/partials/repo-issues", auth(http.HandlerFunc(h.HandlePartialRepoIssues)))
+	mux.Handle(
+		"GET /ui/partials/task-list",
+		auth(http.HandlerFunc(h.HandlePartialTaskList)),
+	)
+	mux.Handle(
+		"GET /ui/partials/kpi-cards",
+		auth(http.HandlerFunc(h.HandlePartialKPICards)),
+	)
+	mux.Handle(
+		"GET /ui/partials/repo-issues",
+		auth(http.HandlerFunc(h.HandlePartialRepoIssues)),
+	)
+
+	mux.Handle(
+		"GET /ui/partials/pr-list",
+		auth(http.HandlerFunc(h.HandlePartialPRList)),
+	)
 
 	// Mutating routes with CSRF.
-	mux.Handle("POST /auth/logout", auth(csrf(http.HandlerFunc(h.HandleLogout))))
+	mux.Handle(
+		"POST /auth/logout",
+		auth(csrf(http.HandlerFunc(h.HandleLogout))),
+	)
 
 	return nil
 }

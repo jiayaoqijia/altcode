@@ -136,7 +136,7 @@ func TestIsTerminalStatus(t *testing.T) {
 }
 
 func TestHandleSSEHTML_NotFound(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -157,7 +157,7 @@ func TestHandleSSEHTML_NotFound(t *testing.T) {
 }
 
 func TestHandleSSEHTML_NoStore(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -178,7 +178,7 @@ func TestHandleSSEHTML_NoStore(t *testing.T) {
 }
 
 func TestHandleSSEHTML_StreamsAndStops(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -230,7 +230,7 @@ func TestHandleSSEHTML_StreamsAndStops(t *testing.T) {
 }
 
 func TestHandleTaskDetail_NotFound(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -254,7 +254,7 @@ func TestHandleTaskDetail_NotFound(t *testing.T) {
 }
 
 func TestHandleTaskDetail_Renders(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,11 +307,11 @@ func TestHandleTaskDetail_Renders(t *testing.T) {
 		"implementing",
 		"$1.23",
 		"PR #99",
-		"Cancel",                    // active task shows cancel
-		"activity-feed",             // feed container
-		"/ui/tasks/task-abc/events", // EventSource URL
-		"Steer the agent",           // steering form
-		"Dashboard",                 // back link
+		"Cancel",                       // active task shows cancel
+		"activity-feed",                // feed container
+		`\/ui\/tasks\/task-abc/events`, // EventSource URL (JS-escaped slashes)
+		"Steer the agent",              // steering form
+		"Dashboard",                    // back link
 	}
 	for _, want := range checks {
 		if !strings.Contains(body, want) {
@@ -321,7 +321,7 @@ func TestHandleTaskDetail_Renders(t *testing.T) {
 }
 
 func TestHandleTaskDetail_TerminalHidesSteering(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}

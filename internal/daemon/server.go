@@ -31,6 +31,15 @@ type ServerConfig struct {
 	SigningKey          string
 	// TestMode enables /auth/test-login bypass for E2E tests.
 	TestMode bool
+	// BasePath is the external mount path for proxy deployments.
+	BasePath string
+	// CloudMode enables Cloud Claw session ticket auth.
+	CloudMode bool
+	// SessionSigningKey is the HMAC key for session tickets.
+	SessionSigningKey string
+	// TrustProxy enables X-Forwarded-Proto for TLS detection
+	// behind a reverse proxy.
+	TrustProxy bool
 }
 
 // Server is the HTTP daemon.
@@ -77,18 +86,22 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		sessions := web.NewSessionStore(8 * time.Hour)
 		sessions.StartGC(5 * time.Minute)
 		if err := web.RegisterRoutes(s.mux, web.WebConfig{
-			Sessions:       sessions,
-			GitHubClientID: cfg.GitHubClientID,
-			GitHubSecret:   cfg.GitHubClientSecret,
-			AllowedOrgs:    cfg.AllowedOrgs,
-			AllowedUsers:   cfg.AllowedUsers,
-			AdminUsers:     cfg.AdminUsers,
-			SigningKey:      []byte(cfg.SigningKey),
-			Store:          &storeAdapter{s: store},
+			Sessions:          sessions,
+			GitHubClientID:    cfg.GitHubClientID,
+			GitHubSecret:      cfg.GitHubClientSecret,
+			AllowedOrgs:       cfg.AllowedOrgs,
+			AllowedUsers:      cfg.AllowedUsers,
+			AdminUsers:        cfg.AdminUsers,
+			SigningKey:         []byte(cfg.SigningKey),
+			Store:             &storeAdapter{s: store},
 			BaseURL: fmt.Sprintf(
 				"http://localhost:%d", cfg.Port,
 			),
-			TestMode: cfg.TestMode,
+			TestMode:          cfg.TestMode,
+			BasePath:          cfg.BasePath,
+			CloudMode:         cfg.CloudMode,
+			SessionSigningKey: []byte(cfg.SessionSigningKey),
+			TrustProxy:        cfg.TrustProxy,
 		}); err != nil {
 			return nil, fmt.Errorf("web ui: %w", err)
 		}

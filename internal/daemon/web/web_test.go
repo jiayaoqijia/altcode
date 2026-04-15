@@ -7,7 +7,7 @@ import (
 )
 
 func TestLoadTemplates(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -25,7 +25,7 @@ func TestLoadTemplates(t *testing.T) {
 }
 
 func TestRender(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestRender(t *testing.T) {
 }
 
 func TestRenderWithNav(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -86,7 +86,7 @@ func TestRenderWithNav(t *testing.T) {
 }
 
 func TestRenderDarkMode(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -105,7 +105,7 @@ func TestRenderDarkMode(t *testing.T) {
 }
 
 func TestRenderNotFound(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}

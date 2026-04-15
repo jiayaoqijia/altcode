@@ -21,6 +21,10 @@ func newDaemonCmd() *cobra.Command {
 	var allowedUsers []string
 	var adminUsers []string
 	var testMode bool
+	var basePath string
+	var cloudMode bool
+	var sessionSigningKey string
+	var trustProxy bool
 
 	cmd := &cobra.Command{
 		Use:   "daemon",
@@ -36,6 +40,22 @@ Designed for AltFix VM deployment.`,
 				fmt.Fprintln(os.Stderr,
 					"warning: no --auth-token or ALTFIX_AUTH_TOKEN set — "+
 						"API endpoints are unauthenticated")
+			}
+			if basePath == "" {
+				basePath = os.Getenv("ALTFIX_WEB_BASE_PATH")
+			}
+			if !cloudMode {
+				cloudMode = os.Getenv("ALTFIX_CLOUD_MODE") == "true"
+			}
+			if sessionSigningKey == "" {
+				sessionSigningKey = os.Getenv(
+					"ALTFIX_SESSION_SIGNING_KEY",
+				)
+			}
+			if !trustProxy {
+				trustProxy = os.Getenv(
+					"ALTFIX_TRUST_PROXY",
+				) == "true"
 			}
 
 			if port < 1 || port > 65535 {
@@ -57,6 +77,10 @@ Designed for AltFix VM deployment.`,
 				AdminUsers:         adminUsers,
 				SigningKey:          signingKey,
 				TestMode:           testMode,
+				BasePath:           basePath,
+				CloudMode:          cloudMode,
+				SessionSigningKey:  sessionSigningKey,
+				TrustProxy:         trustProxy,
 			})
 			if err != nil {
 				return err
@@ -97,6 +121,15 @@ Designed for AltFix VM deployment.`,
 		"HMAC signing key for shared URLs")
 	cmd.Flags().BoolVar(&testMode, "test-mode", false,
 		"Enable /auth/test-login bypass for E2E tests (NEVER in production)")
+	cmd.Flags().StringVar(&basePath, "base-path", "",
+		"External mount path for proxy (e.g. /dash/vm1)")
+	cmd.Flags().BoolVar(&cloudMode, "cloud-mode", false,
+		"Enable Cloud Claw session ticket auth")
+	cmd.Flags().StringVar(&sessionSigningKey,
+		"session-signing-key", "",
+		"HMAC key for session ticket verification")
+	cmd.Flags().BoolVar(&trustProxy, "trust-proxy", false,
+		"Trust X-Forwarded-Proto for TLS detection")
 
 	return cmd
 }

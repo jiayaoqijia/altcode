@@ -39,6 +39,15 @@ type WebConfig struct {
 	AdminUsers     []string
 	SigningKey      []byte
 	BaseURL        string
+	// BasePath is the external mount path for proxy deployments
+	// (e.g. "/dash/vm1"). Empty string means root mount.
+	BasePath string
+	// CloudMode enables Cloud Claw session ticket auth instead
+	// of GitHub OAuth.
+	CloudMode bool
+	// SessionSigningKey is the HMAC key for verifying session
+	// tickets in cloud mode.
+	SessionSigningKey []byte
 	// Store is the backing data store for tasks and events.
 	Store StoreIface
 	// TrustProxy controls whether X-Forwarded-Proto is trusted for
@@ -103,6 +112,15 @@ type WebHandler struct {
 	sessions *SessionStore
 	cfg      WebConfig
 	orgCache *OrgCache
+}
+
+// cookiePath returns the cookie Path scoped to BasePath.
+// When BasePath is empty this returns "/" (site-wide).
+func (h *WebHandler) cookiePath() string {
+	if h.cfg.BasePath == "" {
+		return "/"
+	}
+	return h.cfg.BasePath + "/"
 }
 
 // NewWebHandler creates a handler with the provided dependencies.
@@ -170,7 +188,7 @@ func (h *WebHandler) HandleOAuthRedirect(
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_oauth",
 		Value:    tempID,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   600, // 10 minutes
 		HttpOnly: true,
 		Secure:   isSecure(r, h.cfg.TrustProxy),
@@ -228,7 +246,7 @@ func (h *WebHandler) HandleOAuthCallback(
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_oauth",
 		Value:    "",
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   isSecure(r, h.cfg.TrustProxy),
@@ -284,14 +302,14 @@ func (h *WebHandler) HandleOAuthCallback(
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_session",
 		Value:    sessionID,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   86400, // 24 hours
 		HttpOnly: true,
 		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
 
-	http.Redirect(w, r, "/ui/", http.StatusFound)
+	http.Redirect(w, r, h.cfg.BasePath+"/ui/", http.StatusFound)
 }
 
 // HandleLogout deletes the session, clears the cookie, and redirects
@@ -305,13 +323,15 @@ func (h *WebHandler) HandleLogout(
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_session",
 		Value:    "",
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.Redirect(w, r, "/ui/login", http.StatusFound)
+	http.Redirect(
+		w, r, h.cfg.BasePath+"/ui/login", http.StatusFound,
+	)
 }
 
 // isAuthorized returns true if the login is in the allowed users list,
@@ -357,7 +377,7 @@ func (h *WebHandler) loginError(
 ) {
 	http.Redirect(
 		w, r,
-		"/ui/login?error="+url.QueryEscape(msg),
+		h.cfg.BasePath+"/ui/login?error="+url.QueryEscape(msg),
 		http.StatusFound,
 	)
 }
@@ -522,13 +542,13 @@ func (h *WebHandler) HandleTestLogin(
 	http.SetCookie(w, &http.Cookie{
 		Name:     "altfix_session",
 		Value:    sid,
-		Path:     "/",
+		Path:     h.cookiePath(),
 		MaxAge:   3600,
 		HttpOnly: true,
 		Secure:   isSecure(r, h.cfg.TrustProxy),
 		SameSite: http.SameSiteLaxMode,
 	})
-	http.Redirect(w, r, "/ui/", http.StatusFound)
+	http.Redirect(w, r, h.cfg.BasePath+"/ui/", http.StatusFound)
 }
 
 // isSecure returns true if the request arrived over TLS.

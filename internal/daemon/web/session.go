@@ -32,6 +32,7 @@ type SessionStore struct {
 	mu       sync.RWMutex
 	sessions map[string]*Session
 	ttl      time.Duration
+	usedJTIs map[string]time.Time
 }
 
 // NewSessionStore creates a store with the given session TTL.
@@ -39,6 +40,7 @@ func NewSessionStore(ttl time.Duration) *SessionStore {
 	return &SessionStore{
 		sessions: make(map[string]*Session),
 		ttl:      ttl,
+		usedJTIs: make(map[string]time.Time),
 	}
 }
 
@@ -110,6 +112,21 @@ func (s *SessionStore) SetAuthenticated(id string) {
 	s.mu.Unlock()
 }
 
+// IsJTIUsed returns true if the given JTI has been consumed.
+func (s *SessionStore) IsJTIUsed(jti string) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	_, ok := s.usedJTIs[jti]
+	return ok
+}
+
+// MarkJTIUsed records a JTI as consumed for replay prevention.
+func (s *SessionStore) MarkJTIUsed(jti string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.usedJTIs[jti] = time.Now()
+}
+
 // StartGC launches a background goroutine that evicts expired sessions
 // at the given interval. It runs until the process exits.
 func (s *SessionStore) StartGC(interval time.Duration) {
@@ -122,12 +139,18 @@ func (s *SessionStore) StartGC(interval time.Duration) {
 	}()
 }
 
-// evictExpired removes all sessions whose TTL has elapsed.
+// evictExpired removes all sessions whose TTL has elapsed and
+// JTIs older than the TTL.
 func (s *SessionStore) evictExpired() {
 	s.mu.Lock()
 	for id, sess := range s.sessions {
 		if time.Since(sess.TouchedAt) > s.ttl {
 			delete(s.sessions, id)
+		}
+	}
+	for jti, used := range s.usedJTIs {
+		if time.Since(used) > s.ttl {
+			delete(s.usedJTIs, jti)
 		}
 	}
 	s.mu.Unlock()

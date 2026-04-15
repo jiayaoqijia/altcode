@@ -77,14 +77,15 @@ func RedactSecrets(data string) string {
 }
 
 // GenerateShareLink creates a share URL path of the form
-// /share/{taskID}.{hmac}?exp={expiry}.
+// {basePath}/share/{taskID}.{hmac}?exp={expiry}.
+// basePath is prepended when non-empty (e.g. "/dash/vm1").
 func GenerateShareLink(
-	taskID string, secret []byte, ttl time.Duration,
+	basePath, taskID string, secret []byte, ttl time.Duration,
 ) string {
 	expiry := time.Now().Add(ttl).Unix()
 	sig := SignShareURL(taskID, expiry, secret)
 	return fmt.Sprintf(
-		"/share/%s.%s?exp=%d", taskID, sig, expiry,
+		"%s/share/%s.%s?exp=%d", basePath, taskID, sig, expiry,
 	)
 }
 

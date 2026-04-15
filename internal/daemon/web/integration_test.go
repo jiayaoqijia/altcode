@@ -57,7 +57,7 @@ func (m *mockIntegrationStore) ListEvents(
 }
 
 func TestAllTemplatesRender(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatalf("LoadTemplates: %v", err)
 	}
@@ -555,7 +555,7 @@ func TestShareLink_Integration(t *testing.T) {
 		},
 	}
 
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -570,7 +570,7 @@ func TestShareLink_Integration(t *testing.T) {
 	mux.HandleFunc("GET /share/{token}", h.HandleShareView)
 
 	// Generate a valid share link.
-	link := GenerateShareLink("task-share-int", secret, time.Hour)
+	link := GenerateShareLink("", "task-share-int", secret, time.Hour)
 	req := httptest.NewRequest("GET", link, nil)
 	w := httptest.NewRecorder()
 	mux.ServeHTTP(w, req)
@@ -606,7 +606,7 @@ func TestShareLink_Integration(t *testing.T) {
 }
 
 func TestDashboard_EmptyState(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}

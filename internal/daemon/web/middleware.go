@@ -27,18 +27,25 @@ func GetSession(r *http.Request) *Session {
 // RequireAuth returns middleware that validates the altfix_session
 // cookie. On success it touches the session, stores it in the request
 // context, and calls the next handler. On failure it redirects to the
-// login page.
-func RequireAuth(sessions *SessionStore) func(http.Handler) http.Handler {
+// login page. basePath is prepended to the login redirect URL.
+func RequireAuth(
+	sessions *SessionStore, basePath ...string,
+) func(http.Handler) http.Handler {
+	bp := ""
+	if len(basePath) > 0 {
+		bp = basePath[0]
+	}
+	loginURL := bp + "/ui/login"
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			cookie, err := r.Cookie("altfix_session")
 			if err != nil {
-				http.Redirect(w, r, "/ui/login", http.StatusFound)
+				http.Redirect(w, r, loginURL, http.StatusFound)
 				return
 			}
 			sess, ok := sessions.Get(cookie.Value)
 			if !ok || !sess.Authenticated {
-				http.Redirect(w, r, "/ui/login", http.StatusFound)
+				http.Redirect(w, r, loginURL, http.StatusFound)
 				return
 			}
 			sessions.Touch(sess.ID)

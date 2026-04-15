@@ -1,12 +1,12 @@
 {{define "content"}}
 <div style="margin-bottom:16px">
-  <a href="/ui/" class="text-sm text-blue-600 hover:underline">&larr; Dashboard</a>
+  <a href="{{absPath "/ui/"}}" class="text-sm text-blue-600 hover:underline">&larr; Dashboard</a>
 </div>
 
 <h1 class="text-xl font-bold" style="margin-bottom:16px">New Task</h1>
 
 {{with .Content}}
-<form method="POST" action="/api/tasks" class="card" style="padding:24px;max-width:640px">
+<form method="POST" action="{{absPath "/tasks"}}" class="card" style="padding:24px;max-width:640px">
   <input type="hidden" name="_csrf" value="{{$.CSRFToken}}">
 
   {{if .Repos}}
@@ -14,7 +14,7 @@
     <label class="text-sm font-medium" style="display:block;margin-bottom:4px">Repository</label>
     <select name="repo" id="repo-select"
       class="w-full border border-gray-300 rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-      hx-get="/ui/partials/repo-issues"
+      hx-get="{{absPath "/ui/partials/repo-issues"}}"
       hx-target="#issue-section"
       hx-trigger="change"
       hx-include="[name='repo']">

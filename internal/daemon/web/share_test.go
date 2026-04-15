@@ -136,7 +136,7 @@ func TestGenerateShareLink(t *testing.T) {
 	taskID := "task-link-test"
 	ttl := 2 * time.Hour
 
-	link := GenerateShareLink(taskID, secret, ttl)
+	link := GenerateShareLink("", taskID, secret, ttl)
 
 	if !strings.HasPrefix(link, "/share/task-link-test.") {
 		t.Errorf("unexpected link prefix: %s", link)
@@ -159,7 +159,7 @@ func TestGenerateShareLink(t *testing.T) {
 }
 
 func TestHandleShareView_InvalidFormat(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +184,7 @@ func TestHandleShareView_InvalidFormat(t *testing.T) {
 }
 
 func TestHandleShareView_ExpiredLink(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -215,7 +215,7 @@ func TestHandleShareView_ExpiredLink(t *testing.T) {
 }
 
 func TestHandleShareView_ValidLink(t *testing.T) {
-	tmpl, err := LoadTemplates()
+	tmpl, err := LoadTemplates("")
 	if err != nil {
 		t.Fatal(err)
 	}
