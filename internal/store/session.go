@@ -183,7 +183,10 @@ func (db *DB) ListSessions() ([]*Session, error) {
 		}
 		sessions = append(sessions, s)
 	}
-	return sessions, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("store: list sessions: %w", err)
+	}
+	return sessions, nil
 }
 
 // LatestSession returns the most recently updated session for a project.

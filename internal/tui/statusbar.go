@@ -11,8 +11,8 @@ import (
 type statusBarInfo struct {
 	Model      string
 	Session    string
-	TokensIn   int
-	TokensOut  int
+	TokensIn   int64
+	TokensOut  int64
 	CostUSD    float64
 	ToolActive string // currently running tool, or ""
 }
@@ -83,7 +83,7 @@ func (a *App) renderStatusBar(info statusBarInfo) string {
 	return bar
 }
 
-func formatTokens(n int) string {
+func formatTokens(n int64) string {
 	if n >= 1_000_000 {
 		return fmt.Sprintf("%.1fM", float64(n)/1_000_000)
 	}

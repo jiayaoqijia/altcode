@@ -367,6 +367,10 @@ func userHomeDir() string {
 func SaveProviderAPIKey(providerName, apiKey string) (string, error) {
 	path := UserConfigPath()
 
+	// Load only the on-disk config — NOT the merged runtime config which
+	// may contain auto-detected credentials from Claude Code / Codex CLI
+	// credential stores. Writing those foreign keys to altcode's own
+	// config file would be a credential-leak bug.
 	cfg := config.Default()
 	if _, err := os.Stat(path); err == nil {
 		existing, err := config.LoadFile(path)
@@ -378,9 +382,20 @@ func SaveProviderAPIKey(providerName, apiKey string) (string, error) {
 		return "", err
 	}
 
+	// Only update the specific provider being saved. Any other
+	// provider keys in cfg came from the on-disk file (user-configured)
+	// so they are safe to persist.
 	pcfg := cfg.Provider[providerName]
 	pcfg.APIKey = apiKey
 	cfg.Provider[providerName] = pcfg
+
+	// Strip provider entries whose APIKey is empty — they were never
+	// user-configured and would just be noise in the config file.
+	for name, p := range cfg.Provider {
+		if name != providerName && p.APIKey == "" && p.BaseURL == "" {
+			delete(cfg.Provider, name)
+		}
+	}
 
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", err

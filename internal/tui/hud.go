@@ -15,8 +15,8 @@ import (
 // hudState holds all metrics for the HUD display.
 type hudState struct {
 	// Context
-	ContextTokens int
-	ContextLimit  int // e.g. 128000 for GPT-4
+	ContextTokens int64
+	ContextLimit  int64 // e.g. 128000 for GPT-4
 
 	// Session
 	SessionStart time.Time
@@ -50,7 +50,7 @@ func (h *hudState) contextPercent() int {
 	if p > 100 {
 		return 100
 	}
-	return p
+	return int(p)
 }
 
 // renderHUD builds the full 2-line HUD matching codex-hud/claude-hud style.

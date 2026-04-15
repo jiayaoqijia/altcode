@@ -21,11 +21,11 @@ type collectedToolCall struct {
 type turnResult struct {
 	Text                string
 	ToolCalls           []collectedToolCall
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int // Anthropic prompt-cache write count
-	CacheReadTokens     int // Anthropic prompt-cache hit count
-	Truncated           bool // true when finish_reason indicates max_tokens/length
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64 // Anthropic prompt-cache write count
+	CacheReadTokens     int64 // Anthropic prompt-cache hit count
+	Truncated           bool  // true when finish_reason indicates max_tokens/length
 }
 
 // collectTurn reads a provider stream, emits events to out in real-time,

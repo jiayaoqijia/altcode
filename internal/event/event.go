@@ -57,9 +57,9 @@ type Result struct {
 
 // UsageInfo tracks token consumption for a request.
 type UsageInfo struct {
-	InputTokens  int `json:"input_tokens"`
-	OutputTokens int `json:"output_tokens"`
-	CacheHits    int `json:"cache_hits,omitempty"`
+	InputTokens  int64 `json:"input_tokens"`
+	OutputTokens int64 `json:"output_tokens"`
+	CacheHits    int64 `json:"cache_hits,omitempty"`
 }
 
 // PermResponse carries the result of a permission decision.

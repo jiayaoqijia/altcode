@@ -162,7 +162,7 @@ func TestConcurrentRecordTurn(t *testing.T) {
 
 func TestFormatInt(t *testing.T) {
 	tests := []struct {
-		input int
+		input int64
 		want  string
 	}{
 		{0, "0"},

@@ -467,11 +467,11 @@ func (a *App) builtinContextText() string {
 	}
 
 	sb.WriteString(fmt.Sprintf("  [%s] %d%% %s\n\n", bar, pct, status))
-	sb.WriteString(fmt.Sprintf("  Total:        %s / %s\n", formatTokens(totalTokens), formatTokens(limit)))
-	sb.WriteString(fmt.Sprintf("  System:       %s  (persona + tools + instructions)\n", formatTokens(systemTokens)))
-	sb.WriteString(fmt.Sprintf("  User:         %s  (%d messages)\n", formatTokens(userTokens), countRole(msgs, "user")))
-	sb.WriteString(fmt.Sprintf("  Assistant:    %s  (%d messages)\n", formatTokens(assistantTokens), countRole(msgs, "assistant")))
-	sb.WriteString(fmt.Sprintf("  Tool results: %s  (%d results)\n", formatTokens(toolTokens), countRole(msgs, "tool")))
+	sb.WriteString(fmt.Sprintf("  Total:        %s / %s\n", formatTokens(int64(totalTokens)), formatTokens(int64(limit))))
+	sb.WriteString(fmt.Sprintf("  System:       %s  (persona + tools + instructions)\n", formatTokens(int64(systemTokens))))
+	sb.WriteString(fmt.Sprintf("  User:         %s  (%d messages)\n", formatTokens(int64(userTokens)), countRole(msgs, "user")))
+	sb.WriteString(fmt.Sprintf("  Assistant:    %s  (%d messages)\n", formatTokens(int64(assistantTokens)), countRole(msgs, "assistant")))
+	sb.WriteString(fmt.Sprintf("  Tool results: %s  (%d results)\n", formatTokens(int64(toolTokens)), countRole(msgs, "tool")))
 	sb.WriteString(fmt.Sprintf("  Instructions: %d sections\n", a.engineInstructionCount()))
 	sb.WriteString(fmt.Sprintf("  Memories:     %d loaded\n", a.engineMemoryCount()))
 	sb.WriteString("```")
@@ -738,12 +738,12 @@ func (a *App) builtinCompactText() string {
 	if beforeMsgs == afterMsgs && beforeMsgTokens == afterMsgTokens {
 		return fmt.Sprintf(
 			"Nothing to compact yet — context is under budget (%s tokens, %d messages).\nRun /compact again once the conversation grows.",
-			formatTokens(beforeTotal), beforeMsgs)
+			formatTokens(int64(beforeTotal)), beforeMsgs)
 	}
 	return fmt.Sprintf(
 		"Compaction complete:\n  Messages: %d → %d (-%d)\n  Tokens:   %s → %s (-%s)",
 		beforeMsgs, afterMsgs, beforeMsgs-afterMsgs,
-		formatTokens(beforeTotal), formatTokens(afterTotal), formatTokens(beforeTotal-afterTotal))
+		formatTokens(int64(beforeTotal)), formatTokens(int64(afterTotal)), formatTokens(int64(beforeTotal-afterTotal)))
 }
 
 // stripPairedQuotes removes a single matched pair of surrounding
@@ -1054,17 +1054,17 @@ func (a *App) builtinAgentsText() string {
 
 	// Context window (use API-reported tokens for accuracy)
 	tokens := a.tokensIn + a.tokensOut
-	limit := a.engine.ContextWindowSize()
-	pct := 0
+	limit := int64(a.engine.ContextWindowSize())
+	pct := int64(0)
 	if limit > 0 {
 		pct = tokens * 100 / limit
 	}
-	barWidth := 20
+	barWidth := int64(20)
 	filled := pct * barWidth / 100
 	if filled > barWidth {
 		filled = barWidth
 	}
-	bar := strings.Repeat("█", filled) + strings.Repeat("░", barWidth-filled)
+	bar := strings.Repeat("█", int(filled)) + strings.Repeat("░", int(barWidth-filled))
 	sb.WriteString(fmt.Sprintf("  Context:        [%s] %d%% (%s/%s)\n", bar, pct,
 		formatTokens(tokens), formatTokens(limit)))
 

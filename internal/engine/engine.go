@@ -144,14 +144,14 @@ func (b *CostBudget) Exceeded() bool {
 // Clamps n to non-negative — a buggy or corrected usage report from a
 // provider that hands back a negative count would otherwise rewind the
 // session-spend counter.
-func (b *TokenBudget) Consume(n int) bool {
+func (b *TokenBudget) Consume(n int64) bool {
 	if b == nil || b.limit <= 0 {
 		return true
 	}
 	if n < 0 {
 		n = 0
 	}
-	used := atomic.AddInt64(&b.used, int64(n))
+	used := atomic.AddInt64(&b.used, n)
 	return used <= b.limit
 }
 

@@ -72,9 +72,9 @@ type App struct {
 	cancel           context.CancelFunc
 	events           <-chan event.Event
 	tokenInfo        string
-	tokensIn             int
-	tokensOut            int
-	currentContextTokens int // last-turn input (not cumulative)
+	tokensIn             int64
+	tokensOut            int64
+	currentContextTokens int64 // last-turn input (not cumulative)
 	costUSD              float64
 	sessionStart     time.Time
 	sessionSlug      string
@@ -94,7 +94,7 @@ type App struct {
 	turnReads      int              // files read this turn
 	turnBashes     int              // commands run this turn
 	turnCostStart  float64          // cost at turn start (for delta)
-	turnTokenStart int              // tokens at turn start (for delta)
+	turnTokenStart int64            // tokens at turn start (for delta)
 	prevContentLen int              // viewport content length for scroll stability
 	inputHistory   *inputHistory    // prompt history for up/down recall
 	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode

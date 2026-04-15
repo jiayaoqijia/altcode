@@ -158,8 +158,8 @@ func processOpenAINonStream(body io.ReadCloser, ch chan<- StreamEvent) {
 	ch <- StreamEvent{
 		Type: StreamUsage,
 		Usage: &UsageInfo{
-			InputTokens:  resp.Usage.PromptTokens,
-			OutputTokens: resp.Usage.CompletionTokens,
+			InputTokens:  int64(resp.Usage.PromptTokens),
+			OutputTokens: int64(resp.Usage.CompletionTokens),
 		},
 	}
 	stopReason := "end_turn"
@@ -389,8 +389,8 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 		// Usage can appear on any chunk (often alongside finish_reason)
 		if chunk.Usage != nil {
 			ch <- StreamEvent{Type: StreamUsage, Usage: &UsageInfo{
-				InputTokens:  chunk.Usage.PromptTokens,
-				OutputTokens: chunk.Usage.CompletionTokens,
+				InputTokens:  int64(chunk.Usage.PromptTokens),
+				OutputTokens: int64(chunk.Usage.CompletionTokens),
 			}}
 		}
 

@@ -87,8 +87,8 @@ type ToolCallEvent struct {
 // tracker undercounts cached prompts substantially because it sees
 // only the (small) uncached `input_tokens` field on message_delta.
 type UsageInfo struct {
-	InputTokens              int `json:"input_tokens"`
-	OutputTokens             int `json:"output_tokens"`
-	CacheCreationInputTokens int `json:"cache_creation_input_tokens,omitempty"`
-	CacheReadInputTokens     int `json:"cache_read_input_tokens,omitempty"`
+	InputTokens              int64 `json:"input_tokens"`
+	OutputTokens             int64 `json:"output_tokens"`
+	CacheCreationInputTokens int64 `json:"cache_creation_input_tokens,omitempty"`
+	CacheReadInputTokens     int64 `json:"cache_read_input_tokens,omitempty"`
 }

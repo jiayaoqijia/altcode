@@ -22,11 +22,13 @@ type ModelPricing struct {
 }
 
 // TurnCost records usage and cost for a single provider turn.
+// Token counts use int64 to avoid overflow on 32-bit platforms
+// during long sessions.
 type TurnCost struct {
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
+	InputTokens         int64
+	OutputTokens        int64
+	CacheCreationTokens int64
+	CacheReadTokens     int64
 	CostUSD             float64
 	Model               string
 }
@@ -106,7 +108,7 @@ func (t *Tracker) SetPricing(model string, p ModelPricing) {
 // RecordTurn records a completed provider turn. Cache tokens default
 // to zero so older callers that don't yet pass them get the existing
 // behavior; new callers should use RecordTurnWithCache.
-func (t *Tracker) RecordTurn(model string, inputTokens, outputTokens int) {
+func (t *Tracker) RecordTurn(model string, inputTokens, outputTokens int64) {
 	t.RecordTurnWithCache(model, inputTokens, outputTokens, 0, 0)
 }
 
@@ -115,7 +117,7 @@ func (t *Tracker) RecordTurn(model string, inputTokens, outputTokens int) {
 // the model's CacheCreationPerMillion / CacheReadPerMillion fields,
 // falling back to InputPerMillion (creation) and 0 (reads) when the
 // model entry doesn't have explicit cache prices.
-func (t *Tracker) RecordTurnWithCache(model string, inputTokens, outputTokens, cacheCreation, cacheRead int) {
+func (t *Tracker) RecordTurnWithCache(model string, inputTokens, outputTokens, cacheCreation, cacheRead int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
@@ -147,11 +149,11 @@ func (t *Tracker) TotalCost() float64 {
 }
 
 // TotalTokens returns aggregate input and output tokens.
-func (t *Tracker) TotalTokens() (int, int) {
+func (t *Tracker) TotalTokens() (int64, int64) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 
-	var in, out int
+	var in, out int64
 	for _, tc := range t.turns {
 		in += tc.InputTokens
 		out += tc.OutputTokens
@@ -181,8 +183,8 @@ func (t *Tracker) Summary() string {
 	)
 }
 
-func (t *Tracker) totalsLocked() (int, int, float64) {
-	var in, out int
+func (t *Tracker) totalsLocked() (int64, int64, float64) {
+	var in, out int64
 	var cost float64
 	for _, tc := range t.turns {
 		in += tc.InputTokens
@@ -237,7 +239,7 @@ func (t *Tracker) lookupPricing(model string) ModelPricing {
 	return t.lookupPricingLocked(model)
 }
 
-func computeCost(p ModelPricing, inTok, outTok int) float64 {
+func computeCost(p ModelPricing, inTok, outTok int64) float64 {
 	return computeCostWithCache(p, inTok, outTok, 0, 0)
 }
 
@@ -245,7 +247,7 @@ func computeCost(p ModelPricing, inTok, outTok int) float64 {
 // of the base input/output cost. Cache creation falls back to
 // InputPerMillion when the model entry has no explicit price; cache
 // reads default to zero (no charge) when not configured.
-func computeCostWithCache(p ModelPricing, inTok, outTok, cacheCreate, cacheRead int) float64 {
+func computeCostWithCache(p ModelPricing, inTok, outTok, cacheCreate, cacheRead int64) float64 {
 	inCost := float64(inTok) * p.InputPerMillion / 1_000_000
 	outCost := float64(outTok) * p.OutputPerMillion / 1_000_000
 	creationRate := p.CacheCreationPerMillion
@@ -258,7 +260,7 @@ func computeCostWithCache(p ModelPricing, inTok, outTok, cacheCreate, cacheRead 
 }
 
 // formatInt adds comma separators to an integer.
-func formatInt(n int) string {
+func formatInt(n int64) string {
 	s := fmt.Sprintf("%d", n)
 	if len(s) <= 3 {
 		return s

@@ -115,10 +115,10 @@ func (a *App) buildToolActive() string {
 
 // buildHUDState assembles the hudState from current app state.
 func (a *App) buildHUDState() hudState {
-	ctxLimit := 128000
+	ctxLimit := int64(128000)
 	claudeMDCount, mcpCount, hooksCount := 0, 0, 0
 	if a.engine != nil {
-		ctxLimit = a.engine.ContextWindowSize()
+		ctxLimit = int64(a.engine.ContextWindowSize())
 		claudeMDCount = len(a.engine.Instructions())
 		cfg := a.engine.Config()
 		mcpCount = len(cfg.MCP)
