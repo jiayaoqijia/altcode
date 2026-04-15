@@ -18,6 +18,10 @@ type OrchestratorConfig struct {
 	SpawnFunc   SpawnFunc
 	MaxFixRetry int // default 3
 	Logger      *slog.Logger
+	PlanModel   string // model for plan phase; default "altllm-basic"
+	ImplModel   string // model for implement phase; default "altllm-basic"
+	ReviewModel string // model for review phase; default "altllm-basic"
+	WorkDir     string // base working directory for agent spawns
 }
 
 // Orchestrator drives the Plan->Implement->Review->Finalize loop.
@@ -28,12 +32,24 @@ type Orchestrator struct {
 }
 
 // NewOrchestrator creates an orchestrator.
+// defaultModel is the fallback model when none is configured.
+const defaultModel = "altllm-basic"
+
 func NewOrchestrator(store *Store, cfg OrchestratorConfig) *Orchestrator {
 	if cfg.MaxFixRetry <= 0 {
 		cfg.MaxFixRetry = 3
 	}
 	if cfg.Logger == nil {
 		cfg.Logger = slog.New(slog.NewJSONHandler(os.Stderr, nil))
+	}
+	if cfg.PlanModel == "" {
+		cfg.PlanModel = defaultModel
+	}
+	if cfg.ImplModel == "" {
+		cfg.ImplModel = defaultModel
+	}
+	if cfg.ReviewModel == "" {
+		cfg.ReviewModel = defaultModel
 	}
 	return &Orchestrator{store: store, cfg: cfg, logger: cfg.Logger}
 }
@@ -62,9 +78,16 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 	}
 
 	planOutput, err := o.cfg.SpawnFunc(ctx, AgentConfig{
-		Binary: "echo",
-		Args:   []string{task.TaskDescription},
-		Role:   "lead",
+		Binary: "altcode",
+		Args: []string{
+			"--model", o.cfg.PlanModel,
+			"You are a lead architect. Analyze this task and output " +
+				"a JSON object with \"steps\" (array of objects with " +
+				"\"description\" and \"prompt\" fields). " +
+				"Task: " + task.TaskDescription,
+		},
+		Dir:  o.cfg.WorkDir,
+		Role: "lead",
 	})
 	if err != nil {
 		if ferr := o.store.MarkFailed(task.ID, fmt.Sprintf("plan failed: %v", err)); ferr != nil {
@@ -95,8 +118,14 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 		var lastErr error
 		for attempt := 0; attempt < o.cfg.MaxFixRetry; attempt++ {
 			_, lastErr = o.cfg.SpawnFunc(ctx, AgentConfig{
+				Binary: "altcode",
+				Args: []string{
+					"--model", o.cfg.ImplModel,
+					"--permission-mode", "bypass",
+					step.Prompt,
+				},
+				Dir:  o.cfg.WorkDir,
 				Role: "implementer",
-				Args: []string{step.Prompt},
 			})
 			if lastErr == nil {
 				o.logger.Info("step completed",
@@ -124,7 +153,16 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 		o.logger.Warn("update status", "err", err)
 	}
 
-	_, err = o.cfg.SpawnFunc(ctx, AgentConfig{Role: "reviewer"})
+	_, err = o.cfg.SpawnFunc(ctx, AgentConfig{
+		Binary: "altcode",
+		Args: []string{
+			"--model", o.cfg.ReviewModel,
+			"Review the recent changes for bugs, security issues, " +
+				"and code quality. Be concise.",
+		},
+		Dir:  o.cfg.WorkDir,
+		Role: "reviewer",
+	})
 	if err != nil {
 		o.logger.Warn("review failed, continuing", "err", err)
 	}

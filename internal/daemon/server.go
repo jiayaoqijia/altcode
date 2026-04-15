@@ -85,8 +85,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		spawnFunc = defaultSpawnFunc
 	}
 	orch := NewOrchestrator(store, OrchestratorConfig{
-		SpawnFunc: spawnFunc,
-		Logger:    logger,
+		SpawnFunc:   spawnFunc,
+		Logger:      logger,
+		PlanModel:   os.Getenv("ALTFIX_PLAN_MODEL"),
+		ImplModel:   os.Getenv("ALTFIX_IMPL_MODEL"),
+		ReviewModel: os.Getenv("ALTFIX_REVIEW_MODEL"),
+		WorkDir:     cfg.DataDir,
 	})
 
 	s := &Server{

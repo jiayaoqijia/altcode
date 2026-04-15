@@ -257,7 +257,8 @@ func TestOrchestrator_MalformedPlanJSON(t *testing.T) {
 				return "this is not json {{{", nil
 			}
 			if cfg.Role == "implementer" {
-				implCalls = append(implCalls, strings.Join(cfg.Args, " "))
+				// The prompt is the last arg after model/permission flags.
+				implCalls = append(implCalls, cfg.Args[len(cfg.Args)-1])
 				return "ok", nil
 			}
 			return "ok", nil
@@ -496,6 +497,137 @@ func TestOrchestrator_SpecEventEmitted(t *testing.T) {
 	}
 	if targets[0] != "add auth" {
 		t.Errorf("target[0] = %v, want 'add auth'", targets[0])
+	}
+}
+
+func TestOrchestrator_ModelConfigPropagation(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "check model routing",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	type spawnCall struct {
+		binary string
+		args   []string
+		dir    string
+		role   string
+	}
+	var calls []spawnCall
+	o := NewOrchestrator(store, OrchestratorConfig{
+		PlanModel:   "gpt-4o",
+		ImplModel:   "claude-sonnet",
+		ReviewModel: "deepseek-r1",
+		WorkDir:     "/tmp/test-workdir",
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			calls = append(calls, spawnCall{
+				binary: cfg.Binary,
+				args:   cfg.Args,
+				dir:    cfg.Dir,
+				role:   cfg.Role,
+			})
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s1","prompt":"do it"}]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+	if len(calls) != 3 {
+		t.Fatalf("expected 3 spawn calls, got %d", len(calls))
+	}
+
+	// Plan phase: uses PlanModel.
+	if calls[0].binary != "altcode" {
+		t.Errorf("plan binary = %q, want altcode", calls[0].binary)
+	}
+	if calls[0].dir != "/tmp/test-workdir" {
+		t.Errorf("plan dir = %q, want /tmp/test-workdir", calls[0].dir)
+	}
+	if calls[0].args[1] != "gpt-4o" {
+		t.Errorf("plan model = %q, want gpt-4o", calls[0].args[1])
+	}
+
+	// Implement phase: uses ImplModel + permission bypass.
+	if calls[1].binary != "altcode" {
+		t.Errorf("impl binary = %q, want altcode", calls[1].binary)
+	}
+	if calls[1].args[1] != "claude-sonnet" {
+		t.Errorf("impl model = %q, want claude-sonnet", calls[1].args[1])
+	}
+	foundBypass := false
+	for i, a := range calls[1].args {
+		if a == "--permission-mode" && i+1 < len(calls[1].args) {
+			if calls[1].args[i+1] == "bypass" {
+				foundBypass = true
+			}
+		}
+	}
+	if !foundBypass {
+		t.Errorf("impl args missing --permission-mode bypass: %v",
+			calls[1].args)
+	}
+
+	// Review phase: uses ReviewModel.
+	if calls[2].binary != "altcode" {
+		t.Errorf("review binary = %q, want altcode", calls[2].binary)
+	}
+	if calls[2].args[1] != "deepseek-r1" {
+		t.Errorf("review model = %q, want deepseek-r1", calls[2].args[1])
+	}
+}
+
+func TestOrchestrator_DefaultModels(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	task := &Task{
+		RepoURL:         "https://github.com/test/repo",
+		TaskDescription: "check defaults",
+		Status:          "pending",
+	}
+	if err := store.CreateTask(task); err != nil {
+		t.Fatal(err)
+	}
+
+	var models []string
+	o := NewOrchestrator(store, OrchestratorConfig{
+		// No models set — should default to "altllm-basic".
+		SpawnFunc: func(_ context.Context, cfg AgentConfig) (string, error) {
+			// args[0] is "--model", args[1] is the model name.
+			if len(cfg.Args) >= 2 {
+				models = append(models, cfg.Args[1])
+			}
+			if cfg.Role == "lead" {
+				return `{"steps":[{"description":"s","prompt":"p"}]}`, nil
+			}
+			return "ok", nil
+		},
+	})
+
+	if err := o.RunTask(context.Background(), task); err != nil {
+		t.Fatalf("RunTask: %v", err)
+	}
+
+	for i, m := range models {
+		if m != "altllm-basic" {
+			t.Errorf("call[%d] model = %q, want altllm-basic", i, m)
+		}
 	}
 }
 
