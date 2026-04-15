@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 )
 
 // SpawnFunc is the function signature for spawning an agent and
@@ -66,7 +67,10 @@ type PlanStep struct {
 }
 
 // RunTask executes the full orchestration loop for a task.
-func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
+// steerCh delivers user guidance messages from the steer API.
+// The orchestrator drains pending messages before each implement
+// step and prepends them to the agent prompt.
+func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan string) error {
 	if err := o.store.MarkStarted(task.ID); err != nil {
 		return fmt.Errorf("mark started: %w", err)
 	}
@@ -115,6 +119,12 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task) error {
 	}
 
 	for i, step := range plan.Steps {
+		// Drain pending steer messages and prepend to prompt.
+		if steer := o.drainSteer(steerCh); steer != "" {
+			step.Prompt = steer + "\n\nOriginal task: " + step.Prompt
+			o.store.AppendEvent(task.ID, "steer_applied", steer)
+		}
+
 		var lastErr error
 		for attempt := 0; attempt < o.cfg.MaxFixRetry; attempt++ {
 			_, lastErr = o.cfg.SpawnFunc(ctx, AgentConfig{
@@ -205,6 +215,27 @@ func (o *Orchestrator) emitSpec(taskID string, plan *Plan) {
 	data, _ := json.Marshal(spec)
 	if err := o.store.AppendEvent(taskID, "spec", string(data)); err != nil {
 		o.logger.Warn("emit spec event", "task", taskID, "err", err)
+	}
+}
+
+// drainSteer reads all pending steer messages from the channel
+// and joins them into a single "User guidance: ..." string.
+// Returns empty string if no messages are pending.
+func (o *Orchestrator) drainSteer(ch <-chan string) string {
+	if ch == nil {
+		return ""
+	}
+	var msgs []string
+	for {
+		select {
+		case msg := <-ch:
+			msgs = append(msgs, msg)
+		default:
+			if len(msgs) == 0 {
+				return ""
+			}
+			return "User guidance: " + strings.Join(msgs, "; ")
+		}
 	}
 }
 

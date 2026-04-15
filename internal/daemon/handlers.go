@@ -191,6 +191,13 @@ func (s *Server) handleSteerTask(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Forward to running orchestrator if task is active.
+	if v, ok := s.runners.Load(id); ok {
+		if runner, ok := v.(*TaskRunner); ok && runner != nil {
+			runner.Steer(req.Message)
+		}
+	}
+
 	s.logger.Info("steer", "task", id, "message", req.Message)
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(202)
