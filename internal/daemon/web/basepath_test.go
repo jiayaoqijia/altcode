@@ -176,6 +176,11 @@ func TestValidateBasePath(t *testing.T) {
 		{"/dash;drop", true},
 		{"/dash vm1", true},
 		{"/dash#frag", true},
+		{"/dash/../etc", true},
+		{"/dash//vm1", true},
+		{"/dash\\vm1", true},
+		{"/dash/\x01vm1", true},
+		{"/dash/\x7fvm1", true},
 	}
 	for _, tt := range tests {
 		err := ValidateBasePath(tt.bp)
@@ -689,19 +694,21 @@ func TestVerifySessionTicket_ValidToken(t *testing.T) {
 
 func TestJTI_UsedTracking(t *testing.T) {
 	store := NewSessionStore(time.Hour)
+	exp := time.Now().Add(5 * time.Minute)
 
-	if store.IsJTIUsed("jti-1") {
-		t.Error("expected jti-1 to not be used")
+	// First claim should succeed.
+	if !store.TryUseJTI("jti-1", exp) {
+		t.Error("expected first TryUseJTI to succeed")
 	}
 
-	store.MarkJTIUsed("jti-1")
-
-	if !store.IsJTIUsed("jti-1") {
-		t.Error("expected jti-1 to be used after marking")
+	// Second claim of same JTI should fail.
+	if store.TryUseJTI("jti-1", exp) {
+		t.Error("expected second TryUseJTI to fail (replay)")
 	}
 
-	if store.IsJTIUsed("jti-2") {
-		t.Error("expected jti-2 to not be used")
+	// Different JTI should succeed.
+	if !store.TryUseJTI("jti-2", exp) {
+		t.Error("expected TryUseJTI for jti-2 to succeed")
 	}
 }
 
@@ -737,9 +744,10 @@ func TestCloudMode_GithubAuth_Returns404(t *testing.T) {
 	mux := http.NewServeMux()
 
 	err := RegisterRoutes(mux, WebConfig{
-		Sessions:  sessions,
-		CloudMode: true,
-		TestMode:  true,
+		Sessions:          sessions,
+		CloudMode:         true,
+		SessionSigningKey: []byte("test-session-signing-key-32bytes!"),
+		TestMode:          true,
 	})
 	if err != nil {
 		t.Fatalf("RegisterRoutes: %v", err)

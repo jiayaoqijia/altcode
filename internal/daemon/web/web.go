@@ -280,11 +280,25 @@ func ValidateBasePath(bp string) error {
 	if !strings.HasPrefix(bp, "/") {
 		return fmt.Errorf("base path must start with /")
 	}
+	if strings.Contains(bp, "..") {
+		return fmt.Errorf("base path must not contain ..")
+	}
+	if strings.Contains(bp, "//") {
+		return fmt.Errorf("base path must not contain //")
+	}
+	if strings.Contains(bp, "\\") {
+		return fmt.Errorf("base path must not contain backslash")
+	}
 	for _, ch := range bp {
-		if ch == '%' || ch == ';' || ch == '?' ||
-			ch == '#' || ch == ' ' || ch == '\t' {
+		if ch < 0x20 || ch == 0x7f {
 			return fmt.Errorf(
-				"base path contains invalid character %q", string(ch),
+				"base path must not contain control characters",
+			)
+		}
+		if ch == '%' || ch == ';' || ch == '?' ||
+			ch == '#' || ch == ' ' {
+			return fmt.Errorf(
+				"base path must not contain %c", ch,
 			)
 		}
 	}
@@ -329,6 +343,11 @@ func RegisterRoutes(mux *http.ServeMux, cfg WebConfig) error {
 
 	// Auth routes (no session required).
 	if cfg.CloudMode {
+		if len(cfg.SessionSigningKey) < 32 {
+			return fmt.Errorf(
+				"cloud mode requires --session-signing-key (min 32 bytes)",
+			)
+		}
 		mux.HandleFunc(
 			"GET /auth/session", h.HandleSessionTicket,
 		)

@@ -105,15 +105,15 @@ func (h *WebHandler) HandleSessionTicket(
 		return
 	}
 
-	// Check JTI replay (single-use).
-	if h.sessions.IsJTIUsed(claims.JTI) {
+	// Atomically claim the JTI for replay prevention.
+	exp := time.Unix(claims.Exp, 0)
+	if !h.sessions.TryUseJTI(claims.JTI, exp) {
 		http.Error(
 			w, "ticket already used",
 			http.StatusUnauthorized,
 		)
 		return
 	}
-	h.sessions.MarkJTIUsed(claims.JTI)
 
 	// Create authenticated session.
 	sid := h.sessions.Create(&SessionUser{

@@ -63,18 +63,21 @@ func (s *SessionStore) Create(user *SessionUser) string {
 }
 
 // Get returns the session if it exists and has not expired.
+// It returns a snapshot copy so callers cannot race with Touch.
 func (s *SessionStore) Get(id string) (*Session, bool) {
 	s.mu.RLock()
 	sess, ok := s.sessions[id]
-	s.mu.RUnlock()
 	if !ok {
+		s.mu.RUnlock()
 		return nil, false
 	}
-	if time.Since(sess.TouchedAt) > s.ttl {
+	cp := *sess
+	s.mu.RUnlock()
+	if time.Since(cp.TouchedAt) > s.ttl {
 		s.Delete(id)
 		return nil, false
 	}
-	return sess, true
+	return &cp, true
 }
 
 // Touch refreshes the session's TTL.
@@ -112,19 +115,18 @@ func (s *SessionStore) SetAuthenticated(id string) {
 	s.mu.Unlock()
 }
 
-// IsJTIUsed returns true if the given JTI has been consumed.
-func (s *SessionStore) IsJTIUsed(jti string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	_, ok := s.usedJTIs[jti]
-	return ok
-}
-
-// MarkJTIUsed records a JTI as consumed for replay prevention.
-func (s *SessionStore) MarkJTIUsed(jti string) {
+// TryUseJTI atomically checks and marks a JTI as used.
+// Returns true if the JTI was successfully claimed (first use).
+// Returns false if already used. exp is the ticket expiry time
+// used by GC to decide when the JTI record can be evicted.
+func (s *SessionStore) TryUseJTI(jti string, exp time.Time) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.usedJTIs[jti] = time.Now()
+	if _, ok := s.usedJTIs[jti]; ok {
+		return false
+	}
+	s.usedJTIs[jti] = exp
+	return true
 }
 
 // StartGC launches a background goroutine that evicts expired sessions
@@ -140,16 +142,17 @@ func (s *SessionStore) StartGC(interval time.Duration) {
 }
 
 // evictExpired removes all sessions whose TTL has elapsed and
-// JTIs older than the TTL.
+// JTIs whose ticket expiry has passed.
 func (s *SessionStore) evictExpired() {
+	now := time.Now()
 	s.mu.Lock()
 	for id, sess := range s.sessions {
 		if time.Since(sess.TouchedAt) > s.ttl {
 			delete(s.sessions, id)
 		}
 	}
-	for jti, used := range s.usedJTIs {
-		if time.Since(used) > s.ttl {
+	for jti, exp := range s.usedJTIs {
+		if now.After(exp) {
 			delete(s.usedJTIs, jti)
 		}
 	}
