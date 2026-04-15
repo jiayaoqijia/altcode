@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -40,14 +41,20 @@ type ServerConfig struct {
 	// TrustProxy enables X-Forwarded-Proto for TLS detection
 	// behind a reverse proxy.
 	TrustProxy bool
+	// SpawnFunc overrides the default subprocess-based spawn.
+	// Nil means use SpawnAgent + ReadAll + Wait from subprocess.go.
+	SpawnFunc SpawnFunc
 }
 
 // Server is the HTTP daemon.
 type Server struct {
-	cfg    ServerConfig
-	store  *Store
-	mux    *http.ServeMux
-	logger *slog.Logger
+	cfg     ServerConfig
+	store   *Store
+	mux     *http.ServeMux
+	logger  *slog.Logger
+	cm      *ConcurrencyManager
+	orch    *Orchestrator
+	runners sync.Map // taskID -> *TaskRunner
 }
 
 // NewServer creates a daemon server.
@@ -67,11 +74,28 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		Level: slog.LevelInfo,
 	}))
 
+	maxTasks := cfg.MaxTasks
+	if maxTasks < 1 {
+		maxTasks = 2
+	}
+	cm := NewConcurrencyManager(maxTasks, logger)
+
+	spawnFunc := cfg.SpawnFunc
+	if spawnFunc == nil {
+		spawnFunc = defaultSpawnFunc
+	}
+	orch := NewOrchestrator(store, OrchestratorConfig{
+		SpawnFunc: spawnFunc,
+		Logger:    logger,
+	})
+
 	s := &Server{
 		cfg:    cfg,
 		store:  store,
 		mux:    http.NewServeMux(),
 		logger: logger,
+		cm:     cm,
+		orch:   orch,
 	}
 	s.registerRoutes()
 
@@ -223,11 +247,78 @@ func (s *Server) Run(ctx context.Context) error {
 		httpServer.Shutdown(timeoutCtx)
 	}()
 
+	go s.pollPendingTasks(ctx)
+
 	s.logger.Info("daemon starting", "addr", addr)
 	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
 		return err
 	}
 	return s.store.Close()
+}
+
+// defaultSpawnFunc shells out via SpawnAgent from subprocess.go.
+func defaultSpawnFunc(
+	ctx context.Context, cfg AgentConfig,
+) (string, error) {
+	proc, err := SpawnAgent(ctx, cfg)
+	if err != nil {
+		return "", err
+	}
+	output, err := proc.ReadAll()
+	if err != nil {
+		return "", err
+	}
+	return output, proc.Wait()
+}
+
+// dispatchTask attempts to acquire a concurrency slot and run the
+// task. If no slot is available the task stays pending for the
+// background poller to pick up later.
+func (s *Server) dispatchTask(task *Task) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	runner := NewTaskRunner(task, s.store, s.orch, s.logger)
+
+	// Register runner so handleStopTask can cancel it.
+	s.runners.Store(task.ID, runner)
+	defer s.runners.Delete(task.ID)
+
+	if !s.cm.TryAcquire(task.ID, cancel) {
+		// No slot available — cancel the unused context and let
+		// the background poller retry later.
+		cancel()
+		s.logger.Info("task queued — no slot available",
+			"id", task.ID,
+			"queue", s.cm.QueuePosition())
+		return
+	}
+	defer s.cm.Release(task.ID)
+
+	runner.Run(ctx)
+}
+
+// pollPendingTasks periodically checks for pending tasks that
+// have no active runner and dispatches them.
+func (s *Server) pollPendingTasks(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			tasks, err := s.store.ListTasksByStatus("pending")
+			if err != nil {
+				continue
+			}
+			for _, task := range tasks {
+				if _, ok := s.runners.Load(task.ID); ok {
+					continue
+				}
+				go s.dispatchTask(task)
+			}
+		}
+	}
 }
 
 func (s *Server) middleware() http.Handler {
