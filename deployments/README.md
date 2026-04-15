@@ -9,7 +9,7 @@ Build and run the container image:
 ```bash
 make build                    # produces dist/altcode
 docker build -f deployments/Dockerfile -t altfix .
-docker run -d -p 9100:9100 \
+docker run -d -p 9200:9200 \
   -e ANTHROPIC_API_KEY=sk-ant-... \
   -e OPENAI_API_KEY=sk-... \
   altfix
@@ -45,7 +45,7 @@ gcloud compute images create altfix-v1 --source-disk=altfix-vm --source-disk-zon
 ## Health Check
 
 ```bash
-curl http://localhost:9100/health
+curl http://localhost:9200/health
 ```
 
 ## Configuration

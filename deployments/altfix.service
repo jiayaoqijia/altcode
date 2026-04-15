@@ -10,7 +10,7 @@ User=altfix
 Group=altfix
 WorkingDirectory=/home/altfix
 ExecStart=/usr/local/bin/altcode daemon \
-    --port 9100 \
+    --port 9200 \
     --data-dir /home/altfix/.altcode/daemon \
     --max-concurrent 2
 Restart=on-failure

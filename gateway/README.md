@@ -23,13 +23,13 @@ cd gateway && go build ./cmd/altfix-gateway/
 
 # Run
 ./altfix-gateway \
-  --daemon-url http://localhost:4080 \
+  --daemon-url http://localhost:9200 \
   --auth-token $ALTFIX_AUTH_TOKEN \
   --repo-url https://github.com/org/repo \
   --telegram-token $TELEGRAM_BOT_TOKEN
 
 # Environment variables also work
-export ALTFIX_DAEMON_URL=http://localhost:4080
+export ALTFIX_DAEMON_URL=http://localhost:9200
 export ALTFIX_AUTH_TOKEN=secret
 export ALTFIX_REPO_URL=https://github.com/org/repo
 export TELEGRAM_BOT_TOKEN=123:abc

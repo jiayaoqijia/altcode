@@ -61,7 +61,7 @@ altcode workspace "build JWT auth" claude:architect codex:coder
 altcode --prompt-each prompts.txt --parallel 3 "Review: {{input}}"
 
 # Run as HTTP daemon (AltFix)
-altcode daemon --port 9100 --auth-token $TOKEN
+altcode daemon --port 9200 --auth-token $TOKEN
 
 # Use any provider
 altcode --model minimax/MiniMax-M2.7 "add rate limiting"
@@ -97,10 +97,10 @@ HTTP daemon for autonomous coding agents. Spawns codex/claude/altcode as subproc
 
 ```bash
 # Start with auth token (required for all endpoints except /health)
-altcode daemon --port 9100 --auth-token $TOKEN --data-dir ~/.altcode/daemon
+altcode daemon --port 9200 --auth-token $TOKEN --data-dir ~/.altcode/daemon
 
 # Or use environment variables
-export ALTCODE_DAEMON_PORT=9100
+export ALTCODE_DAEMON_PORT=9200
 export ALTCODE_DAEMON_AUTH_TOKEN=$(openssl rand -hex 16)
 altcode daemon
 ```
@@ -125,13 +125,13 @@ GET  /health             Liveness probe (no auth)
 
 ```bash
 # Simple task
-curl -X POST http://localhost:9100/tasks \
+curl -X POST http://localhost:9200/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"repo_url":"https://github.com/you/repo","task":"fix the failing tests"}'
 
 # With model routing — agents use altllm-basic for implementation
-curl -X POST http://localhost:9100/tasks \
+curl -X POST http://localhost:9200/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -144,7 +144,7 @@ curl -X POST http://localhost:9100/tasks \
   }'
 
 # Webhook-triggered (GitHub delivery dedup via delivery_id)
-curl -X POST http://localhost:9100/tasks \
+curl -X POST http://localhost:9200/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
@@ -185,21 +185,21 @@ The daemon supports flexible model routing per role. Models are auto-detected by
 
 ```bash
 # Get task status + queue position
-curl http://localhost:9100/tasks/$TASK_ID \
+curl http://localhost:9200/tasks/$TASK_ID \
   -H "Authorization: Bearer $TOKEN"
 
 # Stream progress via SSE (supports Last-Event-ID replay)
-curl -N http://localhost:9100/tasks/$TASK_ID/sse \
+curl -N http://localhost:9200/tasks/$TASK_ID/sse \
   -H "Authorization: Bearer $TOKEN"
 
 # Steer a running task
-curl -X POST http://localhost:9100/tasks/$TASK_ID/steer \
+curl -X POST http://localhost:9200/tasks/$TASK_ID/steer \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"message":"focus on error handling, skip the UI changes"}'
 
 # Stop a task
-curl -X POST http://localhost:9100/tasks/$TASK_ID/stop \
+curl -X POST http://localhost:9200/tasks/$TASK_ID/stop \
   -H "Authorization: Bearer $TOKEN"
 ```
 

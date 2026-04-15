@@ -77,12 +77,12 @@ budget.go (stall detection), modes.go (Solo/Pair/Team routing).
 
 **Running the daemon:**
 ```bash
-altcode daemon --port 9100 --auth-token $TOKEN --data-dir ~/.altcode/daemon
+altcode daemon --port 9200 --auth-token $TOKEN --data-dir ~/.altcode/daemon
 ```
 
 **Creating tasks:**
 ```bash
-curl -X POST http://localhost:9100/tasks \
+curl -X POST http://localhost:9200/tasks \
   -H "Authorization: Bearer $TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"repo_url":"https://github.com/you/repo","task":"fix tests","model":"altllm-basic"}'

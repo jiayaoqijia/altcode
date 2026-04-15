@@ -76,7 +76,7 @@ Designed for AltFix VM deployment.`,
 		},
 	}
 
-	cmd.Flags().IntVar(&port, "port", 9100, "HTTP server port")
+	cmd.Flags().IntVar(&port, "port", 9200, "HTTP server port")
 	cmd.Flags().StringVar(&dataDir, "data-dir", "",
 		"Data directory (default ~/.altcode/daemon)")
 	cmd.Flags().StringVar(&authToken, "auth-token", "",

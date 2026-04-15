@@ -7,14 +7,14 @@
 #   ./setup.sh --headed # run tests in headed mode (for debugging)
 #
 # Environment:
-#   ALTFIX_PORT    — port for the daemon (default 9100)
+#   ALTFIX_PORT    — port for the daemon (default 9200)
 #   ALTFIX_BINARY  — path to pre-built binary (skips build)
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../../.." && pwd)"
-PORT="${ALTFIX_PORT:-9100}"
+PORT="${ALTFIX_PORT:-9200}"
 BINARY="${ALTFIX_BINARY:-/tmp/altcode-e2e}"
 DAEMON_PID=""
 DATA_DIR=""
