@@ -935,6 +935,9 @@ func Run(ctx context.Context, p Params) error {
 			return fmt.Errorf("create engine: %w", err)
 		}
 	}
+	if p.Registry == nil {
+		p.Registry = eng.Registry()
+	}
 
 	w := p.Writer
 	if w == nil {

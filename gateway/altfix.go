@@ -8,6 +8,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
@@ -70,7 +71,7 @@ func (b *AltFixBridge) HandleMessage(
 	}
 
 	// Rate limit per sender.
-	if b.rateLimiter != nil && !b.rateLimiter.Allow("msg", msg.SenderID) {
+	if b.rateLimiter != nil && !b.rateLimiter.Allow("all", msg.SenderID) {
 		b.reply(ctx, msg, "Rate limited. Please wait before sending more commands.")
 		return
 	}
@@ -120,7 +121,7 @@ func (b *AltFixBridge) HandleMessage(
 	default:
 		// Normal chat — run through altcode CLI subprocess.
 		// Rate limit chat the same as commands (costs money per turn).
-		if b.rateLimiter != nil && !b.rateLimiter.Allow("chat", msg.SenderID) {
+		if b.rateLimiter != nil && !b.rateLimiter.Allow("all", msg.SenderID) {
 			reply = "Chat rate limited. Please wait before sending more messages."
 			break
 		}
@@ -258,7 +259,7 @@ func (b *AltFixBridge) createTaskWithOpts(
 func (b *AltFixBridge) getTask(
 	ctx context.Context, id string,
 ) (string, error) {
-	resp, err := b.doRequest(ctx, "GET", "/tasks/"+id, nil)
+	resp, err := b.doRequest(ctx, "GET", "/tasks/"+url.PathEscape(id), nil)
 	if err != nil {
 		return "", err
 	}
@@ -409,7 +410,7 @@ func (b *AltFixBridge) generateShareLink(
 	base := strings.TrimSuffix(b.daemonURL, "/api/v1")
 	base = strings.TrimSuffix(base, "/api")
 	return fmt.Sprintf(
-		"Share link (requires auth):\n%s/ui/tasks/%s", base, id,
+		"Share link (requires auth):\n%s/ui/tasks/%s", base, url.PathEscape(id),
 	), nil
 }
 
@@ -417,7 +418,7 @@ func (b *AltFixBridge) listCheckpoints(
 	ctx context.Context, id string,
 ) (string, error) {
 	resp, err := b.doRequest(
-		ctx, "GET", "/tasks/"+id+"/checkpoints", nil,
+		ctx, "GET", "/tasks/"+url.PathEscape(id)+"/checkpoints", nil,
 	)
 	if err != nil {
 		return "", err
@@ -477,7 +478,7 @@ func (b *AltFixBridge) retryTask(
 	ctx context.Context, id string,
 ) (string, error) {
 	// Fetch the original task to get its description.
-	resp, err := b.doRequest(ctx, "GET", "/tasks/"+id, nil)
+	resp, err := b.doRequest(ctx, "GET", "/tasks/"+url.PathEscape(id), nil)
 	if err != nil {
 		return "", fmt.Errorf("fetch task for retry: %w", err)
 	}
@@ -639,7 +640,7 @@ func (b *AltFixBridge) listTasks(
 func (b *AltFixBridge) stopTask(
 	ctx context.Context, id string,
 ) (string, error) {
-	_, err := b.doRequest(ctx, "POST", "/tasks/"+id+"/stop", nil)
+	_, err := b.doRequest(ctx, "POST", "/tasks/"+url.PathEscape(id)+"/stop", nil)
 	if err != nil {
 		return "", err
 	}
@@ -662,7 +663,7 @@ func (b *AltFixBridge) steerTask(
 	body := map[string]string{"message": message}
 	data, _ := json.Marshal(body)
 
-	_, err := b.doRequest(ctx, "POST", "/tasks/"+id+"/steer", data)
+	_, err := b.doRequest(ctx, "POST", "/tasks/"+url.PathEscape(id)+"/steer", data)
 	if err != nil {
 		return "", err
 	}

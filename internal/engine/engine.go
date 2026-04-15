@@ -523,9 +523,9 @@ func (e *Engine) messageCountLocked() int {
 	return len(e.messages)
 }
 
-// messagesSnapshotLocked returns a copy of e.messages under the mutex.
+// messagesSnapshot returns a copy of e.messages under the mutex.
 // Use this when callers need the slice for read-only iteration.
-func (e *Engine) messagesSnapshotLocked() []provider.Message {
+func (e *Engine) messagesSnapshot() []provider.Message {
 	e.msgMu.Lock()
 	defer e.msgMu.Unlock()
 	out := make([]provider.Message, len(e.messages))
@@ -829,7 +829,7 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 	// can't mutate the slice underneath the provider request.
 	req := &provider.Request{
 		Model:     e.model,
-		Messages:  e.messagesSnapshotLocked(),
+		Messages:  e.messagesSnapshot(),
 		System:    system,
 		Tools:     e.toolSchemas(),
 		MaxTokens: 16384,
@@ -1197,7 +1197,7 @@ const maxRequestBytes = 15 * 1024 * 1024
 // maybePreTurnCompact runs BEFORE sending a request to the provider.
 // Triggers on either token count (90% of window) or byte count (15MB).
 func (e *Engine) maybePreTurnCompact(ctx context.Context) {
-	snap := e.messagesSnapshotLocked()
+	snap := e.messagesSnapshot()
 	tokens := compact.EstimateTokens(snap)
 	limit := e.contextWindowSize()
 	bytes := e.messageBytes()
@@ -1292,7 +1292,7 @@ func (e *Engine) maybeCompact(ctx context.Context) {
 	// guard to prevent oversized requests; post-tool compaction needs the
 	// same guard or large byte-heavy tool results (file dumps, screenshots,
 	// page snapshots) can blow past the byte cap with a low token estimate.
-	snap := e.messagesSnapshotLocked()
+	snap := e.messagesSnapshot()
 	tokens := compact.EstimateTokens(snap)
 	threshold := e.contextWindowSize() * 7 / 10 // 70% of context window
 	if e.cfg.CompactThreshold > 0 {
@@ -1464,33 +1464,33 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 			APIKey: pcfg.APIKey, BaseURL: pcfg.BaseURL,
 		}), nil
 	case "deepseek":
-		return newOpenAICompat(cfg, "deepseek", "https://api.deepseek.com"), nil
+		return newOpenAICompat(cfg, "deepseek", "https://api.deepseek.com")
 	case "zhipu", "glm":
 		// GLM coding plan: Anthropic-compat at api.z.ai/api/anthropic
 		// Regular API: OpenAI-compat at open.bigmodel.cn
 		return newChineseProvider(cfg, "zhipu",
 			"https://open.bigmodel.cn/api/paas/v4",
-			"https://api.z.ai/api/anthropic"), nil
+			"https://api.z.ai/api/anthropic")
 	case "moonshot", "kimi":
 		// Kimi coding plan: Anthropic-compat at api.kimi.com/coding/
 		// Regular API: OpenAI-compat at api.moonshot.cn/v1
 		return newChineseProvider(cfg, "moonshot",
 			"https://api.moonshot.cn/v1",
-			"https://api.kimi.com/coding/"), nil
+			"https://api.kimi.com/coding/")
 	case "minimax":
 		// MiniMax coding plan: Anthropic-compat at api.minimax.io/anthropic
 		// Regular API: OpenAI-compat at api.minimax.io/v1
 		return newChineseProvider(cfg, "minimax",
 			"https://api.minimax.io/v1",
-			"https://api.minimax.io/anthropic"), nil
+			"https://api.minimax.io/anthropic")
 	case "altllm":
-		return newOpenAICompat(cfg, "altllm", "https://api.altllm.ai"), nil
+		return newOpenAICompat(cfg, "altllm", "https://api.altllm.ai")
 	case "qwen", "dashscope":
-		return newOpenAICompat(cfg, "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1"), nil
+		return newOpenAICompat(cfg, "qwen", "https://dashscope.aliyuncs.com/compatible-mode/v1")
 	case "ollama":
-		return newOpenAICompat(cfg, "ollama", "http://localhost:11434"), nil
+		return newOpenAICompat(cfg, "ollama", "http://localhost:11434")
 	case "lmstudio":
-		return newOpenAICompat(cfg, "lmstudio", "http://localhost:1234"), nil
+		return newOpenAICompat(cfg, "lmstudio", "http://localhost:1234")
 	default:
 		// Unknown provider prefix — try as OpenAI-compatible.
 		// If the provider has its own config entry, use it.
@@ -1518,15 +1518,18 @@ func createProvider(name string, cfg *config.Config) (provider.Provider, error) 
 func newChineseProvider(
 	cfg *config.Config,
 	name, defaultOpenAIBase, defaultAnthropicBase string,
-) provider.Provider {
+) (provider.Provider, error) {
 	pcfg := cfg.Provider[name]
+	if pcfg.APIKey == "" {
+		return nil, fmt.Errorf("provider %s: API key not configured (set %s_API_KEY)", name, strings.ToUpper(name))
+	}
 	base := pcfg.BaseURL
 
 	// Auto-detect: if baseURL points to an Anthropic-compat endpoint, use Anthropic provider
 	if base != "" && (strings.Contains(base, "/anthropic") || strings.Contains(base, "/coding")) {
 		return provider.NewAnthropic(provider.AnthropicConfig{
 			APIKey: pcfg.APIKey, BaseURL: base,
-		})
+		}), nil
 	}
 
 	// Default: OpenAI-compatible
@@ -1535,18 +1538,21 @@ func newChineseProvider(
 	}
 	return provider.NewOpenAI(provider.OpenAIConfig{
 		APIKey: pcfg.APIKey, BaseURL: base,
-	})
+	}), nil
 }
 
-func newOpenAICompat(cfg *config.Config, name, defaultBase string) provider.Provider {
+func newOpenAICompat(cfg *config.Config, name, defaultBase string) (provider.Provider, error) {
 	pcfg := cfg.Provider[name]
+	if pcfg.APIKey == "" {
+		return nil, fmt.Errorf("provider %s: API key not configured (set %s_API_KEY)", name, strings.ToUpper(name))
+	}
 	base := pcfg.BaseURL
 	if base == "" {
 		base = defaultBase
 	}
 	return provider.NewOpenAI(provider.OpenAIConfig{
 		APIKey: pcfg.APIKey, BaseURL: base,
-	})
+	}), nil
 }
 
 // buildTurnSummary creates a structured summary for the completed turn.
@@ -1574,7 +1580,7 @@ func (e *Engine) buildTurnSummary(intent TaskIntent) string {
 
 // logCompaction records a compaction event for debugging and audit.
 func (e *Engine) logCompaction(method string, beforeMsgs, beforeTokens, afterMsgs int) {
-	afterTokens := compact.EstimateTokens(e.messagesSnapshotLocked())
+	afterTokens := compact.EstimateTokens(e.messagesSnapshot())
 	if os.Getenv("ALTCODE_DEBUG") == "1" {
 		fmt.Fprintf(os.Stderr, "[debug] compaction (%s): %d→%d msgs, ~%d→~%d tokens\n",
 			method, beforeMsgs, afterMsgs, beforeTokens, afterTokens)
@@ -1608,7 +1614,7 @@ func parseModel(model string) (providerName, modelName string) {
 	lower := strings.ToLower(model)
 	for _, prefix := range []string{
 		"altllm", "deepseek", "moonshot", "kimi", "minimax",
-		"zhipu", "glm", "qwen", "ollama",
+		"zhipu", "glm", "qwen", "dashscope", "ollama",
 	} {
 		if strings.HasPrefix(lower, prefix) {
 			return prefix, model
