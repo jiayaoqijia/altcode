@@ -560,23 +560,23 @@ func TestOrchestrator_ModelConfigPropagation(t *testing.T) {
 		t.Errorf("plan model = %q, want gpt-4o", calls[0].args[1])
 	}
 
-	// Implement phase: uses ImplModel + permission bypass.
+	// Implement phase: uses ImplModel + permission auto + tool allowlist.
 	if calls[1].binary != "altcode" {
 		t.Errorf("impl binary = %q, want altcode", calls[1].binary)
 	}
 	if calls[1].args[1] != "claude-sonnet" {
 		t.Errorf("impl model = %q, want claude-sonnet", calls[1].args[1])
 	}
-	foundBypass := false
+	foundAuto := false
 	for i, a := range calls[1].args {
 		if a == "--permission-mode" && i+1 < len(calls[1].args) {
-			if calls[1].args[i+1] == "bypass" {
-				foundBypass = true
+			if calls[1].args[i+1] == "auto" {
+				foundAuto = true
 			}
 		}
 	}
-	if !foundBypass {
-		t.Errorf("impl args missing --permission-mode bypass: %v",
+	if !foundAuto {
+		t.Errorf("impl args missing --permission-mode auto: %v",
 			calls[1].args)
 	}
 
