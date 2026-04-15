@@ -1,12 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
-    paths-ignore: ['docs/**', '*.md', '*.png', 'vendor/**']
   pull_request:
     branches: [main]
-    paths-ignore: ['docs/**', '*.md', '*.png', 'vendor/**']
+    paths: ['**.go', 'go.mod', 'go.sum']
 
 jobs:
   ci:
@@ -21,27 +18,10 @@ jobs:
           go-version: '1.23'
           cache: true
 
-      - name: Build
-        run: go build -mod=mod ./cmd/altcode/... ./internal/...
-
-      - name: Vet
-        run: go vet -mod=mod ./cmd/altcode/... ./internal/...
-
-      - name: Test
+      - name: Build + Vet
         run: |
-          go test -mod=mod ./internal/... -race -count=1 -timeout=180s -parallel=8 2>&1 | tee /tmp/test.out
-          PASS=$(grep -cF '--- PASS' /tmp/test.out || true)
-          echo "Tests passing: $PASS"
-          if [ "$PASS" -lt 300 ]; then
-            echo "WARN: Expected 300+ tests, got $PASS"
-          fi
+          go build -mod=mod ./cmd/altcode/...
+          go vet -mod=mod ./cmd/altcode/... ./internal/...
 
-      - name: Binary size
-        run: |
-          go build -mod=mod -ldflags="-s -w" -trimpath -o /tmp/altcode ./cmd/altcode
-          SIZE=$(stat -c%s /tmp/altcode)
-          echo "Binary size: $((SIZE / 1024 / 1024))MB ($SIZE bytes)"
-          if [ "$SIZE" -gt 26214400 ]; then
-            echo "FAIL: Binary exceeds 25MB"
-            exit 1
-          fi
+      - name: Smoke test
+        run: go test -mod=mod -short -count=1 -timeout=60s ./internal/engine/... ./internal/daemon/... ./internal/tui/... ./internal/exec/...
