@@ -70,8 +70,8 @@ COPY deployments/altfix.service /etc/systemd/system/altfix.service
 
 # Health check
 HEALTHCHECK --interval=10s --timeout=3s --start-period=30s \
-    CMD curl -sf http://localhost:9100/health || exit 1
+    CMD curl -sf http://localhost:9200/health || exit 1
 
 # Default: start daemon
-EXPOSE 9100
-CMD ["altcode", "daemon", "--port", "9100", "--data-dir", "/root/.altcode/daemon"]
+EXPOSE 9200
+CMD ["altcode", "daemon", "--port", "9200", "--data-dir", "/root/.altcode/daemon"]
