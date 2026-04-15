@@ -10,7 +10,7 @@
  *   6. Settings page
  *
  * Prerequisites:
- *   - Daemon running on PORT (default 9100) with --test-mode
+ *   - Daemon running on PORT (default 9200) with --test-mode
  *   - Sample tasks created via POST /tasks
  *   - Playwright chromium browser installed
  *
@@ -25,7 +25,7 @@
 import { chromium } from 'playwright';
 import { copyFileSync, mkdirSync } from 'fs';
 
-const PORT = process.env.ALTFIX_PORT || '9100';
+const PORT = process.env.ALTFIX_PORT || '9200';
 const BASE = `http://localhost:${PORT}`;
 const VIDEO_DIR = '/tmp/demo-videos';
 const OUTPUT = '/tmp/altfix-demo.webm';

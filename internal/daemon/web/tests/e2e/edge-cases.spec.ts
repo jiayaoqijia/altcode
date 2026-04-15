@@ -1,6 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 
-const BASE = process.env.BASE_URL || 'http://localhost:9100';
+const BASE = process.env.BASE_URL || 'http://localhost:9200';
 const API_TOKEN = 'e2e-token';
 const apiHeaders = { 'Authorization': `Bearer ${API_TOKEN}`, 'Content-Type': 'application/json' };
 

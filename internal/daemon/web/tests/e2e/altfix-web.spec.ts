@@ -9,7 +9,7 @@ import { test, expect, type Page } from '@playwright/test';
 // authenticated pages without a real GitHub OAuth flow.
 // -------------------------------------------------------------------
 
-const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9100}`;
+const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9200}`;
 
 // Helper: authenticate via test-login bypass.
 // Uses a regex that excludes /ui/login so a broken redirect is caught

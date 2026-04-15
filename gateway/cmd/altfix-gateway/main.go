@@ -3,7 +3,7 @@
 // Usage:
 //
 //	altfix-gateway \
-//	  --daemon-url http://localhost:4080 \
+//	  --daemon-url http://localhost:9200 \
 //	  --auth-token <token> \
 //	  --repo-url https://github.com/org/repo \
 //	  --telegram-token <token> \

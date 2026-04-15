@@ -1,6 +1,6 @@
 import { defineConfig } from '@playwright/test';
 
-const PORT = Number(process.env.ALTFIX_PORT) || 9100;
+const PORT = Number(process.env.ALTFIX_PORT) || 9200;
 
 export default defineConfig({
   testDir: '.',

@@ -83,7 +83,7 @@ Type=simple
 User=altfix
 Group=altfix
 WorkingDirectory=/home/altfix
-ExecStart=/usr/local/bin/altcode daemon --port 9100 --data-dir /home/altfix/.altcode/daemon --max-concurrent 2
+ExecStart=/usr/local/bin/altcode daemon --port 9200 --data-dir /home/altfix/.altcode/daemon --max-concurrent 2
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -117,7 +117,7 @@ echo "     echo 'ALTFIX_AUTH_TOKEN=your-token' >> /home/altfix/.altcode/env"
 echo ""
 echo "  3. Start the daemon:"
 echo "     sudo systemctl start altfix"
-echo "     curl http://localhost:9100/health"
+echo "     curl http://localhost:9200/health"
 echo ""
 echo "  4. Verify tools:"
 echo "     altcode --help && codex --version && gh --version"

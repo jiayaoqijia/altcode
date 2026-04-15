@@ -9,7 +9,7 @@ import { test, expect, type Page } from '@playwright/test';
 // API-created tasks.
 // -------------------------------------------------------------------
 
-const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9100}`;
+const BASE = process.env.BASE_URL || `http://localhost:${process.env.ALTFIX_PORT || 9200}`;
 const API_TOKEN = 'e2e-token';
 
 const apiHeaders = {
