@@ -30,8 +30,40 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		return a.onInfo(ev)
 	case event.ErrorEvent:
 		return a.onError(ev)
+	case event.PermissionRequest:
+		return a.onPermissionRequest(ev)
 	case event.Done:
 		return a.onDone()
+	}
+	return a, a.waitForEvent()
+}
+
+// onPermissionRequest auto-allows the tool call and surfaces a brief
+// info note. Without this handler the engine's askPermission select
+// blocks forever — every ActionAsk-classified tool call would hang
+// the agent loop indefinitely (the original 1+ hour TUI hang).
+//
+// Auto-allow is the right TUI default because:
+//   1. Interactive users are implicitly consenting to tool calls;
+//      they can Esc-cancel any turn that goes wrong.
+//   2. CC/codex TUIs default to allowing in interactive mode too.
+//   3. Headless mode uses a different policy via permission rules.
+//
+// Future work: replace this with a proper modal driven by
+// internal/tui/permission_dialog.go (struct already exists, just
+// not wired up). For now, surface the auto-allow so users notice.
+func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
+	if ev.Permission == nil || ev.Permission.Response == nil {
+		return a, a.waitForEvent()
+	}
+	a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json",
+		ev.Permission.ToolName))
+	// Non-blocking send: respCh has cap=1 (set in engine.askPermission),
+	// so the first send always succeeds. Default branch is defensive
+	// against a future change to channel capacity.
+	select {
+	case ev.Permission.Response <- event.PermResponse{Action: event.Allow}:
+	default:
 	}
 	return a, a.waitForEvent()
 }

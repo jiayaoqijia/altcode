@@ -261,6 +261,8 @@ func toolSummaryNoun(name string, count int) string {
 
 // RenderLive returns the tree during active execution — NO collapsing.
 // This prevents visual height jumping when consecutive tools complete.
+// Uses tree-branch chars (├─/└─) because the live tree is rendered
+// directly under the in-progress assistant turn (clear parent context).
 func (t *toolTree) RenderLive(theme Theme, width int) string {
 	if len(t.entries) == 0 {
 		return ""
@@ -270,24 +272,33 @@ func (t *toolTree) RenderLive(theme Theme, width int) string {
 	for i, e := range t.entries {
 		items[i] = e
 	}
-	return t.renderItems(items, theme, width)
+	return t.renderItems(items, theme, width, true /*tree*/)
 }
 
-// Render returns the tool tree with collapsed groups (for final display).
+// Render returns the tool tree with collapsed groups (for final display
+// after the turn ends). Uses bullet (⏺) prefix — the persisted tree
+// is wrapped in an info message, so tree-branch chars (├─/└─) would
+// dangle without a parent line and read confusingly.
 func (t *toolTree) Render(theme Theme, width int) string {
 	if len(t.entries) == 0 {
 		return ""
 	}
 	items := collapseEntries(t.entries)
-	return t.renderItems(items, theme, width)
+	return t.renderItems(items, theme, width, false /*persisted*/)
 }
 
-func (t *toolTree) renderItems(items []any, theme Theme, width int) string {
+func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) string {
 	var sb strings.Builder
 	for i, item := range items {
-		prefix := "├─"
-		if i == len(items)-1 {
-			prefix = "└─"
+		var prefix string
+		if tree {
+			prefix = "├─"
+			if i == len(items)-1 {
+				prefix = "└─"
+			}
+		} else {
+			// Persisted-snapshot mode: every tool is a top-level bullet.
+			prefix = "⏺"
 		}
 
 		switch v := item.(type) {
