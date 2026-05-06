@@ -12,9 +12,9 @@ import (
 	"syscall"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/agent"
 	"github.com/jiayaoqijia/altcode/internal/auth"
-	"github.com/jiayaoqijia/altcode/internal/oauth"
 	"github.com/jiayaoqijia/altcode/internal/command"
 	"github.com/jiayaoqijia/altcode/internal/config"
 	"github.com/jiayaoqijia/altcode/internal/engine"
@@ -22,13 +22,13 @@ import (
 	"github.com/jiayaoqijia/altcode/internal/hooks"
 	"github.com/jiayaoqijia/altcode/internal/mcp"
 	"github.com/jiayaoqijia/altcode/internal/memory"
+	"github.com/jiayaoqijia/altcode/internal/oauth"
 	"github.com/jiayaoqijia/altcode/internal/orchestrator"
 	"github.com/jiayaoqijia/altcode/internal/permission"
 	"github.com/jiayaoqijia/altcode/internal/plugin"
 	"github.com/jiayaoqijia/altcode/internal/store"
 	"github.com/jiayaoqijia/altcode/internal/tui"
 	"github.com/jiayaoqijia/altcode/internal/workflow"
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
 
@@ -652,44 +652,44 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		// built. Phase 2 rules were already validated via permShell
 		// above, but re-running is harmless and consistent.
 		ep := exec.Params{
-			EngineParams:   params,
-			Prompt:         prompt,
-			JSON:           flags.jsonMode,
-			Quiet:          flags.quiet,
-			Model:          cfg.Model,
-			Auth:           auth.CredentialSource(cfg),
-			OutputFormat:   flags.outputFormat,
-			Verbose:        flags.verbose,
-			PrintCost:      flags.printCost,
-			PrintTools:     flags.printTools,
-			PrintTree:      flags.printTree,
-			ShowSystem:     flags.showSystem,
-			SaveTranscript: flags.saveTranscript,
-			SaveCost:       flags.saveCost,
-			SaveDiff:       flags.saveDiff,
+			EngineParams:         params,
+			Prompt:               prompt,
+			JSON:                 flags.jsonMode,
+			Quiet:                flags.quiet,
+			Model:                cfg.Model,
+			Auth:                 auth.CredentialSource(cfg),
+			OutputFormat:         flags.outputFormat,
+			Verbose:              flags.verbose,
+			PrintCost:            flags.printCost,
+			PrintTools:           flags.printTools,
+			PrintTree:            flags.printTree,
+			ShowSystem:           flags.showSystem,
+			SaveTranscript:       flags.saveTranscript,
+			SaveCost:             flags.saveCost,
+			SaveDiff:             flags.saveDiff,
 			PermissionMode:       flags.permissionMode,
 			PermissionPromptTool: flags.permPromptTool,
 			AllowTools:           flags.allowTools,
 			DenyTools:            flags.denyTools,
 			DryRun:               flags.dryRun,
-			Images:         flags.images,
-			Files:          flags.files,
-			PromptFile:     flags.promptFile,
-			System:         flags.system,
-			SystemFile:     flags.systemFile,
-			MaxTurns:       flags.maxTurns,
-			MaxCost:        flags.maxCost,
-			Commit:         flags.commit,
-			CommitDirty:    flags.commitDirty,
-			SchemaFile:     flags.schemaFile,
-			Hooks:          flags.cliHooks,
-			MCPServers:     flags.cliMCP,
-			Skills:         flags.cliSkill,
-			RunWorkflow:    flags.runWorkflow,
-			PromptEach:     flags.promptEach,
-			Parallel:       flags.parallel,
-			Retry:          flags.retry,
-			Bail:           flags.bail,
+			Images:               flags.images,
+			Files:                flags.files,
+			PromptFile:           flags.promptFile,
+			System:               flags.system,
+			SystemFile:           flags.systemFile,
+			MaxTurns:             flags.maxTurns,
+			MaxCost:              flags.maxCost,
+			Commit:               flags.commit,
+			CommitDirty:          flags.commitDirty,
+			SchemaFile:           flags.schemaFile,
+			Hooks:                flags.cliHooks,
+			MCPServers:           flags.cliMCP,
+			Skills:               flags.cliSkill,
+			RunWorkflow:          flags.runWorkflow,
+			PromptEach:           flags.promptEach,
+			Parallel:             flags.parallel,
+			Retry:                flags.retry,
+			Bail:                 flags.bail,
 		}
 		if err := ep.Validate(); err != nil {
 			return err
@@ -909,15 +909,7 @@ func discoverAgents() []*agent.Agent {
 	projectRoot := config.DetectProjectRoot(wd)
 	home, _ := os.UserHomeDir()
 
-	dirs := []string{
-		filepath.Join(projectRoot, ".agents", "skills"),
-		filepath.Join(projectRoot, ".claude", "agents"),
-	}
-	if home != "" {
-		dirs = append(dirs,
-			filepath.Join(home, ".claude", "agents"),
-		)
-	}
+	dirs := discoverAgentDirs(projectRoot, home)
 	agents, _ := agent.Discover(dirs...)
 	// Plugin-contributed agents discovered earlier in loadPlugins —
 	// fold them in so user-installed plugins can ship subagents.
@@ -939,21 +931,160 @@ func discoverCommands() []*command.Command {
 	projectRoot := config.DetectProjectRoot(wd)
 	home, _ := os.UserHomeDir()
 
-	dirs := []string{
-		// Claude Code commands (flat .md files)
-		filepath.Join(home, ".claude", "commands"),
-		filepath.Join(projectRoot, ".claude", "commands"),
-		// Claude Code skills (nested SKILL.md dirs)
-		filepath.Join(home, ".claude", "skills"),
-		filepath.Join(projectRoot, ".claude", "skills"),
-		// Agent skills (nested SKILL.md dirs)
-		filepath.Join(projectRoot, ".agents", "skills"),
-	}
+	dirs := discoverCommandDirs(projectRoot, home)
 	cmds, _ := command.Discover(dirs...)
 	// Fold in commands contributed by plugins. Plugins were previously
 	// parsed but their commands never reached the slash-command loader.
 	cmds = append(cmds, pluginCommands...)
 	return cmds
+}
+
+func discoverCommandDirs(projectRoot, home string) []string {
+	var dirs []string
+	if home != "" {
+		dirs = appendUniqueDirs(dirs, filepath.Join(claudeConfigDir(home), "commands"))
+		dirs = appendUniqueDirs(dirs, globalSkillDirs(home)...)
+	}
+	return appendUniqueDirs(dirs,
+		// Project-local entries come last because command.Discover lets
+		// later directories override earlier ones.
+		filepath.Join(projectRoot, ".claude", "commands"),
+		filepath.Join(projectRoot, ".claude", "skills"),
+		filepath.Join(projectRoot, ".agents", "skills"),
+	)
+}
+
+func discoverAgentDirs(projectRoot, home string) []string {
+	var dirs []string
+	if home != "" {
+		dirs = appendUniqueDirs(dirs, filepath.Join(claudeConfigDir(home), "agents"))
+	}
+	return appendUniqueDirs(dirs,
+		filepath.Join(projectRoot, ".claude", "agents"),
+		filepath.Join(projectRoot, ".agents", "skills"),
+	)
+}
+
+func globalSkillDirs(home string) []string {
+	if strings.TrimSpace(home) == "" {
+		return nil
+	}
+
+	configHome := xdgConfigDir(home)
+	dirs := []string{}
+	dirs = appendUniqueDirs(dirs,
+		// Canonical location used by vercel-labs/skills symlink installs.
+		filepath.Join(home, ".agents", "skills"),
+		// Universal/XDG installs. Kimi currently hard-codes ~/.config,
+		// while Amp/Replit/Universal follow XDG_CONFIG_HOME when set.
+		filepath.Join(configHome, "agents", "skills"),
+		filepath.Join(home, ".config", "agents", "skills"),
+		filepath.Join(claudeConfigDir(home), "skills"),
+		filepath.Join(codexConfigDir(home), "skills"),
+		filepath.Join(configHome, "devin", "skills"),
+		filepath.Join(configHome, "goose", "skills"),
+		filepath.Join(configHome, "opencode", "skills"),
+	)
+
+	dirs = appendUniqueDirs(dirs,
+		filepath.Join(home, ".aider-desk", "skills"),
+		filepath.Join(home, ".gemini", "antigravity", "skills"),
+		filepath.Join(home, ".augment", "skills"),
+		filepath.Join(home, ".bob", "skills"),
+		filepath.Join(home, ".codeartsdoer", "skills"),
+		filepath.Join(home, ".codebuddy", "skills"),
+		filepath.Join(home, ".codemaker", "skills"),
+		filepath.Join(home, ".codestudio", "skills"),
+		filepath.Join(home, ".commandcode", "skills"),
+		filepath.Join(home, ".continue", "skills"),
+		filepath.Join(home, ".snowflake", "cortex", "skills"),
+		filepath.Join(home, ".config", "crush", "skills"),
+		filepath.Join(home, ".cursor", "skills"),
+		filepath.Join(home, ".deepagents", "agent", "skills"),
+		filepath.Join(home, ".factory", "skills"),
+		filepath.Join(home, ".firebender", "skills"),
+		filepath.Join(home, ".forge", "skills"),
+		filepath.Join(home, ".gemini", "skills"),
+		filepath.Join(home, ".copilot", "skills"),
+		filepath.Join(home, ".hermes", "skills"),
+		filepath.Join(home, ".junie", "skills"),
+		filepath.Join(home, ".iflow", "skills"),
+		filepath.Join(home, ".kilocode", "skills"),
+		filepath.Join(home, ".kiro", "skills"),
+		filepath.Join(home, ".kode", "skills"),
+		filepath.Join(home, ".mcpjam", "skills"),
+		filepath.Join(vibeConfigDir(home), "skills"),
+		filepath.Join(home, ".mux", "skills"),
+		filepath.Join(home, ".openhands", "skills"),
+		filepath.Join(home, ".pi", "agent", "skills"),
+		filepath.Join(home, ".qoder", "skills"),
+		filepath.Join(home, ".qwen", "skills"),
+		filepath.Join(home, ".rovodev", "skills"),
+		filepath.Join(home, ".roo", "skills"),
+		filepath.Join(home, ".tabnine", "agent", "skills"),
+		filepath.Join(home, ".trae", "skills"),
+		filepath.Join(home, ".trae-cn", "skills"),
+		filepath.Join(home, ".codeium", "windsurf", "skills"),
+		filepath.Join(home, ".zencoder", "skills"),
+		filepath.Join(home, ".neovate", "skills"),
+		filepath.Join(home, ".pochi", "skills"),
+		filepath.Join(home, ".adal", "skills"),
+	)
+
+	// OpenClaw has migrated names. Scan old-to-new because later
+	// discovery dirs override earlier ones.
+	return appendUniqueDirs(dirs,
+		filepath.Join(home, ".moltbot", "skills"),
+		filepath.Join(home, ".clawdbot", "skills"),
+		filepath.Join(home, ".openclaw", "skills"),
+	)
+}
+
+func xdgConfigDir(home string) string {
+	if dir := strings.TrimSpace(os.Getenv("XDG_CONFIG_HOME")); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".config")
+}
+
+func codexConfigDir(home string) string {
+	if dir := strings.TrimSpace(os.Getenv("CODEX_HOME")); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".codex")
+}
+
+func claudeConfigDir(home string) string {
+	if dir := strings.TrimSpace(os.Getenv("CLAUDE_CONFIG_DIR")); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".claude")
+}
+
+func vibeConfigDir(home string) string {
+	if dir := strings.TrimSpace(os.Getenv("VIBE_HOME")); dir != "" {
+		return dir
+	}
+	return filepath.Join(home, ".vibe")
+}
+
+func appendUniqueDirs(dirs []string, candidates ...string) []string {
+	for _, dir := range candidates {
+		if strings.TrimSpace(dir) == "" {
+			continue
+		}
+		exists := false
+		for _, existing := range dirs {
+			if existing == dir {
+				exists = true
+				break
+			}
+		}
+		if !exists {
+			dirs = append(dirs, dir)
+		}
+	}
+	return dirs
 }
 
 func loadSession(db *store.DB, params *engine.EngineParams, last bool, sessionID string) error {
