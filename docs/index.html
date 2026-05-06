@@ -4,7 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>altcode — AI coding CLI</title>
-<meta name="description" content="Multi-provider AI coding CLI. 5ms startup. Runs Claude, GPT, DeepSeek, Qwen, Ollama with the same plugins.">
+<meta name="description" content="Multi-provider AI coding harness. 5ms startup. 51 slash commands. Runs Claude, GPT, DeepSeek, Qwen, Ollama, and 8 more — same plugins, same hooks.">
+<meta property="og:title" content="altcode — universal AI coding harness">
+<meta property="og:description" content="5ms startup. 17MB. 51 slash commands. 13 providers. 117 skills. AltFix daemon. Claude Code-compatible.">
+<meta property="og:url" content="https://altcode.io">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚡</text></svg>">
 <style>
 *{margin:0;padding:0;box-sizing:border-box}
@@ -89,7 +92,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <!-- Header -->
     <div class="logo">alt<span>code</span></div>
     <div class="subtitle">The universal agent harness for coding</div>
-    <div class="tagline">17MB binary · 13 providers · 100+ models · 15 tools · 20+ commands · CC-parity TUI · Expert rated 9.7/10</div>
+    <div class="tagline">17MB binary · 13 providers · 100+ models · 11 tools · 51 slash commands · 117 skills · AltFix daemon · CC-parity TUI</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -152,6 +155,8 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="output"># Persistent execution — loops until complete</div>
     <div class="prompt">altcode workflow --mode interview "add rate limiting"</div>
     <div class="output"># Socratic clarification before coding</div>
+    <div class="prompt">altcode daemon --port 9200 --auth-token $TOKEN</div>
+    <div class="output"># AltFix daemon: REST + SSE + GitHub webhook lifecycle</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -188,14 +193,14 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <h2>Features</h2>
     <p style="font-size:13px">
       <span style="color:var(--green)">●</span> Multi-turn agent loop (tool dispatch, 50-iter cap)<br>
-      <span style="color:var(--green)">●</span> 7 tools: read, glob, grep, ls, bash, edit, write<br>
-      <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events<br>
-      <span style="color:var(--green)">●</span> Slash commands · Plugin system · Marketplace<br>
+      <span style="color:var(--green)">●</span> 11 tools: read, write, edit, glob, grep, ls, bash, patch, web, agent, tasks<br>
+      <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events · Slash commands · Plugin marketplace<br>
       <span style="color:var(--green)">●</span> Context harness — auto-compact, LLM summarization, pre-turn compaction<br>
       <span style="color:var(--green)">●</span> Agent harness — multi-agent, mailbox IPC, history forking, roles<br>
       <span style="color:var(--green)">●</span> Workflow harness — interview → plan → persistent execution (ralph)<br>
       <span style="color:var(--green)">●</span> Tool harness — permissions, hooks (command + HTTP), auto-verify<br>
-      <span style="color:var(--green)">●</span> 47 skills · OAuth login · Persistent memory · Claude Code compat
+      <span style="color:var(--green)">●</span> AltFix daemon — autonomous multi-role pipeline (lead/implementer/reviewer/tester) with PR lifecycle<br>
+      <span style="color:var(--green)">●</span> 117 skills · OAuth login · Persistent memory · Claude Code compat (CLAUDE.md + .mcp.json + settings.json + hooks + skills + plugins)
     </p>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
@@ -219,6 +224,11 @@ td.num{color:var(--yellow);font-family:var(--font)}
       <div style="color:var(--dim)">Enter send · Esc quit</div>
       <div class="right">v0.9.1</div>
     </div>
+
+    <p style="color:var(--dim);font-size:11px;text-align:center;margin-top:12px">
+      Built with the <a href="https://github.com/karpathy/autoresearch">Karpathy autoresearch</a> loop
+      — every change verified against committed mechanical metrics.
+    </p>
 
   </div>
 </div>
