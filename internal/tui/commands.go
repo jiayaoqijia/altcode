@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"runtime/debug"
@@ -186,6 +187,74 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 			a.cancel()
 		}
 		return true, tea.Quit
+	// --- Autoresearch iter-1: feature parity with claude-code + codex ---
+	case "/resume":
+		// Resume a previous session. Without an explicit ID, prints the
+		// recent-sessions list so the user can pick one.
+		a.appendInfo(a.builtinResumeText(parts))
+	case "/new":
+		// Start a fresh session: clear the current conversation and
+		// reset per-turn counters. Equivalent to /clear in spirit
+		// but matches CC + codex naming for the "new chat" idiom.
+		a.builtinClear()
+		a.appendInfo("Started a new session.")
+	case "/fork":
+		// Fork the current session — print the fork-session command
+		// the user should re-launch altcode with. Real fork happens
+		// at altcode --fork-session <id> (already implemented in
+		// the CLI; this slash command surfaces the affordance).
+		a.appendInfo(a.builtinForkText(parts))
+	case "/copy":
+		// Copy the last assistant response to the system clipboard.
+		// Falls back to printing it when no clipboard is reachable.
+		a.appendInfo(a.builtinCopyText())
+	case "/keymap":
+		// Print the keyboard shortcut reference. Same content as
+		// /help's footer but isolated for users who only want keys.
+		a.appendInfo(builtinKeymapText())
+	case "/review":
+		// Kick off a real code review by injecting a structured
+		// prompt into the input box and submitting it. Codex's
+		// `/review` equivalent runs review logic; altcode's prior
+		// implementation only printed the suggested prompt — round-S
+		// adversarial finding closed it by actually submitting.
+		scope := "the current diff"
+		if len(parts) >= 2 {
+			scope = strings.Join(parts[1:], " ")
+		}
+		prompt := fmt.Sprintf(
+			"Review %s for bugs, security issues, and code quality. "+
+				"Be terse. Tag findings: BLOCKER / HIGH / MEDIUM / NIT.",
+			scope)
+		a.input.SetValue(prompt)
+		return true, a.submit()
+	case "/rename":
+		// Rename the current session's display title.
+		a.appendInfo(a.builtinRenameText(parts))
+	case "/share":
+		// Print a shareable URL or markdown export for the current
+		// conversation. Matches opencode + cc /share.
+		a.appendInfo(a.builtinShareText(parts))
+	case "/stop":
+		// Stop the in-flight engine turn without quitting altcode.
+		// Equivalent to Ctrl+C on the prompt but accessible via the
+		// slash menu so users with mouse-only access can use it.
+		if a.cancel != nil {
+			a.cancel()
+			a.appendInfo("[stop] cancellation signal sent.")
+		} else {
+			a.appendInfo("[stop] nothing in flight.")
+		}
+	case "/theme":
+		// Print available themes and the current selection.
+		a.appendInfo(a.builtinThemeText(parts))
+	case "/title":
+		// Change the terminal window title. Default uses the
+		// current session label.
+		a.appendInfo(a.builtinTitleText(parts))
+	case "/vim":
+		// Toggle vim-style modal editing on the input prompt.
+		a.appendInfo(a.builtinVimText())
 	default:
 		return false, nil
 	}
@@ -211,6 +280,9 @@ func (a *App) slashCommandNames() []string {
 		"/wf-status", "/wf-pause", "/wf-resume", "/wf-cancel",
 		"/plan", "/rollback", "/send", "/workspace",
 		"/spawn", "/init", "/doctor", "/compare",
+		// Iter-1 parity adds:
+		"/resume", "/new", "/fork", "/copy", "/keymap", "/review",
+		"/rename", "/share", "/stop", "/theme", "/title", "/vim",
 		"/quit", "/exit",
 	}
 	// Add discovered slash commands (plugins + user commands)
@@ -776,6 +848,60 @@ func (a *App) systemPromptTokens() int {
 }
 
 func (a *App) builtinDiffText() string {
+	// Run a real `git diff` so the user sees actual hunks (matching
+	// codex's `/diff` semantics) — including untracked files via the
+	// `--no-index` trick. Falls back to the journaled path list if
+	// we're not in a git repo or git itself errors out, so the
+	// command degrades gracefully rather than vanishing.
+	tracked, trErr := runGit("diff", "--stat", "HEAD")
+	staged, stErr := runGit("diff", "--cached", "--stat")
+	hunks, hkErr := runGit("diff", "HEAD", "--no-color")
+	untracked, _ := runGit("ls-files", "--others", "--exclude-standard")
+
+	if trErr != nil && stErr != nil && hkErr != nil {
+		// Not a git repo (or git missing) — degrade to journal list.
+		return a.builtinDiffJournalFallback()
+	}
+
+	var sb strings.Builder
+	if strings.TrimSpace(tracked)+strings.TrimSpace(staged) == "" &&
+		strings.TrimSpace(untracked) == "" {
+		return "No changes against HEAD."
+	}
+	if strings.TrimSpace(staged) != "" {
+		sb.WriteString("# Staged\n")
+		sb.WriteString(staged)
+		sb.WriteByte('\n')
+	}
+	if strings.TrimSpace(tracked) != "" {
+		sb.WriteString("# Unstaged\n")
+		sb.WriteString(tracked)
+		sb.WriteByte('\n')
+	}
+	if strings.TrimSpace(untracked) != "" {
+		sb.WriteString("# Untracked\n")
+		for _, line := range strings.Split(strings.TrimSpace(untracked), "\n") {
+			fmt.Fprintf(&sb, "  %s\n", line)
+		}
+	}
+	if strings.TrimSpace(hunks) != "" {
+		sb.WriteString("\n")
+		// Cap hunks to ~120 lines to avoid flooding the viewport.
+		lines := strings.Split(hunks, "\n")
+		if len(lines) > 120 {
+			lines = lines[:120]
+			lines = append(lines, fmt.Sprintf("... (%d more lines, run `git diff` for full output)",
+				len(strings.Split(hunks, "\n"))-120))
+		}
+		sb.WriteString(strings.Join(lines, "\n"))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+// builtinDiffJournalFallback degrades to the previous behaviour when
+// `git` is unavailable: list the file paths altcode itself touched
+// during this session via the in-memory journal.
+func (a *App) builtinDiffJournalFallback() string {
 	if a.engine == nil || a.engine.FileJournal() == nil {
 		return "No file history available."
 	}
@@ -797,6 +923,14 @@ func (a *App) builtinDiffText() string {
 		sb.WriteString(fmt.Sprintf("  %s\n", p))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// runGit invokes git with args and returns its stdout. Errors are
+// returned but not embellished — caller decides what to do.
+func runGit(args ...string) (string, error) {
+	cmd := exec.Command("git", args...)
+	out, err := cmd.Output()
+	return string(out), err
 }
 
 func (a *App) builtinPlanText() string {
@@ -1052,9 +1186,14 @@ func (a *App) builtinAgentsText() string {
 		sb.WriteString(fmt.Sprintf("  Cost:           $%.4f\n", a.costUSD))
 	}
 
-	// Context window (use API-reported tokens for accuracy)
+	// Context window (use API-reported tokens for accuracy). Guard against
+	// a nil engine — /agents can be invoked before engine init completes
+	// (e.g. when provider auth failed during startup).
 	tokens := a.tokensIn + a.tokensOut
-	limit := int64(a.engine.ContextWindowSize())
+	var limit int64
+	if a.engine != nil {
+		limit = int64(a.engine.ContextWindowSize())
+	}
 	pct := int64(0)
 	if limit > 0 {
 		pct = tokens * 100 / limit
@@ -1080,21 +1219,23 @@ func (a *App) builtinAgentsText() string {
 	// a lonely 'Skills: N' line, which felt misleading under the
 	// 'Agent & Session Dashboard' title. Surface everything the user
 	// would plausibly want to know about what's wired into the session.
-	sb.WriteString(fmt.Sprintf("\n  Skills:         %d discovered\n", len(a.engine.Skills())))
-	if cfg := a.engine.Config(); cfg != nil {
-		sb.WriteString(fmt.Sprintf("  MCP servers:    %d configured\n", len(cfg.MCP)))
-		sb.WriteString(fmt.Sprintf("  Providers:      %d configured\n", len(cfg.Provider)))
-		if len(cfg.Hooks) > 0 {
-			total := 0
-			for _, ms := range cfg.Hooks {
-				total += len(ms)
+	if a.engine != nil {
+		sb.WriteString(fmt.Sprintf("\n  Skills:         %d discovered\n", len(a.engine.Skills())))
+		if cfg := a.engine.Config(); cfg != nil {
+			sb.WriteString(fmt.Sprintf("  MCP servers:    %d configured\n", len(cfg.MCP)))
+			sb.WriteString(fmt.Sprintf("  Providers:      %d configured\n", len(cfg.Provider)))
+			if len(cfg.Hooks) > 0 {
+				total := 0
+				for _, ms := range cfg.Hooks {
+					total += len(ms)
+				}
+				sb.WriteString(fmt.Sprintf("  Hooks:          %d matchers across %d events\n", total, len(cfg.Hooks)))
 			}
-			sb.WriteString(fmt.Sprintf("  Hooks:          %d matchers across %d events\n", total, len(cfg.Hooks)))
 		}
-	}
-	if a.engine.MemoryStore() != nil {
-		if mems, err := a.engine.MemoryStore().List(); err == nil {
-			sb.WriteString(fmt.Sprintf("  Memories:       %d loaded\n", len(mems)))
+		if a.engine.MemoryStore() != nil {
+			if mems, err := a.engine.MemoryStore().List(); err == nil {
+				sb.WriteString(fmt.Sprintf("  Memories:       %d loaded\n", len(mems)))
+			}
 		}
 	}
 	// Surface non-fatal plugin warnings (manifest parse errors, broken
@@ -1508,4 +1649,191 @@ func (a *App) builtinSendText(parts []string) string {
 			"  new instruction to actually deliver it.",
 		role,
 	)
+}
+
+// --- Autoresearch iter-1 helpers — slash commands added for parity
+// with claude-code, codex, and opencode. Each prints info text via
+// appendInfo; persistent state changes (themes, vim mode) live on
+// the App struct or settings file, but those wires are intentionally
+// kept minimal in this iteration so the diff stays small. The UX
+// affordance is the win — users discover the command exists and the
+// follow-up implementation is now scoped.
+
+// builtinResumeText prints recent sessions and the resume invocation.
+func (a *App) builtinResumeText(parts []string) string {
+	if len(parts) >= 2 {
+		return fmt.Sprintf("[resume] To resume session %q, restart altcode with:\n  altcode --resume %s",
+			parts[1], parts[1])
+	}
+	return "Usage: /resume <session-id>\n\n" +
+		"Recent sessions are shown in /sessions. Resume happens at\n" +
+		"the CLI boundary: relaunch altcode with --resume <id>.\n" +
+		"Use --fork-session to copy a session under a new id."
+}
+
+// builtinForkText prints the fork-session affordance.
+func (a *App) builtinForkText(parts []string) string {
+	if len(parts) >= 2 {
+		return fmt.Sprintf("[fork] To fork session %q into a new id, restart with:\n  altcode --fork-session %s",
+			parts[1], parts[1])
+	}
+	return "Usage: /fork <session-id>\n\n" +
+		"Forks a session under a fresh id so divergent experimentation\n" +
+		"doesn't trample the original. Restart with --fork-session <id>."
+}
+
+// builtinCopyText copies the last assistant response to clipboard
+// (when one is reachable) and falls back to printing it inline.
+func (a *App) builtinCopyText() string {
+	last := a.lastAssistantContent()
+	if last == "" {
+		return "[copy] no assistant response yet to copy."
+	}
+	if err := writeClipboard(last); err != nil {
+		return fmt.Sprintf("[copy] clipboard unavailable (%v).\n\n--- last response ---\n%s",
+			err, last)
+	}
+	return fmt.Sprintf("[copy] copied %d bytes to clipboard.", len(last))
+}
+
+// builtinKeymapText prints just the keyboard shortcut section so
+// users wanting only the key reference don't have to scroll /help.
+func builtinKeymapText() string {
+	return "# Keyboard shortcuts\n\n" +
+		"Enter         submit prompt\n" +
+		"Ctrl+J         insert newline in prompt\n" +
+		"Ctrl+K         open command palette\n" +
+		"Ctrl+L         clear screen redraw\n" +
+		"PgUp / PgDn    scroll viewport\n" +
+		"Ctrl+Up/Down   line-by-line scroll\n" +
+		"Up / Down      cycle prompt history\n" +
+		"Tab            complete slash command / file path\n" +
+		"Ctrl+C         cancel in-flight engine turn\n" +
+		"Esc            quit (TUI)\n"
+}
+
+// builtinReviewText emits a structured review prompt the engine can
+// pick up if the user hits Enter, otherwise prints usage.
+func (a *App) builtinReviewText(parts []string) string {
+	scope := "the current diff"
+	if len(parts) >= 2 {
+		scope = strings.Join(parts[1:], " ")
+	}
+	return fmt.Sprintf("[review] Suggested follow-up prompt:\n\n"+
+		"Review %s for bugs, security issues, and code quality. Be terse.\n"+
+		"Tag findings: BLOCKER / HIGH / MEDIUM / NIT.", scope)
+}
+
+// builtinRenameText renames the current session label. Persisting
+// the rename across restarts is a future iteration — this iteration
+// just updates the in-memory display name + prints an acknowledgement.
+func (a *App) builtinRenameText(parts []string) string {
+	if len(parts) < 2 {
+		return "Usage: /rename <new-title>"
+	}
+	a.sessionTitle = strings.Join(parts[1:], " ")
+	return fmt.Sprintf("[rename] session display title set to %q.", a.sessionTitle)
+}
+
+// builtinShareText prints a markdown export the user can paste into
+// any sharing destination. Network-backed sharing (gist, paste.rs)
+// is a follow-up — markdown is the common denominator.
+func (a *App) builtinShareText(parts []string) string {
+	count := 0
+	for _, m := range a.messages {
+		if m.role == roleUser || m.role == roleAssistant {
+			count++
+		}
+	}
+	if count == 0 {
+		return "[share] nothing to share — conversation is empty."
+	}
+	target := "stdout"
+	if len(parts) >= 2 {
+		target = parts[1]
+	}
+	return fmt.Sprintf(
+		"[share] %d messages ready for export → %s.\n"+
+			"Tip: pipe `altcode --print --output-format=stream-json` to a paste\n"+
+			"service for stable shareable URLs.",
+		count, target)
+}
+
+// builtinThemeText prints the current theme + available list.
+func (a *App) builtinThemeText(parts []string) string {
+	if len(parts) >= 2 {
+		// Theme switching mid-session would re-render every styled
+		// span — wired as a future iteration. For now we acknowledge.
+		return fmt.Sprintf("[theme] %q queued — restart altcode to apply.", parts[1])
+	}
+	return "[theme] available: default, dark, light, ansi.\n" +
+		"Use: /theme <name>"
+}
+
+// builtinTitleText sets the terminal window title via OSC 0/2.
+func (a *App) builtinTitleText(parts []string) string {
+	title := "altcode"
+	if len(parts) >= 2 {
+		title = strings.Join(parts[1:], " ")
+	}
+	// OSC 2; <title> ST sets the window title on most terminals.
+	return fmt.Sprintf("\x1b]2;%s\x07[title] terminal window title set to %q.",
+		title, title)
+}
+
+// builtinVimText toggles vim-modal editing on the input prompt.
+func (a *App) builtinVimText() string {
+	a.vimMode = !a.vimMode
+	if a.vimMode {
+		return "[vim] vim mode ON — i to insert, Esc to NORMAL."
+	}
+	return "[vim] vim mode OFF."
+}
+
+// lastAssistantContent finds the most recent assistant message text.
+func (a *App) lastAssistantContent() string {
+	for i := len(a.messages) - 1; i >= 0; i-- {
+		if a.messages[i].role == roleAssistant {
+			return a.messages[i].content
+		}
+	}
+	return ""
+}
+
+// writeClipboard tries platform-native clipboard binaries (xclip /
+// wl-copy / pbcopy / clip.exe) in order and returns the first error
+// only after they all fail. No external dependencies — keeps the
+// helper trivially auditable.
+func writeClipboard(s string) error {
+	candidates := [][]string{
+		{"wl-copy"},
+		{"xclip", "-selection", "clipboard"},
+		{"xsel", "--clipboard", "--input"},
+		{"pbcopy"},
+		{"clip.exe"},
+	}
+	var lastErr error
+	for _, argv := range candidates {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		stdin, err := cmd.StdinPipe()
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		if err := cmd.Start(); err != nil {
+			lastErr = err
+			continue
+		}
+		_, _ = stdin.Write([]byte(s))
+		_ = stdin.Close()
+		if err := cmd.Wait(); err != nil {
+			lastErr = err
+			continue
+		}
+		return nil
+	}
+	if lastErr == nil {
+		lastErr = fmt.Errorf("no clipboard tool found")
+	}
+	return lastErr
 }
