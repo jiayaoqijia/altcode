@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/jiayaoqijia/altcode/internal/event"
-	"github.com/jiayaoqijia/altcode/internal/workspace"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // testApp creates a minimal App for view testing with a mock engine.
@@ -750,11 +750,11 @@ func TestToolTree_CollapseConsecutiveReads(t *testing.T) {
 	// Simulate 5 consecutive Read calls
 	for i := 0; i < 5; i++ {
 		tree.Start("", "Read", fmt.Sprintf("file%d.go", i))
-		tree.Done("",fmt.Sprintf("file%d.go", i), 10*time.Millisecond)
+		tree.Done("", fmt.Sprintf("file%d.go", i), 10*time.Millisecond)
 	}
 	// Then a different tool
 	tree.Start("", "Edit", "main.go")
-	tree.Done("","main.go", 50*time.Millisecond)
+	tree.Done("", "main.go", 50*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -774,9 +774,9 @@ func TestToolTree_NoCollapseUnder3(t *testing.T) {
 
 	// 2 consecutive Reads — should NOT collapse
 	tree.Start("", "Read", "a.go")
-	tree.Done("","a.go", 5*time.Millisecond)
+	tree.Done("", "a.go", 5*time.Millisecond)
 	tree.Start("", "Read", "b.go")
-	tree.Done("","b.go", 5*time.Millisecond)
+	tree.Done("", "b.go", 5*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -796,14 +796,14 @@ func TestToolTree_MixedToolsCollapse(t *testing.T) {
 	// 4 Grep, then 3 Read, then 1 Bash
 	for i := 0; i < 4; i++ {
 		tree.Start("", "Grep", fmt.Sprintf("pattern%d", i))
-		tree.Done("",fmt.Sprintf("pattern%d", i), 8*time.Millisecond)
+		tree.Done("", fmt.Sprintf("pattern%d", i), 8*time.Millisecond)
 	}
 	for i := 0; i < 3; i++ {
 		tree.Start("", "Read", fmt.Sprintf("file%d.go", i))
-		tree.Done("",fmt.Sprintf("file%d.go", i), 5*time.Millisecond)
+		tree.Done("", fmt.Sprintf("file%d.go", i), 5*time.Millisecond)
 	}
 	tree.Start("", "Bash", "go test ./...")
-	tree.Done("","go test ./...", 1000*time.Millisecond)
+	tree.Done("", "go test ./...", 1000*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -825,7 +825,7 @@ func TestToolTree_RunningNotCollapsed(t *testing.T) {
 	// 3 completed Reads + 1 running Read — running should not be collapsed
 	for i := 0; i < 3; i++ {
 		tree.Start("", "Read", fmt.Sprintf("done%d.go", i))
-		tree.Done("",fmt.Sprintf("done%d.go", i), 5*time.Millisecond)
+		tree.Done("", fmt.Sprintf("done%d.go", i), 5*time.Millisecond)
 	}
 	tree.Start("", "Read", "active.go")
 	// Don't call Done — this one is still running
@@ -966,6 +966,19 @@ func TestPaletteBuiltins_MatchSlashCommandNames(t *testing.T) {
 	}
 }
 
+func TestPaletteBuiltins_HasNoDuplicateNames(t *testing.T) {
+	paletteBuiltins := buildPaletteCommands(nil)
+	seen := make(map[string]int, len(paletteBuiltins))
+	for _, p := range paletteBuiltins {
+		seen[p.Name]++
+	}
+	for name, count := range seen {
+		if count > 1 {
+			t.Errorf("palette buildPaletteCommands has duplicate %q entries: %d", name, count)
+		}
+	}
+}
+
 // Regression guard for the "a lot of timeout" user complaint: running
 // tools must NOT render the word "timeout" in their elapsed label. Users
 // read "⟳ grep Running… (4s · timeout 2m)" on every concurrent tool and
@@ -1083,8 +1096,8 @@ func TestCCParity_HUD_TaskProgress(t *testing.T) {
 
 func TestCCParity_HUD_AllTasksComplete(t *testing.T) {
 	hs := hudState{
-		TasksTotal: 5,
-		TasksDone:  5,
+		TasksTotal:   5,
+		TasksDone:    5,
 		ContextLimit: 128000,
 	}
 	info := statusBarInfo{Model: "opus"}
@@ -1260,9 +1273,9 @@ func TestCCParity_ToolTree_WithTargets(t *testing.T) {
 	tree := newToolTree()
 
 	tree.Start("", "Read", "main.go")
-	tree.Done("","main.go", 15*time.Millisecond)
+	tree.Done("", "main.go", 15*time.Millisecond)
 	tree.Start("", "Bash", "go test ./...")
-	tree.Done("","go test ./...", 2500*time.Millisecond)
+	tree.Done("", "go test ./...", 2500*time.Millisecond)
 	tree.Start("", "Edit", "app.go")
 	// Still running
 
@@ -1413,7 +1426,7 @@ func TestCCStyle_EditDiffOutput(t *testing.T) {
 	tree := newToolTree()
 	tree.Start("", "Edit", "app.go")
 	diffOutput := "- old line removed\n+ new line added\n  context line\n+ another addition"
-	tree.DoneWithOutput("","app.go", 50*time.Millisecond, diffOutput)
+	tree.DoneWithOutput("", "app.go", 50*time.Millisecond, diffOutput)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1439,7 +1452,7 @@ func TestCCStyle_BashCommandOutput(t *testing.T) {
 	tree := newToolTree()
 	tree.Start("", "Bash", "go test ./... -race")
 	bashOutput := "ok  github.com/jiayaoqijia/altcode/internal/tui  2.902s\nok  github.com/jiayaoqijia/altcode/cmd/altcode  1.2s"
-	tree.DoneWithOutput("","go test", 2500*time.Millisecond, bashOutput)
+	tree.DoneWithOutput("", "go test", 2500*time.Millisecond, bashOutput)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1467,7 +1480,7 @@ func TestCCStyle_OutputTruncation(t *testing.T) {
 	for i := 0; i < 20; i++ {
 		lines = append(lines, fmt.Sprintf("output line %d", i))
 	}
-	tree.DoneWithOutput("","long command", 100*time.Millisecond, strings.Join(lines, "\n"))
+	tree.DoneWithOutput("", "long command", 100*time.Millisecond, strings.Join(lines, "\n"))
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1485,7 +1498,7 @@ func TestCCStyle_OutputTruncation(t *testing.T) {
 func TestCCStyle_NoOutputForRead(t *testing.T) {
 	tree := newToolTree()
 	tree.Start("", "Read", "file.go")
-	tree.Done("","file.go", 10*time.Millisecond)
+	tree.Done("", "file.go", 10*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)
@@ -1503,9 +1516,9 @@ func TestCCStyle_NoOutputForRead(t *testing.T) {
 func TestCCStyle_NameParenFormat(t *testing.T) {
 	tree := newToolTree()
 	tree.Start("", "Grep", "func.*Update")
-	tree.Done("","func.*Update", 8*time.Millisecond)
+	tree.Done("", "func.*Update", 8*time.Millisecond)
 	tree.Start("", "Glob", "**/*.go")
-	tree.Done("","**/*.go", 5*time.Millisecond)
+	tree.Done("", "**/*.go", 5*time.Millisecond)
 
 	output := tree.Render(DefaultTheme, 120)
 	plain := stripANSI(output)

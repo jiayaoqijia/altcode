@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -144,7 +145,7 @@ func TestHandleGlobalKey_CtrlJ_InsertsNewline(t *testing.T) {
 	got := a.input.Value()
 	// The cursor moves between calls — we only verify that a newline
 	// was inserted somewhere in the buffer.
-	if !contains(got, "\n") {
+	if !strings.Contains(got, "\n") {
 		t.Errorf("expected newline inserted, got %q", got)
 	}
 }

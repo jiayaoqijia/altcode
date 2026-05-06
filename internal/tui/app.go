@@ -540,4 +540,3 @@ func (a *App) updateViewport() {
 	}
 	a.prevContentLen = len(newContent)
 }
-

@@ -107,3 +107,18 @@ func TestBuiltinMemoryText_VariousParts(t *testing.T) {
 		}
 	}
 }
+
+// TestBuiltinRenameText_UpdatesDisplayName covers the in-memory
+// session label used by the HUD.
+func TestBuiltinRenameText_UpdatesDisplayName(t *testing.T) {
+	a := testApp()
+	a.sessionSlug = "default-session"
+
+	got := a.builtinRenameText([]string{"/rename", "Release", "notes"})
+	if !strings.Contains(got, "Release notes") {
+		t.Fatalf("rename output missing new title: %q", got)
+	}
+	if a.sessionDisplayName() != "Release notes" {
+		t.Fatalf("sessionDisplayName() = %q, want %q", a.sessionDisplayName(), "Release notes")
+	}
+}

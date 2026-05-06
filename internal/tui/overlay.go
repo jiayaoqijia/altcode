@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"strings"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/command"
 	"github.com/jiayaoqijia/altcode/internal/engine"
 	"github.com/jiayaoqijia/altcode/internal/store"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // submitText sends the given text to the engine as a new turn.
