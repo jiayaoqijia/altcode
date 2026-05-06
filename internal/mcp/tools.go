@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // ToolInfo is a tool discovered from an MCP server.
@@ -83,19 +84,72 @@ func (c *Client) CallTool(ctx context.Context, name string, args json.RawMessage
 		return "", fmt.Errorf("mcp tools/call %s: %w", name, err)
 	}
 
+	// Concatenate ALL content blocks the server returned, not just
+	// the first text one. The MCP spec allows multiple content
+	// blocks of mixed types in a single result; the previous
+	// `resp.Content[0].Text` accessor silently dropped subsequent
+	// text, image, and resource blocks. Codex round-R adversarial
+	// finding (parity with claude-code 2.1.128 fix for the same
+	// class of MCP content drop). For non-text blocks we render a
+	// stable placeholder so the caller can detect that media was
+	// returned even if it doesn't yet have a renderer.
 	var resp struct {
-		Content []struct {
-			Type string `json:"type"`
-			Text string `json:"text"`
+		Content          []struct {
+			Type     string          `json:"type"`
+			Text     string          `json:"text,omitempty"`
+			Data     string          `json:"data,omitempty"`
+			MimeType string          `json:"mimeType,omitempty"`
+			Resource json.RawMessage `json:"resource,omitempty"`
 		} `json:"content"`
+		StructuredContent json.RawMessage `json:"structuredContent,omitempty"`
+		IsError           bool            `json:"isError,omitempty"`
 	}
 	if err := json.Unmarshal(result, &resp); err != nil {
 		return string(result), nil
 	}
-	if len(resp.Content) > 0 {
-		return resp.Content[0].Text, nil
+	var sb strings.Builder
+	for _, c := range resp.Content {
+		switch c.Type {
+		case "text":
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			sb.WriteString(c.Text)
+		case "image":
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			fmt.Fprintf(&sb, "[image: %s, %d bytes]",
+				c.MimeType, len(c.Data))
+		case "resource":
+			if sb.Len() > 0 {
+				sb.WriteByte('\n')
+			}
+			fmt.Fprintf(&sb, "[resource: %s]", string(c.Resource))
+		default:
+			// Unknown block — surface its raw text/data if any,
+			// rather than silently dropping it.
+			if c.Text != "" {
+				if sb.Len() > 0 {
+					sb.WriteByte('\n')
+				}
+				sb.WriteString(c.Text)
+			}
+		}
 	}
-	return string(result), nil
+	// If there's structured content but no text/image/resource block,
+	// surface the JSON as-is so callers can parse it themselves.
+	if sb.Len() == 0 && len(resp.StructuredContent) > 0 {
+		sb.WriteString(string(resp.StructuredContent))
+	}
+	if sb.Len() == 0 {
+		return string(result), nil
+	}
+	out := sb.String()
+	if resp.IsError {
+		return "", fmt.Errorf("mcp tool error: %s", out)
+	}
+	return out, nil
 }
 
 // mcpTool wraps an MCP server tool as a tool.Tool implementation.

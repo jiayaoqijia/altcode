@@ -5,7 +5,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/altcode-ai/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
 	"github.com/charmbracelet/lipgloss"
 )
 

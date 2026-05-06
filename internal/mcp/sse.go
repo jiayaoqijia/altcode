@@ -76,23 +76,67 @@ func (c *SSEClient) Call(ctx context.Context, method string, params any) (json.R
 
 func readSSEResponse(body io.Reader, expectedID int64) (json.RawMessage, error) {
 	scanner := bufio.NewScanner(body)
+	// Default Scanner buffer is 64 KiB — MCP JSON-RPC results can be
+	// much larger (tool/resource listings, large tool outputs), so
+	// bump to 4 MiB to avoid silent truncation.
+	scanner.Buffer(make([]byte, 0, 64*1024), 4*1024*1024)
+
+	// SSE allows multi-line `data:` payloads — each data: line within
+	// an event is concatenated with a newline, and the event ends on
+	// a blank line. A single-line parser loses any payload that the
+	// server chose to wrap at 80 cols.
+	var dataBuf strings.Builder
+	tryDispatch := func() (json.RawMessage, bool, error) {
+		if dataBuf.Len() == 0 {
+			return nil, false, nil
+		}
+		payload := dataBuf.String()
+		dataBuf.Reset()
+		var resp jsonRPCResponse
+		if err := json.Unmarshal([]byte(payload), &resp); err != nil {
+			return nil, false, nil
+		}
+		if resp.ID != expectedID {
+			return nil, false, nil
+		}
+		if resp.Error != nil {
+			return nil, true, fmt.Errorf(
+				"mcp rpc error %d: %s",
+				resp.Error.Code, resp.Error.Message)
+		}
+		return resp.Result, true, nil
+	}
+
 	for scanner.Scan() {
 		line := scanner.Text()
-		if !strings.HasPrefix(line, "data: ") {
-			continue
-		}
-		data := strings.TrimPrefix(line, "data: ")
-		var resp jsonRPCResponse
-		if json.Unmarshal([]byte(data), &resp) != nil {
-			continue
-		}
-		if resp.ID == expectedID {
-			if resp.Error != nil {
-				return nil, fmt.Errorf("mcp rpc error %d: %s",
-					resp.Error.Code, resp.Error.Message)
+		if line == "" {
+			if result, done, err := tryDispatch(); done {
+				return result, err
 			}
-			return resp.Result, nil
+			continue
 		}
+		if strings.HasPrefix(line, "data:") {
+			// Per SSE spec: strip the "data:" and a single optional
+			// leading space; preserve the rest verbatim.
+			chunk := strings.TrimPrefix(line, "data:")
+			chunk = strings.TrimPrefix(chunk, " ")
+			if dataBuf.Len() > 0 {
+				dataBuf.WriteByte('\n')
+			}
+			dataBuf.WriteString(chunk)
+		}
+		// Ignore other SSE field names (event, id, retry, comments)
+		// since we only care about the JSON-RPC body here.
+	}
+	// Flush a final event that wasn't terminated by a blank line.
+	if result, done, err := tryDispatch(); done {
+		return result, err
+	}
+	// Scanner.Err surfaces bufio.ErrTooLong and transport failures —
+	// without this check, a truncated response falls through to the
+	// misleading "no response for id" below.
+	if err := scanner.Err(); err != nil {
+		return nil, fmt.Errorf("mcp sse read: %w", err)
 	}
 	return nil, fmt.Errorf("mcp sse: no response for id %d", expectedID)
 }

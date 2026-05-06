@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 // Backend represents an external coding CLI that altcode can delegate to.

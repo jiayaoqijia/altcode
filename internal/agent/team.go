@@ -6,8 +6,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 // Team coordinates multiple agents running in parallel.

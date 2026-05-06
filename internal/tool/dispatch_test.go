@@ -7,7 +7,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 type mockTool struct {

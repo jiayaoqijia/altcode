@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 // LoadFromCLIs detects and loads credentials from Claude Code, Codex CLI,
@@ -22,6 +22,11 @@ func LoadFromCLIs(cfg *config.Config) {
 }
 
 // loadAltcodeAuth reads ~/.altcode/auth.json written by `altcode login`.
+// If the cached access_token is stale AND a refresh_token exists, it
+// attempts a best-effort refresh and writes the new token back.
+// Codex round-J caught that the previous version ignored refresh_token
+// entirely, so sessions silently failed with 401 once the ~30-day
+// access token expired — until the user manually re-ran `altcode login`.
 func loadAltcodeAuth(cfg *config.Config) {
 	if p, ok := cfg.Provider["openai"]; ok && p.APIKey != "" {
 		return // already configured
@@ -37,9 +42,11 @@ func loadAltcodeAuth(cfg *config.Config) {
 	}
 	var a struct {
 		Tokens struct {
-			AccessToken string `json:"access_token"`
+			AccessToken  string `json:"access_token"`
+			RefreshToken string `json:"refresh_token"`
 		} `json:"tokens"`
-		OpenAIKey string `json:"OPENAI_API_KEY"`
+		OpenAIKey   string     `json:"OPENAI_API_KEY"`
+		LastRefresh *time.Time `json:"last_refresh"`
 	}
 	if json.Unmarshal(data, &a) != nil {
 		return
@@ -51,10 +58,56 @@ func loadAltcodeAuth(cfg *config.Config) {
 	if token == "" {
 		return
 	}
+
+	// If the cached access token looks stale (>25 days since the last
+	// successful refresh; ChatGPT access tokens live ~30 days) and we
+	// have a refresh token, try a best-effort refresh before handing
+	// the (possibly-expired) token to the provider. A refresh failure
+	// falls through to the old behaviour — the user gets a 401 from
+	// the provider but at least we tried.
+	if a.Tokens.RefreshToken != "" && tokenIsStale(a.LastRefresh) {
+		if refreshed := refreshAltcodeToken(path, a.Tokens.RefreshToken); refreshed != "" {
+			token = refreshed
+		}
+	}
+
 	cfg.Provider["openai"] = config.ProviderConfig{
 		APIKey:  token,
 		BaseURL: "https://chatgpt.com/backend-api/codex",
 	}
+}
+
+// tokenIsStale reports whether a cached access token is old enough
+// that we should try refreshing it. Threshold is 25 days — chosen to
+// leave a comfortable margin before the typical 30-day expiry.
+func tokenIsStale(lastRefresh *time.Time) bool {
+	if lastRefresh == nil {
+		return true
+	}
+	return time.Since(*lastRefresh) > 25*24*time.Hour
+}
+
+// refreshAltcodeTokenFn is the live token-refresh implementation.
+// It's injected as a var so auth.go doesn't have to import the oauth
+// package directly (and can be stubbed in tests). The oauth package
+// registers itself via oauth.init() by calling RegisterRefresh.
+// Returns "" on any failure — the caller falls through to the cached
+// (possibly expired) token so behaviour is never worse than pre-fix.
+var refreshAltcodeTokenFn func(path, refreshToken string) string
+
+// refreshAltcodeToken is a tiny dispatcher so loadAltcodeAuth can call
+// the refresh hook through a stable name.
+func refreshAltcodeToken(path, refreshToken string) string {
+	if refreshAltcodeTokenFn == nil {
+		return ""
+	}
+	return refreshAltcodeTokenFn(path, refreshToken)
+}
+
+// RegisterRefresh installs the live token-refresh implementation.
+// Called from internal/oauth.init().
+func RegisterRefresh(fn func(path, refreshToken string) string) {
+	refreshAltcodeTokenFn = fn
 }
 
 // loadClaudeCodeAuth reads ~/.claude/.credentials.json (Claude subscription)
@@ -397,7 +450,11 @@ func SaveProviderAPIKey(providerName, apiKey string) (string, error) {
 		}
 	}
 
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+	// Directory holds config.json with provider API keys — keep it
+	// owner-only (0700) so the file's 0600 permissions are not
+	// undermined by a world-readable parent that leaks metadata and
+	// sibling files. altcode-TUI round-J adversarial review.
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
 		return "", err
 	}
 

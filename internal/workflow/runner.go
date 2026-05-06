@@ -9,9 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 // RunParams configures a workflow run.
@@ -98,6 +98,44 @@ func runRalph(ctx context.Context, p RunParams, task string, maxIter int, w io.W
 	for i := 1; i <= maxIter; i++ {
 		if ctx.Err() != nil {
 			return ctx.Err()
+		}
+
+		// Re-read disk state at the top of every iteration so
+		// external /wf-pause / /wf-cancel / /wf-resume commands are
+		// actually honoured. Previously the runner blindly rewrote
+		// PhaseActive every turn, losing operator transitions —
+		// Codex round-P/Q adversarial finding. The operator-set
+		// phase (paused/cancelled) short-circuits the iteration.
+		if existing, err := LoadState(p.ProjectRoot, ModeRalph); err == nil && existing != nil {
+			switch existing.Phase {
+			case PhaseCancelled:
+				fmt.Fprintf(w, "[ralph] Cancelled by operator at iteration %d.\n", i)
+				return nil
+			case PhasePaused:
+				// Wait for pause to lift (polled every 2s) or ctx to
+				// cancel. This is cooperative — we don't force a
+				// transition to active; the operator calls /wf-resume.
+				fmt.Fprintf(w, "[ralph] Paused by operator at iteration %d; waiting for /wf-resume...\n", i)
+				for {
+					select {
+					case <-ctx.Done():
+						return ctx.Err()
+					case <-time.After(2 * time.Second):
+					}
+					current, err := LoadState(p.ProjectRoot, ModeRalph)
+					if err != nil || current == nil {
+						break
+					}
+					if current.Phase == PhaseCancelled {
+						fmt.Fprintf(w, "[ralph] Cancelled during pause.\n")
+						return nil
+					}
+					if current.Phase != PhasePaused {
+						fmt.Fprintf(w, "[ralph] Resumed at iteration %d.\n", i)
+						break
+					}
+				}
+			}
 		}
 
 		st := &State{

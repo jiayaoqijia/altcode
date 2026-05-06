@@ -3,7 +3,7 @@ package tui
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/completions"
+	"github.com/jiayaoqijia/altcode/internal/completions"
 )
 
 // TestExtractAtQuery covers the @ mention parser used to drive the file

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // Cross-provider live test: same prompt to both Claude and GPT, verify both work.

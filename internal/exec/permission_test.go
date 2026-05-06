@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // mockPromptTool implements tool.Tool with a scripted response

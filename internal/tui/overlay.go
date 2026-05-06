@@ -5,9 +5,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/command"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/store"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -238,6 +238,19 @@ func buildPaletteCommands(
 		{Name: "/rollback", Description: "rollback to turn N"},
 		{Name: "/search", Description: "search messages in conversation"},
 		{Name: "/workflow", Description: "run phased workflow"},
+		// Iter-1 parity (claude-code + codex + opencode):
+		{Name: "/resume", Description: "resume a previous session"},
+		{Name: "/new", Description: "start a fresh session"},
+		{Name: "/fork", Description: "fork session under a new id"},
+		{Name: "/copy", Description: "copy last response to clipboard"},
+		{Name: "/keymap", Description: "show keyboard shortcut reference"},
+		{Name: "/review", Description: "structured review of current diff"},
+		{Name: "/rename", Description: "rename current session display title"},
+		{Name: "/share", Description: "export conversation as markdown"},
+		{Name: "/stop", Description: "cancel in-flight engine turn"},
+		{Name: "/theme", Description: "show / pick UI theme"},
+		{Name: "/title", Description: "set terminal window title"},
+		{Name: "/vim", Description: "toggle vim-modal editing"},
 		{Name: "/quit", Description: "quit altcode"},
 	}
 	// Assign actions that return the command name (submitted by the app).

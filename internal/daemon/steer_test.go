@@ -83,9 +83,17 @@ func TestSteerDuringExecution(t *testing.T) {
 		t.Errorf("prompt should contain steer message, got %q",
 			implPrompts[0])
 	}
-	if !strings.Contains(implPrompts[0], "Original task: do step 1") {
-		t.Errorf("prompt should preserve original task, got %q",
+	// Iteration-2 sanitisation wraps steer + plan step in boundary
+	// blocks. Assertions now check both are present — the exact
+	// "Original task:" prefix was dropped when we moved to structured
+	// wrappers.
+	if !strings.Contains(implPrompts[0], "do step 1") {
+		t.Errorf("prompt should preserve step text, got %q",
 			implPrompts[0])
+	}
+	if !strings.Contains(implPrompts[0], "USER_STEER") ||
+		!strings.Contains(implPrompts[0], "PLAN_STEP") {
+		t.Errorf("prompt missing boundary wrappers: %q", implPrompts[0])
 	}
 
 	// Verify steer_applied event was recorded.

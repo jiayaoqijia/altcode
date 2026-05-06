@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // Message represents a single chat message in a session.
@@ -40,6 +40,19 @@ func (db *DB) AddMessage(sessionID, role string, content []byte, model string, t
 	)
 	if err != nil {
 		return nil, fmt.Errorf("store: add message: %w", err)
+	}
+	// Bump session.updated_at so LatestSession() and any UI sorted by
+	// recency treat this session as "recently active." Without this,
+	// a session could have 50 new messages and still look stale
+	// to /sessions-list ordering. Codex round-Q finding.
+	if _, err := db.sql.Exec(
+		`UPDATE session SET updated_at = ? WHERE id = ?`,
+		m.CreatedAt.UnixMilli(), m.SessionID,
+	); err != nil {
+		// Don't fail the message insert — a stale updated_at is a
+		// UX bug, not a correctness bug. Log via the returned
+		// message (the caller already logs on add errors).
+		return m, fmt.Errorf("store: bump session.updated_at: %w", err)
 	}
 	return m, nil
 }

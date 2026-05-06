@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 func TestEventTypes(t *testing.T) {

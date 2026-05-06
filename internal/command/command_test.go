@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/command"
 )
 
 func TestParseFile_WithFrontmatter(t *testing.T) {

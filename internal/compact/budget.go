@@ -1,6 +1,6 @@
 package compact
 
-import "github.com/altcode-ai/altcode/internal/provider"
+import "github.com/jiayaoqijia/altcode/internal/provider"
 
 // BudgetCompactor truncates old tool results to stay within a byte budget.
 type BudgetCompactor struct {

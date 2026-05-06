@@ -15,8 +15,9 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/exec"
 )
 
 // printConfig writes the effective (post-cascade) config to stdout
@@ -299,4 +300,83 @@ func candidateConfigPaths(projectRoot string) []string {
 		filepath.Join(projectRoot, ".mcp.json"),
 	)
 	return paths
+}
+
+// printResolvedParams writes a secret-redacted JSON view of the
+// resolved exec.Params (flag-parse → struct assembly → engine-ready)
+// to stdout and returns nil. Used by --print-params for mechanical
+// end-to-end flag-propagation tests — CI can now assert that e.g.
+// `altcode --max-turns 7 --print-params "hi"` produces JSON with
+// max_turns=7, proving the flag reached the runtime boundary.
+//
+// What's shown: MaxTurns, MaxCost, OutputFormat, PermissionMode,
+// AllowTools, DenyTools, DryRun, Commit, CommitDirty, SaveCost,
+// SaveDiff, SaveTranscript, and whether EngineParams.CostBudget
+// is wired. Sizes (prompt_len, system_len, etc.) are shown.
+//
+// What's redacted/truncated:
+//   - Any file content that may have been loaded via --file,
+//     --prompt-file, or --system-file (logged as sizes only).
+//   - The prompt itself is truncated to 200 chars. A --prompt-file
+//     that carried a secret would previously round-trip verbatim
+//     through this output; iter-5 CC review caught that
+//     inconsistency with the file-content redaction contract.
+func printResolvedParams(p exec.Params) error {
+	view := map[string]any{
+		"prompt":                truncate(p.Prompt, 200),
+		"prompt_len":            len(p.Prompt),
+		"output_format":         string(p.OutputFormat),
+		"verbose":               p.Verbose,
+		"quiet":                 p.Quiet,
+		"print_cost":            p.PrintCost,
+		"print_tools":           p.PrintTools,
+		"print_tree":            p.PrintTree,
+		"show_system":           p.ShowSystem,
+		"permission_mode":       p.PermissionMode,
+		"permission_prompt_tool": p.PermissionPromptTool,
+		"allow_tools":           p.AllowTools,
+		"deny_tools":            p.DenyTools,
+		"dry_run":               p.DryRun,
+		"max_turns":             p.MaxTurns,
+		"max_cost":              p.MaxCost,
+		"commit":                p.Commit,
+		"commit_dirty":          p.CommitDirty,
+		"save_transcript":       p.SaveTranscript,
+		"save_cost":             p.SaveCost,
+		"save_diff":             p.SaveDiff,
+		"schema_file":           p.SchemaFile,
+		"hooks_count":           len(p.Hooks),
+		"mcp_servers_count":     len(p.MCPServers),
+		"skills_count":          len(p.Skills),
+		"run_workflow":          p.RunWorkflow,
+		"prompt_each":           p.PromptEach,
+		"parallel":              p.Parallel,
+		"retry":                 p.Retry,
+		"bail":                  p.Bail,
+		"images_count":          len(p.Images),
+		"files_count":           len(p.Files),
+		"system_len":            len(p.System),
+		"engine_max_turns":      p.EngineParams.MaxTurns,
+		"engine_cost_budget_wired": p.EngineParams.CostBudget != nil,
+	}
+	enc := json.NewEncoder(os.Stdout)
+	enc.SetIndent("", "  ")
+	return enc.Encode(view)
+}
+
+// truncate returns s limited to maxRunes RUNES (not bytes); anything
+// past the cap is replaced with a "...[N more runes]" tail so the
+// caller can tell the value was elided. Byte-indexed truncation
+// would split a multi-byte character (CJK, emoji) mid-codepoint and
+// emit invalid UTF-8; iter-6 CC review caught that regression. Used
+// by --print-params to prevent a --prompt-file with embedded secrets
+// from leaking verbatim into JSON intended for copy-paste into bug
+// reports.
+func truncate(s string, maxRunes int) string {
+	runes := []rune(s)
+	if len(runes) <= maxRunes {
+		return s
+	}
+	return string(runes[:maxRunes]) +
+		fmt.Sprintf("...[%d more runes]", len(runes)-maxRunes)
 }

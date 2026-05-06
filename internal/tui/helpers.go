@@ -4,7 +4,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 func normalInputPlaceholder(startupPrompt string) string {
@@ -139,3 +139,4 @@ func max(a, b int) int {
 	}
 	return b
 }
+

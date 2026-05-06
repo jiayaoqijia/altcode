@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -56,12 +57,36 @@ func (r *RateLimiter) WaitForReset(ctx context.Context) error {
 	}
 }
 
+// retryBackoffBase is the base unit for RetryWithBackoff's exponential
+// schedule. Production = 1s. Tests override via SetRetryBackoffBase.
+// Karpathy autoresearch iter-3: TestRetryWithBackoff_* runs no longer
+// burn 3s each on the production cadence.
+var retryBackoffBase atomic.Int64 // nanoseconds; 0 means default 1s
+
+func init() {
+	retryBackoffBase.Store(int64(time.Second))
+}
+
+// SetRetryBackoffBase replaces the exponential-backoff base unit
+// (returns the previous value so tests can defer-restore). Caller is
+// responsible for resetting after the test if cross-test isolation
+// matters; the existing backoff schedule otherwise leaks.
+func SetRetryBackoffBase(d time.Duration) time.Duration {
+	prev := retryBackoffBase.Swap(int64(d))
+	return time.Duration(prev)
+}
+
 // RetryWithBackoff wraps fn with exponential backoff retry.
 // Only transient errors (5xx, network) are retried; 4xx errors
-// return immediately. Backoff caps at 30 seconds.
+// return immediately. Backoff caps at 30× the base.
 func RetryWithBackoff(
 	ctx context.Context, maxRetries int, fn func() error,
 ) error {
+	base := time.Duration(retryBackoffBase.Load())
+	if base <= 0 {
+		base = time.Second
+	}
+	cap := 30 * base
 	for i := 0; i <= maxRetries; i++ {
 		err := fn()
 		if err == nil {
@@ -73,9 +98,9 @@ func RetryWithBackoff(
 		if i == maxRetries {
 			break
 		}
-		backoff := time.Duration(1<<uint(i)) * time.Second
-		if backoff > 30*time.Second {
-			backoff = 30 * time.Second
+		backoff := time.Duration(1<<uint(i)) * base
+		if backoff > cap {
+			backoff = cap
 		}
 		select {
 		case <-time.After(backoff):

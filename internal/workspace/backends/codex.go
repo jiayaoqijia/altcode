@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // CodexBackend implements workspace.Agent for OpenAI Codex CLI.
@@ -50,8 +50,12 @@ func (b *CodexBackend) SetupWorkspaceHooks(sess *workspace.AgentSession) error {
 
 // prepareCodexHome creates a per-task CODEX_HOME directory.
 // auth.json is symlinked (shared), config files are copied (isolated).
+// The directory is owner-only (0700) because the auth.json symlink
+// and copied config files can hold API keys and credentials — the
+// prior 0755 leaked metadata to other local users. altcode-TUI
+// round-K adversarial review.
 func prepareCodexHome(codexHome string) error {
-	if err := os.MkdirAll(codexHome, 0o755); err != nil {
+	if err := os.MkdirAll(codexHome, 0o700); err != nil {
 		return err
 	}
 	sharedHome := resolveSharedCodexHome()
@@ -91,7 +95,16 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	defer in.Close()
-	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o644)
+	// Preserve source mode so a 0600 codex config isn't silently
+	// downgraded to 0644 when copied into the per-task CODEX_HOME.
+	// Fall back to 0600 (not 0644) when Stat fails — the config
+	// files in ~/.codex can carry secrets, so the safer default is
+	// owner-only rather than world-readable.
+	mode := os.FileMode(0o600)
+	if info, err := os.Stat(src); err == nil {
+		mode = info.Mode().Perm()
+	}
+	out, err := os.OpenFile(dst, os.O_WRONLY|os.O_CREATE|os.O_EXCL, mode)
 	if err != nil {
 		return err
 	}

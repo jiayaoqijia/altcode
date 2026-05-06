@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 )
 
 // RunParams configures a workflow execution.

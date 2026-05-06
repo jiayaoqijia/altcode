@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // GitHubAPISCM implements workspace.SCM using direct HTTP calls.

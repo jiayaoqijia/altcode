@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/lifecycle"
-	"github.com/altcode-ai/altcode/internal/scm"
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/lifecycle"
+	"github.com/jiayaoqijia/altcode/internal/scm"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 	"github.com/spf13/cobra"
 )
 

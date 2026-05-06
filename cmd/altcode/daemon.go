@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/altcode-ai/altcode/internal/daemon"
+	"github.com/jiayaoqijia/altcode/internal/daemon"
 	"github.com/spf13/cobra"
 )
 

@@ -3,8 +3,8 @@ package compact_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/compact"
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/compact"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 func TestToolResultBudget(t *testing.T) {

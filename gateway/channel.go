@@ -1,4 +1,4 @@
-// Adapted from github.com/altcode-ai/altcode/gateway (interfaces.go + base.go)
+// Adapted from github.com/jiayaoqijia/altcode/gateway (interfaces.go + base.go)
 // Copyright (c) 2026 Ottie contributors — MIT License
 
 package gateway

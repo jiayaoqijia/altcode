@@ -12,7 +12,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // Activity detection thresholds (matches lifecycle constants).

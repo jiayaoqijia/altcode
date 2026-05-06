@@ -6,9 +6,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/workspace"
-	"github.com/altcode-ai/altcode/internal/workspace/backends"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace/backends"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

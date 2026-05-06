@@ -23,7 +23,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 // eventRecord is a minimal copy of event.Event that drops the

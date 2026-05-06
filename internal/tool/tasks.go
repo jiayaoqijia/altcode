@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/task"
+	"github.com/jiayaoqijia/altcode/internal/task"
 )
 
 // taskCreateTool creates a new task in the task queue.

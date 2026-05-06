@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/permission"
-	"github.com/altcode-ai/altcode/internal/provider"
-	"github.com/altcode-ai/altcode/internal/schema"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/schema"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // Output format constants. Empty string = text (default).
@@ -498,7 +498,10 @@ func (p *Params) PrepareInputs(stdin io.Reader) error {
 			if stdin == nil {
 				stdin = os.Stdin
 			}
-			data, err = io.ReadAll(stdin)
+			// Cap stdin at 10MB to defend against pipe-an-entire-file-by-accident
+			// OOMs. Codex round-R adversarial finding (parity with claude-code
+			// 2.1.128 fix). Returns a friendly UsageError instead of crashing.
+			data, err = readAllCapped(stdin, maxStdinBytes)
 		} else {
 			data, err = os.ReadFile(p.PromptFile)
 		}
@@ -587,7 +590,7 @@ func (p *Params) PrepareInputs(stdin io.Reader) error {
 				if stdin == nil {
 					stdin = os.Stdin
 				}
-				data, rerr := io.ReadAll(stdin)
+				data, rerr := readAllCapped(stdin, maxStdinBytes)
 				if rerr != nil {
 					return NewUsageError("--image -: %v", rerr)
 				}
@@ -1801,4 +1804,27 @@ func printCostToStderr(elapsed time.Duration, eng *engine.Engine) {
 	} else {
 		fmt.Fprintf(os.Stderr, "altcode: %s · %d in / %d out\n", timing, in, out)
 	}
+}
+
+// maxStdinBytes caps stdin reads (--prompt-file=- or --image=-) so a
+// caller piping an entire file by accident doesn't OOM altcode.
+// Matches the 10MB cap claude-code 2.1.128 added for the same reason.
+const maxStdinBytes = 10 * 1024 * 1024
+
+// readAllCapped reads up to limit+1 bytes from r so it can detect
+// overflow without buffering the whole stream. Returns a friendly
+// UsageError when the input exceeds the cap.
+func readAllCapped(r io.Reader, limit int64) ([]byte, error) {
+	lr := io.LimitReader(r, limit+1)
+	data, err := io.ReadAll(lr)
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > limit {
+		return nil, NewUsageError(
+			"stdin exceeds %d-byte cap (use --prompt-file <path> "+
+				"or --file <path> for large inputs)",
+			limit)
+	}
+	return data, nil
 }

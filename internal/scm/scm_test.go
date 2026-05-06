@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 func TestParsePRJSON(t *testing.T) {

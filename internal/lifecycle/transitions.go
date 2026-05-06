@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/checkpoint"
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/checkpoint"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // advanceSpawning transitions to working once all agents have been

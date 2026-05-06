@@ -6,11 +6,21 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
+
+// TestMain installs ALTCODE_ALLOW_LOOPBACK_FETCH=1 for all web_fetch
+// tests. Loopback is blocked by the SSRF guard by default (round-O
+// hardening); these tests exercise httptest servers on 127.0.0.1,
+// so they need explicit opt-in.
+func TestMain(m *testing.M) {
+	_ = os.Setenv("ALTCODE_ALLOW_LOOPBACK_FETCH", "1")
+	os.Exit(m.Run())
+}
 
 func TestWebFetchToolMetadata(t *testing.T) {
 	ft := tool.NewWebFetchTool()
@@ -218,5 +228,51 @@ func TestWebSearchToolParsesResults(t *testing.T) {
 	// Result may or may not have hits (depends on network), but should not error
 	if result.Title == "" {
 		t.Fatal("Expected non-empty title")
+	}
+}
+
+// TestWebFetchSSRFLoopbackBlockedByDefault guards the Codex round-O
+// adversarial finding: loopback was previously exempt from the SSRF
+// guard, so a prompt-injected LLM could reach Docker socket proxies,
+// IDE debug servers, and local admin panels via web_fetch. Loopback
+// is now blocked by default; users opt in via ALTCODE_ALLOW_LOOPBACK_FETCH.
+func TestWebFetchSSRFLoopbackBlockedByDefault(t *testing.T) {
+	// Explicitly unset the opt-in so the blocking branch is exercised.
+	// (TestMain sets it to allow the other tests to hit httptest loopback.)
+	prev := os.Getenv("ALTCODE_ALLOW_LOOPBACK_FETCH")
+	_ = os.Unsetenv("ALTCODE_ALLOW_LOOPBACK_FETCH")
+	t.Cleanup(func() { _ = os.Setenv("ALTCODE_ALLOW_LOOPBACK_FETCH", prev) })
+
+	ft := tool.NewWebFetchTool()
+	input, _ := json.Marshal(map[string]string{
+		"url": "http://127.0.0.1:1/",
+	})
+	result, err := ft.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if !strings.Contains(result.Output, "blocked by SSRF guard") ||
+		!strings.Contains(result.Output, "loopback") {
+		t.Errorf("expected loopback SSRF block, got: %s", result.Output)
+	}
+}
+
+// TestWebFetchSSRFLoopbackOptInAllowed verifies the opt-in env var
+// restores the old behaviour for developers who explicitly want it.
+func TestWebFetchSSRFLoopbackOptInAllowed(t *testing.T) {
+	t.Setenv("ALTCODE_ALLOW_LOOPBACK_FETCH", "1")
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprintln(w, "ok")
+	}))
+	defer srv.Close()
+
+	ft := tool.NewWebFetchTool()
+	input, _ := json.Marshal(map[string]string{"url": srv.URL})
+	result, err := ft.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if strings.Contains(result.Output, "blocked by SSRF guard") {
+		t.Errorf("opt-in should permit loopback; got: %s", result.Output)
 	}
 }

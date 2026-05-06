@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // maxContextSize caps the injected context.md content to 32KB.

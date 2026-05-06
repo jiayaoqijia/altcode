@@ -3,7 +3,7 @@ package tui
 import (
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/completions"
+	"github.com/jiayaoqijia/altcode/internal/completions"
 	"github.com/charmbracelet/lipgloss"
 )
 

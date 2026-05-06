@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Config holds Signal channel configuration.

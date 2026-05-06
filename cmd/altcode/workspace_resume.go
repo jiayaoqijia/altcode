@@ -11,9 +11,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/workspace"
-	"github.com/altcode-ai/altcode/internal/workspace/backends"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace/backends"
 	"github.com/spf13/cobra"
 )
 

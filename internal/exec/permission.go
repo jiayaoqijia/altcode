@@ -28,8 +28,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // promptToolResponse is the JSON shape expected from a

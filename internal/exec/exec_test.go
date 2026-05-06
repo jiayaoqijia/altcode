@@ -11,11 +11,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/exec"
-	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/exec"
+	"github.com/jiayaoqijia/altcode/internal/store"
 )
 
 func sse(eventType, data string) string {

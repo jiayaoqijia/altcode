@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 func TestPatchToolMetadata(t *testing.T) {

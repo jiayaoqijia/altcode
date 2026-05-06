@@ -9,6 +9,72 @@ import (
 	"strings"
 )
 
+// taskBudget is a lightweight per-task budget tracker. Constructed
+// once per RunTask invocation. maxTurns is counted at every phase /
+// retry; zero means unlimited. maxCostUSD is checked against the
+// rolling sum of phase costs reported via recordCost; zero means
+// unlimited. The cost ceiling only bites once agents actually report
+// cost back — until then, enforcement is defence-in-depth via the
+// 201 response's `budget_enforced: {max_cost_usd: false}` signal
+// and autoresearch iteration 4 below: accepts user-provided cost
+// samples so SSE steer messages or downstream wrappers that do have
+// cost telemetry can feed them in.
+type taskBudget struct {
+	maxTurns   int
+	maxCostUSD float64
+	turns      int
+	costUSD    float64
+}
+
+func newTaskBudget(maxTurns int, maxCostUSD float64) *taskBudget {
+	return &taskBudget{maxTurns: maxTurns, maxCostUSD: maxCostUSD}
+}
+
+func (b *taskBudget) recordTurn() error {
+	b.turns++
+	if b.maxTurns > 0 && b.turns > b.maxTurns {
+		return fmt.Errorf(
+			"budget: max_turns %d exceeded (current=%d)",
+			b.maxTurns, b.turns,
+		)
+	}
+	return nil
+}
+
+// recordCost accumulates a reported phase cost (USD) and returns an
+// error if the running total exceeds maxCostUSD. Negative samples
+// are clamped to 0 so a misbehaving agent can't reduce the running
+// total. Autoresearch iteration 4 closes the path.
+func (b *taskBudget) recordCost(usd float64) error {
+	if usd < 0 {
+		usd = 0
+	}
+	b.costUSD += usd
+	if b.maxCostUSD > 0 && b.costUSD > b.maxCostUSD {
+		return fmt.Errorf(
+			"budget: max_cost_usd %.4f exceeded (current=%.4f)",
+			b.maxCostUSD, b.costUSD,
+		)
+	}
+	return nil
+}
+
+// failBudget marks a task failed with a budget_exceeded signal and
+// appends an event so SSE/UI clients can distinguish budget-driven
+// failure from a crashed agent.
+func (o *Orchestrator) failBudget(taskID, phase string, budgetErr error) {
+	data, _ := json.Marshal(map[string]string{
+		"phase":  phase,
+		"reason": budgetErr.Error(),
+	})
+	if err := o.store.AppendEvent(taskID, "budget_exceeded", string(data)); err != nil {
+		o.logger.Warn("append budget event", "task", taskID, "err", err)
+	}
+	if err := o.store.MarkFailed(taskID, budgetErr.Error()); err != nil {
+		o.logger.Warn("mark budget failed", "task", taskID, "err", err)
+	}
+}
+
 // SpawnFunc is the function signature for spawning an agent and
 // collecting its output. Tests inject a mock; production uses
 // SpawnAndCollect which delegates to subprocess.go.
@@ -75,7 +141,35 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 		return fmt.Errorf("mark started: %w", err)
 	}
 
+	// Per-task budget enforcement. MaxTurns is counted across every
+	// SpawnFunc invocation the orchestrator makes (plan, each
+	// implement step + retry, review, finalize). Zero means unlimited
+	// — preserves the historical behaviour for callers that don't
+	// opt into limits. MaxCostUSD is stored for future use but not
+	// yet enforced because altcode subprocesses don't report cost
+	// back to the daemon; the handler's 201 response surfaces that
+	// gap explicitly. Autoresearch iteration 1.
+	budget := newTaskBudget(task.MaxTurns, task.MaxCostUSD)
+
+	// Per-task overrides from Task.AgentConfig (JSON). Blank fields
+	// fall back to OrchestratorConfig defaults. This honours the
+	// `model` field the API has always accepted but previously
+	// ignored — Codex round-D flagged that as a real bug.
+	_, overrideModel := decodeAgentConfig(task.AgentConfig)
+	planModel := o.cfg.PlanModel
+	implModel := o.cfg.ImplModel
+	reviewModel := o.cfg.ReviewModel
+	if overrideModel != "" {
+		planModel = overrideModel
+		implModel = overrideModel
+		reviewModel = overrideModel
+	}
+
 	// Phase 1: Plan
+	if err := budget.recordTurn(); err != nil {
+		o.failBudget(task.ID, "plan", err)
+		return err
+	}
 	o.emitPhase(task.ID, "plan", "started")
 	if err := o.store.UpdateStatus(task.ID, "planning"); err != nil {
 		o.logger.Warn("update status", "err", err)
@@ -84,11 +178,11 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 	planOutput, err := o.cfg.SpawnFunc(ctx, AgentConfig{
 		Binary: "altcode",
 		Args: []string{
-			"--model", o.cfg.PlanModel,
+			"--model", planModel,
 			"You are a lead architect. Analyze this task and output " +
 				"a JSON object with \"steps\" (array of objects with " +
-				"\"description\" and \"prompt\" fields). " +
-				"Task: " + task.TaskDescription,
+				"\"description\" and \"prompt\" fields).\n\n" +
+				WrapAsUserContent(task.TaskDescription, "TASK"),
 		},
 		Dir:  o.cfg.WorkDir,
 		Env:  o.taskEnv(task),
@@ -101,7 +195,10 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 		return fmt.Errorf("plan phase: %w", err)
 	}
 	o.emitPhase(task.ID, "plan", "completed")
-	o.emitCost(task.ID, "plan", planOutput)
+	if err := o.emitCost(task.ID, "plan", planOutput, budget); err != nil {
+		o.failBudget(task.ID, "plan", err)
+		return err
+	}
 
 	var plan Plan
 	if jerr := json.Unmarshal([]byte(planOutput), &plan); jerr != nil || len(plan.Steps) == 0 {
@@ -121,18 +218,29 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 	}
 
 	for i, step := range plan.Steps {
-		// Drain pending steer messages and prepend to prompt.
+		// Drain pending steer messages and prepend to prompt. Steer
+		// text comes from the user API, step.Prompt comes from the
+		// planner LLM — both are wrapped so the implementer treats
+		// them as data, not instructions.
+		stepPrompt := WrapAsUserContent(step.Prompt, "PLAN_STEP")
 		if steer := o.drainSteer(steerCh); steer != "" {
-			step.Prompt = steer + "\n\nOriginal task: " + step.Prompt
+			stepPrompt = WrapAsUserContent(steer, "USER_STEER") +
+				"\n\n" + stepPrompt
 			o.store.AppendEvent(task.ID, "steer_applied", steer)
 		}
+		step.Prompt = stepPrompt
 
 		var lastErr error
+		var stepOutput string
 		for attempt := 0; attempt < o.cfg.MaxFixRetry; attempt++ {
-			_, lastErr = o.cfg.SpawnFunc(ctx, AgentConfig{
+			if err := budget.recordTurn(); err != nil {
+				o.failBudget(task.ID, fmt.Sprintf("implement_step_%d", i), err)
+				return err
+			}
+			stepOutput, lastErr = o.cfg.SpawnFunc(ctx, AgentConfig{
 				Binary: "altcode",
 				Args: []string{
-					"--model", o.cfg.ImplModel,
+					"--model", implModel,
 					"--permission-mode", "auto",
 				"--allow-tool", "Read",
 				"--allow-tool", "Write",
@@ -149,7 +257,14 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 			if lastErr == nil {
 				o.logger.Info("step completed",
 					"task", task.ID, "step", i, "attempt", attempt)
-				o.emitCost(task.ID, fmt.Sprintf("implement_step_%d", i), "")
+				phaseName := fmt.Sprintf("implement_step_%d", i)
+				// Iter 6/7: step output contributes to the cost
+				// proxy; iter 7 threads the recordCost error back up
+				// so a single path handles both record + abort.
+				if err := o.emitCost(task.ID, phaseName, stepOutput, budget); err != nil {
+					o.failBudget(task.ID, phaseName, err)
+					return err
+				}
 				break
 			}
 			o.logger.Warn("step attempt failed, retrying",
@@ -168,6 +283,10 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 	o.emitPhase(task.ID, "implement", "completed")
 
 	// Phase 3: Review
+	if err := budget.recordTurn(); err != nil {
+		o.failBudget(task.ID, "review", err)
+		return err
+	}
 	o.emitPhase(task.ID, "review", "started")
 	if err := o.store.UpdateStatus(task.ID, "reviewing"); err != nil {
 		o.logger.Warn("update status", "err", err)
@@ -176,14 +295,17 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 	reviewPrompt := "Review the recent changes for bugs, security issues, " +
 		"and code quality. Be concise."
 	if steer := o.drainSteer(steerCh); steer != "" {
-		reviewPrompt = steer + "\n\n" + reviewPrompt
+		// Wrap user steer so the reviewer treats it as guidance data
+		// rather than executable instructions. Iteration 2 fix.
+		reviewPrompt = WrapAsUserContent(steer, "USER_STEER") +
+			"\n\n" + reviewPrompt
 		o.store.AppendEvent(task.ID, "steer_applied", steer)
 	}
 
-	_, err = o.cfg.SpawnFunc(ctx, AgentConfig{
+	reviewOutput, err := o.cfg.SpawnFunc(ctx, AgentConfig{
 		Binary: "altcode",
 		Args: []string{
-			"--model", o.cfg.ReviewModel,
+			"--model", reviewModel,
 			reviewPrompt,
 		},
 		Dir:  o.cfg.WorkDir,
@@ -191,10 +313,22 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 		Role: "reviewer",
 	})
 	if err != nil {
-		o.logger.Warn("review failed, continuing", "err", err)
+		// Review failure must not be swallowed — a task whose reviewer
+		// crashed/timed-out should not be reported as successfully
+		// merged. Persist the failure and abort finalize.
+		if ferr := o.store.MarkFailed(task.ID,
+			fmt.Sprintf("review phase: %v", err)); ferr != nil {
+			o.logger.Warn("mark review-failed", "task", task.ID, "err", ferr)
+		}
+		return fmt.Errorf("review phase: %w", err)
 	}
 	o.emitPhase(task.ID, "review", "completed")
-	o.emitCost(task.ID, "review", "")
+	// Iter 6/7: review output contributes to the cost proxy; a single
+	// emitCost call both records and returns any budget overflow.
+	if err := o.emitCost(task.ID, "review", reviewOutput, budget); err != nil {
+		o.failBudget(task.ID, "review", err)
+		return err
+	}
 
 	// Phase 4: Finalize
 	o.emitPhase(task.ID, "finalize", "started")
@@ -230,18 +364,40 @@ func (o *Orchestrator) emitSpec(taskID string, plan *Plan) {
 	}
 }
 
-// emitCost records a cost attribution event after a phase completes.
-// Since subprocess agents handle their own cost tracking, this records
-// phase completion with output length as a proxy metric.
-func (o *Orchestrator) emitCost(taskID, phase, output string) {
+// emitCost records a cost attribution event after a phase completes
+// AND feeds the cost sample into the running task budget. For now the
+// cost is best-estimated from output_bytes (agents don't report USD
+// directly); the helper is priced with a conservative rate so the
+// running total is a proxy rather than a ground-truth cost.
+//
+// The budget.recordCost return is surfaced to the caller so the
+// orchestrator can abort at the same boundary the overflow was
+// detected — a single recorded-and-returned contract rather than
+// record + separate probe. CC iter-6 review called out the prior
+// dual-path as a contract smell; CC iter-7 caught the second probe
+// then became dead code, so it's been removed entirely.
+func (o *Orchestrator) emitCost(taskID, phase, output string, budget *taskBudget) error {
+	// Rough proxy: output_bytes × $1e-6 is deliberately an order of
+	// magnitude smaller than any real LLM rate, so zero-cost agents
+	// trip only true overages. When an agent reports cost directly
+	// (future hook) it flows through this same path.
+	estUSD := float64(len(output)) * 1e-6
 	data, _ := json.Marshal(map[string]any{
 		"phase":        phase,
 		"output_bytes": len(output),
+		"est_usd":      estUSD,
 	})
 	if err := o.store.AppendEvent(taskID, "phase_cost", string(data)); err != nil {
 		o.logger.Warn("emit cost", "task", taskID, "err", err)
 	}
+	if budget != nil {
+		if err := budget.recordCost(estUSD); err != nil {
+			return err
+		}
+	}
+	return nil
 }
+
 
 // taskEnv returns environment variables to inject into every agent
 // spawn for the given task. Always includes ALTFIX_REPO_URL.

@@ -6,8 +6,8 @@ import (
 	"errors"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // collectedToolCall holds a fully accumulated tool call from a stream.

@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -29,6 +30,8 @@ type Task struct {
 	CompletedAt     *time.Time `json:"completed_at,omitempty"`
 	ErrorMessage    string     `json:"error_message,omitempty"`
 	DeliveryID      string     `json:"delivery_id,omitempty"`
+	MaxCostUSD      float64    `json:"max_cost_usd,omitempty"` // 0 = unlimited
+	MaxTurns        int        `json:"max_turns,omitempty"`    // 0 = unlimited
 	CreatedAt       time.Time  `json:"created_at"`
 	UpdatedAt       time.Time  `json:"updated_at"`
 }
@@ -99,6 +102,8 @@ func (s *Store) createSchema() error {
 		completed_at TEXT,
 		error_message TEXT DEFAULT '',
 		delivery_id TEXT DEFAULT '',
+		max_cost_usd REAL DEFAULT 0,
+		max_turns INTEGER DEFAULT 0,
 		created_at TEXT DEFAULT (datetime('now')),
 		updated_at TEXT DEFAULT (datetime('now'))
 	);
@@ -127,8 +132,22 @@ func (s *Store) createSchema() error {
 	CREATE INDEX IF NOT EXISTS idx_checkpoints_task
 		ON checkpoints(task_id, phase_number);
 	`
-	_, err := s.db.Exec(schema)
-	return err
+	if _, err := s.db.Exec(schema); err != nil {
+		return err
+	}
+	// Migrations: additive ALTER TABLE for rows created before the
+	// max_cost_usd/max_turns columns landed. SQLite rejects ADD COLUMN
+	// if the column already exists, so swallow "duplicate column" errors.
+	for _, m := range []string{
+		`ALTER TABLE tasks ADD COLUMN max_cost_usd REAL DEFAULT 0`,
+		`ALTER TABLE tasks ADD COLUMN max_turns INTEGER DEFAULT 0`,
+	} {
+		if _, err := s.db.Exec(m); err != nil &&
+			!strings.Contains(err.Error(), "duplicate column") {
+			return err
+		}
+	}
+	return nil
 }
 
 func newID() string {
@@ -148,11 +167,12 @@ func (s *Store) CreateTask(t *Task) error {
 	_, err := s.db.Exec(
 		`INSERT INTO tasks (id, repo_url, task_description, status,
 		 agent_config, branch_name, complexity, issue_number,
-		 repo_owner, repo_name, delivery_id, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		 repo_owner, repo_name, delivery_id, max_cost_usd, max_turns,
+		 created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		t.ID, t.RepoURL, t.TaskDescription, t.Status, t.AgentConfig,
 		t.BranchName, t.Complexity, t.IssueNumber, t.RepoOwner,
-		t.RepoName, t.DeliveryID,
+		t.RepoName, t.DeliveryID, t.MaxCostUSD, t.MaxTurns,
 		now.Format(time.RFC3339), now.Format(time.RFC3339),
 	)
 	return err
@@ -164,7 +184,8 @@ func (s *Store) GetTask(id string) (*Task, error) {
 		`SELECT id, repo_url, task_description, status, agent_config,
 		 pr_number, pr_url, branch_name, api_cost_usd, complexity,
 		 issue_number, repo_owner, repo_name, started_at, completed_at,
-		 error_message, delivery_id, created_at, updated_at
+		 error_message, delivery_id, max_cost_usd, max_turns,
+		 created_at, updated_at
 		 FROM tasks WHERE id = ?`, id)
 	return scanTask(row)
 }
@@ -175,7 +196,8 @@ func (s *Store) ListTasks() ([]*Task, error) {
 		`SELECT id, repo_url, task_description, status, agent_config,
 		 pr_number, pr_url, branch_name, api_cost_usd, complexity,
 		 issue_number, repo_owner, repo_name, started_at, completed_at,
-		 error_message, delivery_id, created_at, updated_at
+		 error_message, delivery_id, max_cost_usd, max_turns,
+		 created_at, updated_at
 		 FROM tasks ORDER BY created_at DESC`)
 	if err != nil {
 		return nil, err
@@ -192,15 +214,23 @@ func (s *Store) ListTasks() ([]*Task, error) {
 	return tasks, rows.Err()
 }
 
-// ListTasksByStatus returns tasks with the given status,
-// ordered by creation time descending.
+// ListTasksByStatus returns tasks with the given status.
+//
+// Ordering is strictly FIFO (oldest first) by SQLite's internal rowid,
+// which is monotonically assigned at INSERT time. This is stronger
+// than (created_at, id) because the id is random hex — two tasks
+// created in the same second with id "aaa" < "zzz" would tie-break
+// lexicographically, not by arrival order. Codex round-E caught that
+// subtle queue-position regression; using rowid closes the gap.
 func (s *Store) ListTasksByStatus(status string) ([]*Task, error) {
 	rows, err := s.db.Query(
 		`SELECT id, repo_url, task_description, status, agent_config,
 		 pr_number, pr_url, branch_name, api_cost_usd, complexity,
 		 issue_number, repo_owner, repo_name, started_at, completed_at,
-		 error_message, delivery_id, created_at, updated_at
-		 FROM tasks WHERE status = ? ORDER BY created_at DESC`,
+		 error_message, delivery_id, max_cost_usd, max_turns,
+		 created_at, updated_at
+		 FROM tasks WHERE status = ?
+		 ORDER BY rowid ASC`,
 		status)
 	if err != nil {
 		return nil, err
@@ -217,64 +247,192 @@ func (s *Store) ListTasksByStatus(status string) ([]*Task, error) {
 	return tasks, rows.Err()
 }
 
-// UpdateStatus sets the task status and updates updated_at.
+// UpdateStatus sets the task status and updates updated_at. The
+// WHERE clause refuses to resurrect terminal rows back to an active
+// phase — a stale orchestrator writing UpdateStatus("implementing")
+// after the task was cancelled must not un-cancel it. Returns nil
+// without error when the row is already terminal (idempotent no-op).
 func (s *Store) UpdateStatus(id, status string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE tasks SET status = ?, updated_at = ? WHERE id = ?
+		   AND status NOT IN ('merged','failed','closed','cancelled')`,
 		status, now, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("task %q not found", id)
+		// Confirm the row exists before returning — a truly missing
+		// id is a programmer bug, a terminal row is the benign race.
+		var exists int
+		err := s.db.QueryRow(
+			`SELECT 1 FROM tasks WHERE id = ?`, id,
+		).Scan(&exists)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task %q not found", id)
+		}
+		if err != nil {
+			return fmt.Errorf("task %q lookup: %w", id, err)
+		}
 	}
 	return nil
 }
 
-// MarkFailed sets status to failed with an error message.
+// CancelIfActive transitions a task to cancelled if it is in any
+// non-terminal state — queued (pending) OR mid-phase (planning,
+// implementing, reviewing, testing, awaiting_spec, pr_open). This is
+// the handler-path semantics: user stopped a task with no live runner
+// (queued, or runner crashed mid-execution leaving the task orphaned).
+// We deliberately exclude 'failed' so a genuine failure that raced the
+// stop request isn't rewritten as user cancellation — and 'merged',
+// 'closed', 'cancelled' for their usual reasons.
+//
+// Returns (true, nil) if the row was updated; (false, nil) otherwise
+// (task unknown, or in a terminal status). Callers wanting to
+// distinguish the two cases must pre-read the task.
+func (s *Store) CancelIfActive(id string) (bool, error) {
+	now := time.Now().UTC().Format(time.RFC3339)
+	res, err := s.db.Exec(
+		`UPDATE tasks SET status = 'cancelled', error_message = '',
+		 completed_at = ?, updated_at = ? WHERE id = ?
+		   AND status NOT IN
+		     ('merged','failed','closed','cancelled')`,
+		now, now, id)
+	if err != nil {
+		return false, err
+	}
+	n, _ := res.RowsAffected()
+	return n > 0, nil
+}
+
+// MarkCancelled sets status to cancelled, records completion time, and
+// clears any error_message left over from a MarkFailed that fired before
+// the runner could reclassify the result as a user-cancellation.
+//
+// The WHERE clause excludes already-terminal statuses so a stop request
+// that arrives just after the runner finishes successfully cannot
+// silently overwrite a "merged"/"failed"/"closed" task to "cancelled"
+// (TOCTOU race between handleStopTask's GetTask and this update).
+// Returns nil with no error if the row was already terminal — the
+// caller should treat zero-rows-affected as a no-op for that race.
+func (s *Store) MarkCancelled(id string) error {
+	now := time.Now().UTC().Format(time.RFC3339)
+	// We INTENTIONALLY allow overwriting "failed" → "cancelled":
+	// when the orchestrator's SpawnFunc returns ctx.Err on a user
+	// cancel, RunTask writes MarkFailed before TaskRunner.Run gets to
+	// reclassify. The reclassification is the whole point. We do NOT
+	// allow overwriting "merged"/"closed" (real successes) or
+	// "cancelled" (already done — keeps this idempotent).
+	res, err := s.db.Exec(
+		`UPDATE tasks SET status = 'cancelled', error_message = '',
+		 completed_at = ?, updated_at = ? WHERE id = ?
+		   AND status NOT IN ('merged','closed','cancelled')`,
+		now, now, id)
+	if err != nil {
+		return err
+	}
+	// Distinguish "task missing" from "task already terminal". The
+	// former is a programmer bug; the latter is the benign TOCTOU race.
+	if n, _ := res.RowsAffected(); n == 0 {
+		var status string
+		err := s.db.QueryRow(
+			`SELECT status FROM tasks WHERE id = ?`, id,
+		).Scan(&status)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task %q not found", id)
+		}
+		if err != nil {
+			// Surface real DB failures rather than silently pretending
+			// the cancel succeeded.
+			return fmt.Errorf("task %q diagnostic query: %w", id, err)
+		}
+		// err == nil and row exists: already terminal — no-op.
+	}
+	return nil
+}
+
+// MarkFailed sets status to failed with an error message. Refuses to
+// overwrite 'merged', 'closed', or 'cancelled' — a slow orchestrator
+// goroutine writing MarkFailed after the user has cancelled the task
+// (MarkCancelled ran, or the runner reclassified) must not undo that.
+// Noops silently on terminal rows.
 func (s *Store) MarkFailed(id, errMsg string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
 		`UPDATE tasks SET status = 'failed', error_message = ?,
-		 completed_at = ?, updated_at = ? WHERE id = ?`,
+		 completed_at = ?, updated_at = ? WHERE id = ?
+		   AND status NOT IN ('merged','closed','cancelled')`,
 		errMsg, now, now, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("task %q not found", id)
+		var exists int
+		err := s.db.QueryRow(
+			`SELECT 1 FROM tasks WHERE id = ?`, id,
+		).Scan(&exists)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task %q not found", id)
+		}
+		if err != nil {
+			return fmt.Errorf("task %q lookup: %w", id, err)
+		}
 	}
 	return nil
 }
 
-// MarkCompleted sets status to merged and records completion time.
+// MarkCompleted sets status to merged. Refuses to overwrite
+// 'failed', 'closed', or 'cancelled' — a lagging success write must
+// not clobber an earlier terminal verdict. Idempotent on 'merged'.
 func (s *Store) MarkCompleted(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
 		`UPDATE tasks SET status = 'merged', completed_at = ?,
-		 updated_at = ? WHERE id = ?`,
+		 updated_at = ? WHERE id = ?
+		   AND status NOT IN ('failed','closed','cancelled','merged')`,
 		now, now, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("task %q not found", id)
+		var exists int
+		err := s.db.QueryRow(
+			`SELECT 1 FROM tasks WHERE id = ?`, id,
+		).Scan(&exists)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task %q not found", id)
+		}
+		if err != nil {
+			return fmt.Errorf("task %q lookup: %w", id, err)
+		}
 	}
 	return nil
 }
 
-// MarkStarted records the started_at timestamp for a task.
+// MarkStarted records the started_at timestamp for a task. Refuses
+// to set started_at on a terminal row — a stale orchestrator path
+// (e.g. one that raced Stop) must not stamp a start time on a task
+// that was already cancelled/failed/merged.
 func (s *Store) MarkStarted(id string) error {
 	now := time.Now().UTC().Format(time.RFC3339)
 	res, err := s.db.Exec(
-		`UPDATE tasks SET started_at = ?, updated_at = ? WHERE id = ?`,
+		`UPDATE tasks SET started_at = ?, updated_at = ? WHERE id = ?
+		   AND status NOT IN ('merged','failed','closed','cancelled')`,
 		now, now, id)
 	if err != nil {
 		return err
 	}
 	if n, _ := res.RowsAffected(); n == 0 {
-		return fmt.Errorf("task %q not found", id)
+		var exists int
+		err := s.db.QueryRow(
+			`SELECT 1 FROM tasks WHERE id = ?`, id,
+		).Scan(&exists)
+		if err == sql.ErrNoRows {
+			return fmt.Errorf("task %q not found", id)
+		}
+		if err != nil {
+			return fmt.Errorf("task %q lookup: %w", id, err)
+		}
 	}
 	return nil
 }
@@ -340,7 +498,8 @@ func scanTask(s scanner) (*Task, error) {
 		&t.AgentConfig, &t.PRNumber, &t.PRURL, &t.BranchName,
 		&t.APICostUSD, &t.Complexity, &t.IssueNumber, &t.RepoOwner,
 		&t.RepoName, &startedAt, &completedAt, &t.ErrorMessage,
-		&t.DeliveryID, &createdAt, &updatedAt,
+		&t.DeliveryID, &t.MaxCostUSD, &t.MaxTurns,
+		&createdAt, &updatedAt,
 	)
 	if err != nil {
 		return nil, err
@@ -418,15 +577,20 @@ func (s *Store) GetCheckpoint(id string) (*Checkpoint, error) {
 	return scanCheckpoint(row)
 }
 
-// CountPendingBefore returns the number of pending tasks created
-// before the given task. Used for queue position calculation.
+// CountPendingBefore returns the number of pending tasks that are
+// ahead of the given task in dispatch order. Used for queue position.
+//
+// Uses SQLite's rowid as the ordering key — it's monotonic at INSERT
+// time and matches ListTasksByStatus's FIFO ordering. created_at at
+// RFC3339 second precision is too coarse for bursty creates; the id
+// is random hex (not a timestamp) so it can't tie-break correctly.
 func (s *Store) CountPendingBefore(taskID string) (int, error) {
 	var count int
 	err := s.db.QueryRow(
 		`SELECT COUNT(*) FROM tasks
 		 WHERE status = 'pending'
-		 AND created_at < (SELECT created_at FROM tasks WHERE id = ?)
-		 AND id != ?`, taskID, taskID).Scan(&count)
+		   AND rowid < (SELECT rowid FROM tasks WHERE id = ?)`,
+		taskID).Scan(&count)
 	return count, err
 }
 

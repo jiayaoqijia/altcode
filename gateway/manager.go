@@ -1,4 +1,4 @@
-// Adapted from github.com/altcode-ai/altcode/gateway/manager.go
+// Adapted from github.com/jiayaoqijia/altcode/gateway/manager.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 //
 // Simplified: no media pipeline, no placeholder/typing/reaction orchestration,

@@ -12,14 +12,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/compact"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/orchestrator"
-	"github.com/altcode-ai/altcode/internal/plugin"
-	"github.com/altcode-ai/altcode/internal/provider"
-	"github.com/altcode-ai/altcode/internal/workflow"
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/compact"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/orchestrator"
+	"github.com/jiayaoqijia/altcode/internal/plugin"
+	"github.com/jiayaoqijia/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/workflow"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/orchestra"
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

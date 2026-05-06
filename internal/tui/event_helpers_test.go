@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 // TestPlural covers the trivial English-pluralization helper used in

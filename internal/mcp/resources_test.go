@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/mcp"
+	"github.com/jiayaoqijia/altcode/internal/mcp"
 )
 
 const mockResourceScript = `#!/usr/bin/env python3

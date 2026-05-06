@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // runPromptHook sends the hook prompt to the LLM and parses for allow/deny.

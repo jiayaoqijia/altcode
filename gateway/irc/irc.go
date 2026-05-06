@@ -17,7 +17,7 @@ import (
 	"github.com/ergochat/irc-go/ircmsg"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Config holds IRC connection configuration.

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/memory"
+	"github.com/jiayaoqijia/altcode/internal/memory"
 )
 
 func TestSaveAndLoad(t *testing.T) {

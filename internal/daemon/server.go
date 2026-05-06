@@ -14,7 +14,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/daemon/web"
+	"github.com/jiayaoqijia/altcode/internal/daemon/web"
 )
 
 // ServerConfig holds daemon startup parameters.
@@ -44,6 +44,15 @@ type ServerConfig struct {
 	// SpawnFunc overrides the default subprocess-based spawn.
 	// Nil means use SpawnAgent + ReadAll + Wait from subprocess.go.
 	SpawnFunc SpawnFunc
+	// PollInterval is how often pollPendingTasks wakes to check the
+	// pending queue. Zero = 5s (the production default). Tests use
+	// e.g. 25*time.Millisecond to avoid 7s waits on every poll-test.
+	// Karpathy autoresearch iter-1: shaves the slowest two tests.
+	PollInterval time.Duration
+	// SSEPollInterval is how often the SSE handler polls the store
+	// for new events and emits a heartbeat. Zero = 2s default. Tests
+	// override to ~25ms. Iter-2 of the autoresearch loop.
+	SSEPollInterval time.Duration
 }
 
 // Server is the HTTP daemon.
@@ -55,6 +64,17 @@ type Server struct {
 	cm      *ConcurrencyManager
 	orch    *Orchestrator
 	runners sync.Map // taskID -> *TaskRunner
+	// stopSessionGC stops the web session GC goroutine on shutdown;
+	// nil when the web UI is disabled.
+	stopSessionGC func()
+	// lifecycleCtx is the root context for all background tasks.
+	// It is cancelled on daemon shutdown so runners inherit the signal
+	// instead of running on orphaned context.Background() trees.
+	lifecycleCtx    context.Context
+	lifecycleCancel context.CancelFunc
+	// dispatchWG tracks in-flight dispatchTask goroutines so shutdown
+	// can wait for runner store-writes to drain before store.Close.
+	dispatchWG sync.WaitGroup
 }
 
 // NewServer creates a daemon server.
@@ -83,6 +103,12 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 	spawnFunc := cfg.SpawnFunc
 	if spawnFunc == nil {
 		spawnFunc = defaultSpawnFunc
+		// In --test-mode keep tasks in active phases for the duration of
+		// e2e interactions instead of letting the real altcode subprocess
+		// fail fast (which leaves stop/steer endpoints returning 409).
+		if cfg.TestMode {
+			spawnFunc = testModeSpawnFunc
+		}
 	}
 	orch := NewOrchestrator(store, OrchestratorConfig{
 		SpawnFunc:   spawnFunc,
@@ -93,13 +119,16 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 		WorkDir:     cfg.DataDir,
 	})
 
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
 	s := &Server{
-		cfg:    cfg,
-		store:  store,
-		mux:    http.NewServeMux(),
-		logger: logger,
-		cm:     cm,
-		orch:   orch,
+		cfg:             cfg,
+		store:           store,
+		mux:             http.NewServeMux(),
+		logger:          logger,
+		cm:              cm,
+		orch:            orch,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
 	}
 	s.registerRoutes()
 
@@ -112,7 +141,7 @@ func NewServer(cfg ServerConfig) (*Server, error) {
 
 	if cfg.GitHubClientID != "" || cfg.TestMode {
 		sessions := web.NewSessionStore(8 * time.Hour)
-		sessions.StartGC(5 * time.Minute)
+		s.stopSessionGC = sessions.StartGC(5 * time.Minute)
 		if err := web.RegisterRoutes(s.mux, web.WebConfig{
 			Sessions:          sessions,
 			GitHubClientID:    cfg.GitHubClientID,
@@ -241,6 +270,16 @@ func (s *Server) Run(ctx context.Context) error {
 	shutdownCtx, stop := signal.NotifyContext(ctx, os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// shutdownDone signals that httpServer.Shutdown has returned. We
+	// must observe this BEFORE draining dispatchWG, otherwise a POST
+	// /tasks handler in-flight during shutdown can call dispatchWG.Add
+	// concurrently with Wait (sync.WaitGroup panic). Shutdown blocks
+	// until all handlers return, so waiting on it closes the Add-race
+	// window completely.
+	shutdownDone := make(chan struct{})
+	var shutdownOnce sync.Once
+	closeShutdown := func() { shutdownOnce.Do(func() { close(shutdownDone) }) }
+
 	go func() {
 		<-shutdownCtx.Done()
 		s.logger.Info("shutting down daemon")
@@ -249,15 +288,69 @@ func (s *Server) Run(ctx context.Context) error {
 		)
 		defer cancel()
 		httpServer.Shutdown(timeoutCtx)
+		closeShutdown()
 	}()
 
-	go s.pollPendingTasks(ctx)
+	// Track the poller in dispatchWG so shutdown's Wait blocks until it
+	// exits — otherwise a poll tick already inside its for-loop can call
+	// `dispatchWG.Add` after Wait starts (panic: "Add called concurrently
+	// with Wait") or after it returns (race with store.Close).
+	s.dispatchWG.Add(1)
+	go func() {
+		defer s.dispatchWG.Done()
+		s.pollPendingTasks(s.lifecycleCtx)
+	}()
 
 	s.logger.Info("daemon starting", "addr", addr)
-	if err := httpServer.ListenAndServe(); err != http.ErrServerClosed {
-		return err
+	serverErr := httpServer.ListenAndServe()
+
+	// If ListenAndServe returned without Shutdown being triggered
+	// (e.g., bind failure), release the wait so we don't deadlock.
+	if serverErr != nil && serverErr != http.ErrServerClosed {
+		closeShutdown()
 	}
-	return s.store.Close()
+	// Wait for all HTTP handlers to return (Shutdown handles this)
+	// BEFORE we drain dispatchWG, so no handler can still race Add(1)
+	// against our Wait(). Bounded by Shutdown's 10s grace.
+	<-shutdownDone
+
+	// Tear down in order: cancel runners + poller, wait for their
+	// store-writes to drain, stop the web session GC goroutine, THEN
+	// close the DB.
+	s.lifecycleCancel()
+	s.dispatchWG.Wait()
+	if s.stopSessionGC != nil {
+		s.stopSessionGC()
+	}
+	closeErr := s.store.Close()
+
+	// Surface both server and store-close errors so a bad shutdown isn't
+	// hidden by an earlier ListenAndServe error.
+	if serverErr != nil && serverErr != http.ErrServerClosed {
+		if closeErr != nil {
+			return fmt.Errorf("serve: %w; store close: %v", serverErr, closeErr)
+		}
+		return serverErr
+	}
+	return closeErr
+}
+
+// testModeSpawnFunc keeps a task in the planning phase until its
+// orchestrator context is cancelled (Stop) or a long ceiling elapses.
+// This makes lifecycle e2e tests deterministic — Stop/Steer/SSE can
+// run against a known-active task instead of racing a fast-failing
+// real subprocess. Uses an explicit Timer (not time.After) so the
+// timer fd is released on context cancellation rather than leaking
+// for 5 minutes per cancelled task.
+func testModeSpawnFunc(ctx context.Context, _ AgentConfig) (string, error) {
+	timer := time.NewTimer(5 * time.Minute)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case <-timer.C:
+		return `{"steps":[]}`, nil
+	}
 }
 
 // defaultSpawnFunc shells out via SpawnAgent from subprocess.go.
@@ -278,14 +371,24 @@ func defaultSpawnFunc(
 // dispatchTask attempts to acquire a concurrency slot and run the
 // task. If no slot is available the task stays pending for the
 // background poller to pick up later.
+//
+// Callers MUST call s.dispatchWG.Add(1) BEFORE `go s.dispatchTask(...)`
+// and pair it with the deferred Done here. Adding inside the goroutine
+// body would race shutdown's Wait — Wait could see 0 and let store.Close
+// run before the goroutine schedules in.
 func (s *Server) dispatchTask(task *Task) {
+	defer s.dispatchWG.Done()
+
 	// Atomically claim this task ID to prevent double-dispatch
 	// from concurrent poller ticks or handleCreateTask goroutines.
 	if _, loaded := s.runners.LoadOrStore(task.ID, (*TaskRunner)(nil)); loaded {
 		return // already dispatched
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// Derive from the server lifecycle context so daemon shutdown
+	// cancels in-flight tasks instead of letting them race with
+	// store close.
+	ctx, cancel := context.WithCancel(s.lifecycleCtx)
 
 	if !s.cm.TryAcquire(task.ID, cancel) {
 		// No slot — remove claim, cancel unused context, let poller retry.
@@ -308,7 +411,11 @@ func (s *Server) dispatchTask(task *Task) {
 // pollPendingTasks periodically checks for pending tasks that
 // have no active runner and dispatches them.
 func (s *Server) pollPendingTasks(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Second)
+	interval := s.cfg.PollInterval
+	if interval <= 0 {
+		interval = 5 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -320,9 +427,19 @@ func (s *Server) pollPendingTasks(ctx context.Context) {
 				continue
 			}
 			for _, task := range tasks {
+				// Re-check cancellation on each iteration: without this
+				// a cancel that lands after ListTasksByStatus returns
+				// would still dispatch every task in the batch, and
+				// those goroutines would run MarkStarted/RunTask on an
+				// already-cancelled context — turning pending tasks
+				// into spurious "planning"/"failed" rows on shutdown.
+				if ctx.Err() != nil {
+					return
+				}
 				if _, ok := s.runners.Load(task.ID); ok {
 					continue
 				}
+				s.dispatchWG.Add(1)
 				go s.dispatchTask(task)
 			}
 		}

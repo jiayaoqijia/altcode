@@ -31,7 +31,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	_ "modernc.org/sqlite"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 const (

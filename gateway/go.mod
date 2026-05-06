@@ -1,4 +1,4 @@
-module github.com/altcode-ai/altcode/gateway
+module github.com/jiayaoqijia/altcode/gateway
 
 go 1.25.5
 

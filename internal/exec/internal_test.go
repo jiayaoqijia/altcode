@@ -14,11 +14,11 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/permission"
 )
 
 // --- Unit tests for unexported helpers in exec.go --------------------

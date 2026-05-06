@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/auth"
-	"github.com/altcode-ai/altcode/internal/exec"
-	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/auth"
+	"github.com/jiayaoqijia/altcode/internal/exec"
+	"github.com/jiayaoqijia/altcode/internal/store"
 )
 
 func TestLoadConfigReadsUserConfigPath(t *testing.T) {

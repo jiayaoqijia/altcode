@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // SSE envelope types from signal-cli

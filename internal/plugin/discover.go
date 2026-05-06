@@ -7,9 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/command"
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 // Warnings holds non-fatal plugin discovery problems so callers can
@@ -142,6 +142,14 @@ func Load(pluginDir string) (*Plugin, error) {
 // and verifies the result stays inside base. Defends against malicious
 // plugin.json fields like "commands":"../../../etc" that would otherwise
 // escape the plugin directory.
+//
+// Both the lexical and post-symlink-resolution forms must stay inside
+// base — a plugin that ships `commands/foo.md -> /etc/passwd` would
+// pass a purely lexical check but leak content on read. This was a
+// real escape vector found by the codex round-M adversarial review.
+// If the target doesn't exist yet, the lexical check is sufficient
+// (nothing to resolve); a future file at that path can still be
+// validated at read time by re-running safeJoin.
 func safeJoin(base, sub string) (string, error) {
 	joined := filepath.Join(base, sub)
 	cleanBase := filepath.Clean(base)
@@ -149,6 +157,19 @@ func safeJoin(base, sub string) (string, error) {
 	rel, err := filepath.Rel(cleanBase, cleanJoined)
 	if err != nil || strings.HasPrefix(rel, "..") || rel == ".." {
 		return "", fmt.Errorf("path %q escapes plugin directory", sub)
+	}
+	// Post-symlink containment check. Only runs when both the target
+	// and base actually exist; a freshly-created plugin that hasn't
+	// populated `commands/*.md` yet still validates purely lexically.
+	resolvedBase, errB := filepath.EvalSymlinks(cleanBase)
+	resolvedJoined, errJ := filepath.EvalSymlinks(cleanJoined)
+	if errB == nil && errJ == nil {
+		if relR, err := filepath.Rel(resolvedBase, resolvedJoined); err == nil {
+			if strings.HasPrefix(relR, "..") || relR == ".." {
+				return "", fmt.Errorf(
+					"path %q escapes plugin directory via symlink", sub)
+			}
+		}
 	}
 	return cleanJoined, nil
 }
@@ -212,38 +233,55 @@ func loadAgents(pluginDir string, m *Manifest) ([]*agent.Agent, error) {
 }
 
 func loadHooks(pluginDir string, m *Manifest, out map[string][]config.HookMatcherConfig) {
-	hookFile := filepath.Join(pluginDir, "hooks", "hooks.json")
-	if m.Hooks != "" {
-		// Validate the manifest-supplied path stays inside the plugin
+	// Build the list of hook files to merge, honouring all three shapes
+	// `Manifest.UnmarshalJSON` accepts for `"hooks"`:
+	//   - string (one file path)       → m.Hooks
+	//   - []string (multiple files)    → m.HookFiles
+	//   - missing → default hooks/hooks.json
+	//
+	// Codex round-N caught that m.HookFiles was decoded correctly by
+	// UnmarshalJSON but silently ignored here, so plugins using the
+	// marketplace-style `"hooks":["./a.json","./b.json"]` shape
+	// loaded "successfully" with zero hooks registered.
+	var paths []string
+	switch {
+	case m.Hooks != "":
+		paths = append(paths, m.Hooks)
+	case len(m.HookFiles) > 0:
+		paths = append(paths, m.HookFiles...)
+	default:
+		// Default location; read-or-noop below handles missing.
+		paths = append(paths, filepath.Join("hooks", "hooks.json"))
+	}
+
+	for _, rel := range paths {
+		// Validate each manifest-supplied path stays inside the plugin
 		// directory. Without safeJoin, a malicious plugin could set
 		// "hooks": "../../../etc/passwd" and we'd happily read it.
-		joined, err := safeJoin(pluginDir, m.Hooks)
+		hookFile, err := safeJoin(pluginDir, rel)
 		if err != nil {
-			warn("plugin %s: hooks path: %v", pluginDir, err)
-			return
+			warn("plugin %s: hooks path %q: %v", pluginDir, rel, err)
+			continue
 		}
-		hookFile = joined
-	}
-
-	data, err := os.ReadFile(hookFile)
-	if err != nil {
-		// Missing hooks.json is normal — most plugins don't have one.
-		// Other read errors (permission, etc.) are worth a warning.
-		if !os.IsNotExist(err) {
-			warn("plugin %s: hooks: %v", pluginDir, err)
+		data, err := os.ReadFile(hookFile)
+		if err != nil {
+			// Missing hooks.json is normal — most plugins don't have one.
+			// Other read errors (permission, etc.) are worth a warning.
+			if !os.IsNotExist(err) {
+				warn("plugin %s: hooks %q: %v", pluginDir, rel, err)
+			}
+			continue
 		}
-		return
-	}
-
-	var wrapper struct {
-		Hooks map[string][]config.HookMatcherConfig `json:"hooks"`
-	}
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		warn("plugin %s: hooks json: %v", pluginDir, err)
-		return
-	}
-	for k, v := range wrapper.Hooks {
-		out[k] = append(out[k], v...)
+		var wrapper struct {
+			Hooks map[string][]config.HookMatcherConfig `json:"hooks"`
+		}
+		if err := json.Unmarshal(data, &wrapper); err != nil {
+			warn("plugin %s: hooks %q json: %v", pluginDir, rel, err)
+			continue
+		}
+		for k, v := range wrapper.Hooks {
+			out[k] = append(out[k], v...)
+		}
 	}
 }
 

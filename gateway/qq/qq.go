@@ -23,7 +23,7 @@ import (
 	"golang.org/x/oauth2"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 const (

@@ -13,14 +13,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/memory"
-	"github.com/altcode-ai/altcode/internal/permission"
-	"github.com/altcode-ai/altcode/internal/provider"
-	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/memory"
+	"github.com/jiayaoqijia/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/store"
 )
 
 // =============================================================================

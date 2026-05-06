@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 func TestNewEventAccumulator_NilWhenUnused(t *testing.T) {

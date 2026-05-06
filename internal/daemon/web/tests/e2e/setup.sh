@@ -51,7 +51,7 @@ echo "Starting daemon on port $PORT (data: $DATA_DIR)..."
   --github-client-id "e2e-test-client-id" \
   --github-client-secret "e2e-test-client-secret" \
   --signing-key "$SIGNING_KEY" \
-  --auth-token "e2e-bearer-token" \
+  --auth-token "e2e-token" \
   --allowed-users "e2e-test-user" \
   --admin-users "e2e-test-user" \
   --test-mode \

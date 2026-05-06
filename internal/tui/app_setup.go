@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/auth"
-	"github.com/altcode-ai/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/auth"
+	"github.com/jiayaoqijia/altcode/internal/engine"
 	"github.com/charmbracelet/lipgloss"
 )
 

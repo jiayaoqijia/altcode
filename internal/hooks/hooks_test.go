@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
 )
 
 func TestMatchTool_Exact(t *testing.T) {

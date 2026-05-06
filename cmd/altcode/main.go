@@ -12,22 +12,22 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/auth"
-	"github.com/altcode-ai/altcode/internal/oauth"
-	"github.com/altcode-ai/altcode/internal/command"
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/exec"
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/mcp"
-	"github.com/altcode-ai/altcode/internal/memory"
-	"github.com/altcode-ai/altcode/internal/orchestrator"
-	"github.com/altcode-ai/altcode/internal/permission"
-	"github.com/altcode-ai/altcode/internal/plugin"
-	"github.com/altcode-ai/altcode/internal/store"
-	"github.com/altcode-ai/altcode/internal/tui"
-	"github.com/altcode-ai/altcode/internal/workflow"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/auth"
+	"github.com/jiayaoqijia/altcode/internal/oauth"
+	"github.com/jiayaoqijia/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/exec"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/mcp"
+	"github.com/jiayaoqijia/altcode/internal/memory"
+	"github.com/jiayaoqijia/altcode/internal/orchestrator"
+	"github.com/jiayaoqijia/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/plugin"
+	"github.com/jiayaoqijia/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/tui"
+	"github.com/jiayaoqijia/altcode/internal/workflow"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )
@@ -79,6 +79,7 @@ type cliFlags struct {
 	printToolsList bool // --print-tools-list: registered tools
 	printSkills    bool // --print-skills: discovered skills
 	printMCP       bool // --print-mcp: configured MCP servers
+	printParams    bool // --print-params: resolved exec.Params JSON (for e2e introspection)
 	doctor         bool // --doctor: health check
 
 	// Phase 8: budgets
@@ -109,6 +110,13 @@ type cliFlags struct {
 }
 
 func main() {
+	// Production retry budget for transient provider errors. Tests
+	// inherit no value (effective 0 retries) so deterministic-error
+	// fixtures don't see backoff. Round-S autoresearch fix to wire
+	// internal/provider.RetryableStream into the engine.
+	if os.Getenv("ALTCODE_PROVIDER_RETRIES") == "" {
+		_ = os.Setenv("ALTCODE_PROVIDER_RETRIES", "5")
+	}
 	var modelFlag, configFlag, themeFlag string
 	var debugFlag bool
 	var flags cliFlags
@@ -258,6 +266,8 @@ func main() {
 		"List discovered skills and exit")
 	root.Flags().BoolVar(&flags.printMCP, "print-mcp", false,
 		"List configured MCP servers and exit")
+	root.Flags().BoolVar(&flags.printParams, "print-params", false,
+		"Print resolved exec.Params (flag → runtime) as JSON and exit")
 	root.Flags().BoolVar(&flags.doctor, "doctor", false,
 		"Run environment health check and exit")
 
@@ -691,6 +701,14 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		if flags.maxCost > 0 {
 			ep.EngineParams.CostBudget = engine.NewCostBudget(flags.maxCost)
 		}
+		// --print-params: inspection path that proves the flag-parse
+		// → exec.Params assembly → runtime-ready state round-trips.
+		// Codex iteration-3 non-blocker: "no test proves budget
+		// semantics from Cobra flag parse through internal/exec into
+		// engine". This flag gives tests a mechanical assertion target.
+		if flags.printParams {
+			return printResolvedParams(ep)
+		}
 		// Phase 5: read --prompt-file / --file / --system / --image
 		// before the engine is built. PrepareInputs mutates ep.Prompt,
 		// ep.EngineParams.Instructions, and ep.EngineParams.PendingInputParts.
@@ -1094,9 +1112,17 @@ func teamName(t *config.TeamConfig) string {
 }
 
 func truncateMain(s string, n int) string {
+	// Rune-safe AND budget-honouring: the returned string is at most
+	// n runes including the "..." tail. Iter-8 parity with
+	// truncateTask — previously the slice was [:n] + "..." which
+	// could emit n+3 runes past the caller's declared width.
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > n {
-		return s[:n] + "..."
+	runes := []rune(s)
+	if len(runes) > n {
+		if n < 3 {
+			return string(runes[:n])
+		}
+		return string(runes[:n-3]) + "..."
 	}
 	return s
 }

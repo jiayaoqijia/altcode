@@ -8,25 +8,26 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/compact"
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/cost"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/history"
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/memory"
-	"github.com/altcode-ai/altcode/internal/permission"
-	"github.com/altcode-ai/altcode/internal/provider"
-	"github.com/altcode-ai/altcode/internal/sandbox"
-	"github.com/altcode-ai/altcode/internal/store"
-	"github.com/altcode-ai/altcode/internal/sysctl"
-	"github.com/altcode-ai/altcode/internal/task"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/compact"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/cost"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/history"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/memory"
+	"github.com/jiayaoqijia/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/sandbox"
+	"github.com/jiayaoqijia/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/sysctl"
+	"github.com/jiayaoqijia/altcode/internal/task"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 const maxIterations = 50
@@ -839,15 +840,44 @@ func (e *Engine) callProvider(ctx context.Context) (<-chan provider.StreamEvent,
 	if temp, ok := providerDefaultTemperature(e.cfg.Model); ok {
 		req.Temperature = &temp
 	}
-	// NOTE: RetryableStream from internal/provider exists and is
-	// callable, but wrapping it here changes the semantics existing
-	// engine tests rely on (they expect a 500 to surface immediately
-	// as an error event, not be retried with backoff). Wire it in
-	// once the test fixture supports a "no retry" mode and the
-	// retry budget is tuned for both real providers and the test
-	// mock. Until then, the helper is available to provider
-	// implementations that want to opt in.
-	return e.provider.Stream(ctx, req)
+	// Wrap the stream with the provider-level RetryableStream helper.
+	// Only retries KNOWN-transient errors (5xx / 429 / Retry-After /
+	// connection refused), so test mocks that emit deterministic
+	// errors still surface them instantly. Retry budget is read from
+	// ALTCODE_PROVIDER_RETRIES (default 5 in production binary,
+	// unset in tests → 0 retries → identical to the prior direct
+	// Stream call). Round-S adversarial finding: codex's mature
+	// retry UX previously had no altcode counterpart.
+	cfg := provider.RetryConfig{
+		MaxRetries: providerRetryBudget(),
+		BaseDelay:  500 * time.Millisecond,
+		MaxDelay:   30 * time.Second,
+	}
+	if cfg.MaxRetries == 0 {
+		// Skip the wrap entirely so existing engine tests continue
+		// to see Stream() error semantics unchanged.
+		return e.provider.Stream(ctx, req)
+	}
+	return provider.RetryableStream(ctx, cfg,
+		func(ctx context.Context) (<-chan provider.StreamEvent, error) {
+			return e.provider.Stream(ctx, req)
+		})
+}
+
+// providerRetryBudget reads ALTCODE_PROVIDER_RETRIES; default 0.
+// The cmd/altcode entry point sets this to 5 in production so a
+// transient 429/5xx is recovered transparently. Tests leave it
+// unset for deterministic error propagation.
+func providerRetryBudget() int {
+	v := os.Getenv("ALTCODE_PROVIDER_RETRIES")
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 0 {
+		return 0
+	}
+	if n > 20 {
+		return 20 // safety cap
+	}
+	return n
 }
 
 // providerDefaultTemperature returns a model-specific temperature and
@@ -969,10 +999,21 @@ func (e *Engine) dispatchTools(
 		}
 	}
 
+	// Snapshot pre-images for write/edit tools so journalToolResult
+	// can record a real before/after diff. Without this the journal
+	// only saw the post-edit content and had to guess whether the
+	// tool created or modified the file (Codex round-H finding).
+	preImages := make([]filePreImage, len(toolCalls))
+	for i, tc := range toolCalls {
+		if tc.Name == "write" || tc.Name == "edit" {
+			preImages[i] = capturePreImage(extractPath(tc.Input))
+		}
+	}
+
 	results := tool.Dispatch(ctx, calls)
 
 	for i, r := range results {
-		e.journalToolResult(toolCalls[i], r)
+		e.journalToolResult(toolCalls[i], r, preImages[i])
 		// Propagate tool errors so the TUI can render the tree line
 		// with a red ✗ instead of a misleading green ✓. Some tools set
 		// r.Error explicitly; others leak 'Error: ...' through Output —
@@ -1390,7 +1431,31 @@ func (e *Engine) BudgetExceeded() bool {
 	return e.tokenBudget.Used() >= e.tokenBudget.Limit()
 }
 
-func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result) {
+// filePreImage captures a file's state before a tool ran. `existed`
+// disambiguates a truly empty file from a not-yet-created one so the
+// journal can label the action as "create" vs "modify" accurately.
+type filePreImage struct {
+	content string
+	existed bool
+}
+
+func capturePreImage(path string) filePreImage {
+	if path == "" {
+		return filePreImage{}
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		// os.IsNotExist covers both absent files and broken symlinks —
+		// treat anything unreadable as "did not exist" and let the
+		// journal record action="create". Other errors (permission,
+		// IO) would also yield err; those are rare and benign in the
+		// audit trail since the tool would typically fail too.
+		return filePreImage{}
+	}
+	return filePreImage{content: string(data), existed: true}
+}
+
+func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result, pre filePreImage) {
 	name := tc.Name
 	if name != "write" && name != "edit" {
 		return
@@ -1408,23 +1473,18 @@ func (e *Engine) journalToolResult(tc collectedToolCall, r tool.Result) {
 	if path == "" {
 		return
 	}
-	// Read the post-edit content so the journal stores the real file
-	// state instead of the tool's stdout ("wrote 42 bytes to foo.go").
-	// Pre-image is left empty here for backward compatibility — a
-	// proper before/after capture would have to read the file BEFORE
-	// dispatch and thread it through.
 	after := ""
 	if data, err := os.ReadFile(path); err == nil {
 		after = string(data)
 	}
-	// Action is based on whether the file existed before the tool ran.
-	// We can no longer detect that here (post-tool), so use the tool
-	// name as the best signal: write usually creates, edit modifies.
+	// Now that we snapshot the pre-image, action reflects reality:
+	// a write that overwrote an existing file is "modify", not the
+	// old "write=>create" guess that lost the pre-image entirely.
 	action := "modify"
-	if name == "write" {
+	if !pre.existed {
 		action = "create"
 	}
-	e.journal.Record(name, path, action, "", after)
+	e.journal.Record(name, path, action, pre.content, after)
 }
 
 func extractPath(input json.RawMessage) string {

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // Live e2e tests against 5 models via OpenRouter.

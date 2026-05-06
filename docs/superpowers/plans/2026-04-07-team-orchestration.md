@@ -778,7 +778,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 )
 
 func TestRunWorkflow_SinglePhase(t *testing.T) {
@@ -840,8 +840,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/agent"
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 )
 
 // RunParams configures a workflow execution.
@@ -1041,7 +1041,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
 	"github.com/charmbracelet/lipgloss"
 )
 

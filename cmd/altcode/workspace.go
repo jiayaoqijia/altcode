@@ -12,12 +12,12 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/lifecycle"
-	"github.com/altcode-ai/altcode/internal/scm"
-	"github.com/altcode-ai/altcode/internal/workspace"
-	"github.com/altcode-ai/altcode/internal/workspace/backends"
-	"github.com/altcode-ai/altcode/internal/wsctl"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/lifecycle"
+	"github.com/jiayaoqijia/altcode/internal/scm"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace/backends"
+	"github.com/jiayaoqijia/altcode/internal/wsctl"
 	"github.com/oklog/ulid/v2"
 	"github.com/spf13/cobra"
 )
@@ -809,9 +809,14 @@ func truncateID(id string) string {
 }
 
 func truncateTask(s string, n int) string {
+	// Rune-safe: task descriptions in the workspace list are shown
+	// in narrow columns; a byte-indexed slice would split multibyte
+	// characters (CJK / emoji) and emit invalid UTF-8 to the TUI.
+	// Iter-7 parity with inspect.go::truncate.
 	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > n {
-		return s[:n-3] + "..."
+	runes := []rune(s)
+	if len(runes) > n {
+		return string(runes[:n-3]) + "..."
 	}
 	return s
 }

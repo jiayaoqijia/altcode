@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // Event identifies when a hook fires.

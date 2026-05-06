@@ -1,6 +1,6 @@
 package commands
 
-import "github.com/altcode-ai/altcode/gateway/config"
+import "github.com/jiayaoqijia/altcode/gateway/config"
 
 // Runtime provides runtime dependencies to command handlers. It is constructed
 // per-request by the agent loop so that per-request state (like session scope)

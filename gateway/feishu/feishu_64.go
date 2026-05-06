@@ -24,7 +24,7 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Config holds Feishu bot configuration.

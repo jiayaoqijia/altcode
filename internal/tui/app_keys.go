@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

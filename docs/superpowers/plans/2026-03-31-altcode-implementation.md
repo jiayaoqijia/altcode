@@ -30,7 +30,7 @@ Minimal end-to-end: type a prompt, get a streamed response from Anthropic, see i
 
 ```bash
 cd /home/coder/github/altcode
-go mod init github.com/altcode-ai/altcode
+go mod init github.com/jiayaoqijia/altcode
 ```
 
 - [ ] **Step 2: Create event types**
@@ -196,7 +196,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 func TestAnthropicStream(t *testing.T) {
@@ -756,7 +756,7 @@ package store_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/store"
+	"github.com/jiayaoqijia/altcode/internal/store"
 )
 
 func TestSessionCRUD(t *testing.T) {
@@ -1155,7 +1155,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 func TestLoadDefaults(t *testing.T) {
@@ -1491,9 +1491,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 type Engine struct {
@@ -1662,8 +1662,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
@@ -1875,9 +1875,9 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/tui"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -1969,7 +1969,7 @@ import (
 	"sync/atomic"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 type mockTool struct {
@@ -2269,7 +2269,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 func setupTestDir(t *testing.T) string {
@@ -3153,7 +3153,7 @@ package permission_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/permission"
+	"github.com/jiayaoqijia/altcode/internal/permission"
 )
 
 func TestDefaultRulesAllowReads(t *testing.T) {
@@ -3562,8 +3562,8 @@ package compact_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/compact"
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/compact"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 func TestToolResultBudget(t *testing.T) {
@@ -3650,9 +3650,9 @@ Create `internal/context/system.go`:
 package context
 
 import (
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/provider"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 func BuildSystemPrompt(cfg *config.Config, tools *tool.Registry, instructions []config.Instruction, env EnvContext) []provider.SystemSection {
@@ -3747,7 +3747,7 @@ Create `internal/compact/budget.go`:
 ```go
 package compact
 
-import "github.com/altcode-ai/altcode/internal/provider"
+import "github.com/jiayaoqijia/altcode/internal/provider"
 
 type BudgetCompactor struct {
 	maxBytes int
@@ -3799,7 +3799,7 @@ Create `internal/compact/micro.go`:
 ```go
 package compact
 
-import "github.com/altcode-ai/altcode/internal/provider"
+import "github.com/jiayaoqijia/altcode/internal/provider"
 
 type Microcompactor struct {
 	keepTurns int
@@ -3886,7 +3886,7 @@ package tui_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tui"
+	"github.com/jiayaoqijia/altcode/internal/tui"
 )
 
 func TestRenderPlainText(t *testing.T) {
@@ -4467,10 +4467,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	appcontext "github.com/altcode-ai/altcode/internal/context"
-	"github.com/altcode-ai/altcode/internal/engine"
-	"github.com/altcode-ai/altcode/internal/tui"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	appcontext "github.com/jiayaoqijia/altcode/internal/context"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/tui"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/spf13/cobra"
 )

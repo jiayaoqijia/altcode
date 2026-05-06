@@ -20,8 +20,6 @@ func newTestServer(
 	if err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { store.Close() })
-
 	logger := slog.New(slog.NewTextHandler(
 		os.Stderr, &slog.HandlerOptions{Level: slog.LevelError},
 	))
@@ -30,13 +28,33 @@ func newTestServer(
 		SpawnFunc: spawn,
 		Logger:    logger,
 	})
-	return &Server{
-		cfg:    ServerConfig{MaxTasks: maxTasks},
-		store:  store,
-		logger: logger,
-		cm:     cm,
-		orch:   orch,
+	lifecycleCtx, lifecycleCancel := context.WithCancel(context.Background())
+	s := &Server{
+		cfg: ServerConfig{
+			MaxTasks: maxTasks,
+			// 25ms intervals keep tests responsive without waiting on
+			// production 5s/2s defaults. Karpathy autoresearch
+			// iter-1/iter-2 cut total daemon test time from ~34s.
+			PollInterval:    25 * time.Millisecond,
+			SSEPollInterval: 25 * time.Millisecond,
+		},
+		store:           store,
+		logger:          logger,
+		cm:              cm,
+		orch:            orch,
+		lifecycleCtx:    lifecycleCtx,
+		lifecycleCancel: lifecycleCancel,
 	}
+	// Cleanup mirrors prod shutdown order: cancel → wait for dispatch
+	// goroutines → close store. Without the Wait, late MarkStarted /
+	// MarkCompleted writes from a poller-spawned dispatch race the
+	// store close between tests.
+	t.Cleanup(func() {
+		lifecycleCancel()
+		s.dispatchWG.Wait()
+		store.Close()
+	})
+	return s
 }
 
 func TestDispatchTask_RunsToCompletion(t *testing.T) {
@@ -56,6 +74,7 @@ func TestDispatchTask_RunsToCompletion(t *testing.T) {
 	}
 
 	// Run synchronously (dispatchTask blocks until done).
+	s.dispatchWG.Add(1)
 	s.dispatchTask(task)
 
 	got, err := s.store.GetTask(task.ID)
@@ -103,6 +122,7 @@ func TestDispatchTask_StopCancels(t *testing.T) {
 	}
 
 	done := make(chan struct{})
+	s.dispatchWG.Add(1)
 	go func() {
 		s.dispatchTask(task)
 		close(done)
@@ -180,6 +200,7 @@ func TestDispatchTask_ConcurrencyLimit(t *testing.T) {
 	dones := make([]chan struct{}, len(tasks))
 	for i, task := range tasks {
 		dones[i] = make(chan struct{})
+		s.dispatchWG.Add(1)
 		go func(task *Task, done chan struct{}) {
 			s.dispatchTask(task)
 			close(done)
@@ -285,6 +306,7 @@ func TestDispatchTask_FailedTask(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	s.dispatchWG.Add(1)
 	s.dispatchTask(task)
 
 	got, _ := s.store.GetTask(task.ID)
@@ -329,8 +351,10 @@ func TestPollPendingTasks_SkipsActiveRunners(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	go s.pollPendingTasks(ctx)
 
-	// Wait long enough for at least one poll tick.
-	time.Sleep(7 * time.Second)
+	// Wait long enough for several poll ticks at the test's 25ms
+	// interval (production 5s default would need 7s here — that's
+	// what this test cost us before karpathy autoresearch iter-1).
+	time.Sleep(150 * time.Millisecond)
 	cancel()
 
 	// The poller should have skipped this task because a runner

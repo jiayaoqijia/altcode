@@ -1,6 +1,6 @@
 package compact
 
-import "github.com/altcode-ai/altcode/internal/provider"
+import "github.com/jiayaoqijia/altcode/internal/provider"
 
 // Microcompactor removes old tool results beyond a turn window.
 type Microcompactor struct {
@@ -34,15 +34,49 @@ func (c *Microcompactor) Apply(messages []provider.Message) []provider.Message {
 	}
 
 	var result []provider.Message
+	stub := "[previous tool result removed]"
 	for i, m := range messages {
-		if i < protectFrom && m.Role == "tool" {
+		if i >= protectFrom {
+			result = append(result, m)
+			continue
+		}
+		// OpenAI-style: a dedicated role="tool" message. Replace the
+		// Content text wholesale.
+		if m.Role == "tool" {
 			result = append(result, provider.Message{
 				Role:    "tool",
-				Content: "[previous tool result removed]",
+				Content: stub,
 			})
-		} else {
-			result = append(result, m)
+			continue
 		}
+		// Anthropic-style: role="user" with one or more `tool_result`
+		// parts. Only the tool_result parts are replaced so the
+		// surrounding user text (e.g. a real follow-up message that
+		// happens to include a tool_result) is preserved. Codex
+		// round-H caught that the previous role=="tool"-only check
+		// meant Anthropic sessions never benefited from fallback
+		// compaction and could overflow.
+		if hasToolResultParts(m) {
+			newParts := make([]provider.ContentPart, 0, len(m.Parts))
+			for _, p := range m.Parts {
+				if p.Type == "tool_result" {
+					newParts = append(newParts, provider.ContentPart{
+						Type:      "tool_result",
+						ToolUseID: p.ToolUseID,
+						Content:   stub,
+					})
+				} else {
+					newParts = append(newParts, p)
+				}
+			}
+			result = append(result, provider.Message{
+				Role:    m.Role,
+				Content: m.Content,
+				Parts:   newParts,
+			})
+			continue
+		}
+		result = append(result, m)
 	}
 
 	return result

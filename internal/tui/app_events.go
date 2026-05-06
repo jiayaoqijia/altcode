@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 	"github.com/charmbracelet/lipgloss"
 )
 
@@ -98,14 +98,21 @@ func extractToolTarget(tc *event.ToolCall) string {
 		if v, ok := input["command"]; ok {
 			json.Unmarshal(v, &s)
 		}
-		if len(s) > 30 {
-			s = s[:27] + "..."
-		}
+		// Rune-safe: byte-indexed truncation would split CJK / emoji
+		// codepoints. Iter-9 migrated this user-facing tool-target
+		// label to the shared truncateRunes helper.
+		s = truncateRunes(s, 30)
 	}
 	return s
 }
 
-// truncateLines returns the first n lines of text, adding "… +N lines" if truncated.
+// truncateLines returns the first n lines of text, adding "… +N lines"
+// if truncated. This is a LINE-count truncator operating on a `[]string`
+// slice — the `lines[:n]` index is a string-slice index, not a byte
+// index into a string, so it's safe for multibyte content by
+// construction. Distinct from truncateRunes (which truncates within a
+// single string by rune count) — both helpers coexist for different
+// scopes. CC iter-9 docs-clarity note.
 func truncateLines(text string, n int) string {
 	if text == "" {
 		return ""
@@ -181,9 +188,8 @@ func (a *App) renderThinkingIndicator() string {
 		if i := strings.IndexByte(preview, '\n'); i > 0 {
 			preview = preview[:i]
 		}
-		if len(preview) > 80 {
-			preview = preview[:77] + "..."
-		}
+		// Rune-safe thinking-preview truncation. Iter-9.
+		preview = truncateRunes(preview, 80)
 		line1 += lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
 			Render("  ⎿  "+preview) + "\n"
 	}

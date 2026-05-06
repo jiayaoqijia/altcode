@@ -96,7 +96,15 @@ func (t *editTool) Execute(_ context.Context, input json.RawMessage) (*Result, e
 		newContent = strings.Replace(content, params.OldString, params.NewString, 1)
 	}
 
-	if err := os.WriteFile(params.FilePath, []byte(newContent), 0o644); err != nil {
+	// Preserve the target file's existing mode bits so an edit of a
+	// 0600 credential file doesn't silently downgrade it to 0644.
+	// Fall back to 0644 for new files or if Stat fails. Found by
+	// altcode-TUI round-J adversarial review.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(params.FilePath); err == nil {
+		mode = info.Mode().Perm()
+	}
+	if err := os.WriteFile(params.FilePath, []byte(newContent), mode); err != nil {
 		// Previously this set Output but not Error, so a permission
 		// failure rendered with a green ✓ in the tool tree. Same
 		// class of bug we fixed for read/ls/glob — make Error explicit.

@@ -7,10 +7,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/jiayaoqijia/altcode/internal/envscrub"
 )
 
 // callResult carries either a successful result or an RPC error.
@@ -61,9 +64,14 @@ type jsonRPCError struct {
 // because we never spoke the handshake.
 func Connect(ctx context.Context, command string, args []string, env []string) (*Client, error) {
 	cmd := exec.CommandContext(ctx, command, args...)
-	if len(env) > 0 {
-		cmd.Env = env
-	}
+	// Build the child env: scrubbed parent env + caller-supplied entries.
+	// Caller-supplied env (cfg.Env from config.MCPServerConfig) is layered
+	// on AFTER the scrubbed parent so explicit overrides win — this is
+	// how a user opts a specific MCP server back into a particular
+	// secret (e.g. a GITHUB_TOKEN scoped to one server). Without this
+	// scrub, MCP stdio servers inherited the full parent env including
+	// OTEL_*, CLAUDE_*, ALTCODE_*, and any provider keys. Codex round-R.
+	cmd.Env = append(envscrub.Scrub(os.Environ()), env...)
 	// Configure a process group so Close can SIGKILL the entire tree
 	// (servers that fork helpers leave them orphaned otherwise).
 	configureMCPProcessGroup(cmd)

@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 // Live integration tests — only run when API keys are set.

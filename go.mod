@@ -1,4 +1,4 @@
-module github.com/altcode-ai/altcode
+module github.com/jiayaoqijia/altcode
 
 go 1.25.0
 

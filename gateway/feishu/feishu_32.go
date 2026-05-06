@@ -6,7 +6,7 @@ import (
 	"context"
 	"errors"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Channel is a stub for 32-bit architectures.

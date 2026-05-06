@@ -24,9 +24,18 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Track this stream in dispatchWG so Run()'s shutdown sequence
+	// waits for it to finish before closing the store. Without this
+	// an SSE client holding the connection open past http.Server.Shutdown's
+	// 10s grace window can land a ListEvents/GetTask call against an
+	// already-closed DB. Paired with the lifecycleCtx watch below.
+	s.dispatchWG.Add(1)
+	defer s.dispatchWG.Done()
+
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no") // bypass nginx buffering
 
 	// Replay from Last-Event-ID if provided.
 	var lastID int64
@@ -38,12 +47,24 @@ func (s *Server) handleSSE(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ticker := time.NewTicker(2 * time.Second)
+	// Use server-configurable interval so tests can poll at 25ms
+	// without changing production semantics (default still 2s).
+	// Karpathy autoresearch iter-2: SSE tests no longer pay a 2s
+	// wait per heartbeat assertion.
+	interval := s.cfg.SSEPollInterval
+	if interval <= 0 {
+		interval = 2 * time.Second
+	}
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 
 	for {
 		select {
 		case <-r.Context().Done():
+			return
+		case <-s.lifecycleCtx.Done():
+			// Daemon is shutting down — exit cooperatively so
+			// Run()'s dispatchWG.Wait unblocks before store.Close.
 			return
 		case <-ticker.C:
 			events, err := s.store.ListEvents(taskID, lastID)

@@ -130,15 +130,34 @@ func (s *SessionStore) TryUseJTI(jti string, exp time.Time) bool {
 }
 
 // StartGC launches a background goroutine that evicts expired sessions
-// at the given interval. It runs until the process exits.
-func (s *SessionStore) StartGC(interval time.Duration) {
+// at the given interval. The returned function stops the goroutine and
+// blocks until it exits, so the caller can own the lifecycle (needed
+// for tests and for daemon shutdown — running forever is a leak).
+func (s *SessionStore) StartGC(interval time.Duration) (stop func()) {
+	done := make(chan struct{})
+	exited := make(chan struct{})
 	go func() {
+		defer close(exited)
 		ticker := time.NewTicker(interval)
 		defer ticker.Stop()
-		for range ticker.C {
-			s.evictExpired()
+		for {
+			select {
+			case <-done:
+				return
+			case <-ticker.C:
+				s.evictExpired()
+			}
 		}
 	}()
+	return func() {
+		select {
+		case <-done:
+			// already stopped
+		default:
+			close(done)
+		}
+		<-exited
+	}
 }
 
 // evictExpired removes all sessions whose TTL has elapsed and

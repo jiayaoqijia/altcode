@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/task"
+	"github.com/jiayaoqijia/altcode/internal/task"
 )
 
 func TestCreateTask(t *testing.T) {

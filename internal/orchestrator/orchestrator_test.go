@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/orchestrator"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/orchestrator"
 )
 
 func sseText(text string) string {

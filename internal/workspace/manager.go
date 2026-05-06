@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/agent"
+	"github.com/jiayaoqijia/altcode/internal/agent"
 )
 
 // maxWorkerOutputBytes caps each worker's output in the manager prompt.

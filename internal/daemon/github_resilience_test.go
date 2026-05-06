@@ -6,11 +6,24 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"os"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 )
+
+// TestMain shrinks RetryWithBackoff's base unit from 1s → 1ms for
+// the entire daemon test binary. The retry schedule is still
+// exponential and still cancellable, just on a 1000× tighter clock.
+// Karpathy autoresearch iter-3: kills ~6-9s of fixed delay across
+// the three TestRetryWithBackoff_* tests without losing semantics.
+func TestMain(m *testing.M) {
+	prev := SetRetryBackoffBase(time.Millisecond)
+	code := m.Run()
+	SetRetryBackoffBase(prev)
+	os.Exit(code)
+}
 
 func TestRateLimiter_Update(t *testing.T) {
 	rl := &RateLimiter{}

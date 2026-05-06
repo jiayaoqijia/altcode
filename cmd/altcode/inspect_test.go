@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 // captureStdout temporarily replaces os.Stdout with a pipe and
@@ -217,4 +217,70 @@ func TestPrintConfig_ValidJSONEnvelope(t *testing.T) {
 	if err := json.Unmarshal([]byte(out), &parsed); err != nil {
 		t.Errorf("output is not valid JSON: %v\nout: %q", err, out)
 	}
+}
+
+func TestTruncate_RuneSafeBoundary(t *testing.T) {
+	// CJK and emoji characters are multibyte — byte-indexed truncation
+	// can split a codepoint and produce invalid UTF-8. This test
+	// guards the iter-6 rune-aware fix.
+	cases := []struct {
+		name     string
+		in       string
+		maxRunes int
+		wantOK   func(out string) bool
+	}{
+		{
+			name:     "short ascii pass-through",
+			in:       "hello",
+			maxRunes: 10,
+			wantOK:   func(o string) bool { return o == "hello" },
+		},
+		{
+			name:     "long ascii truncated",
+			in:       strings.Repeat("a", 250),
+			maxRunes: 200,
+			wantOK: func(o string) bool {
+				return strings.Contains(o, "...[50 more runes]")
+			},
+		},
+		{
+			name:     "CJK boundary",
+			in:       strings.Repeat("你好", 150), // 300 runes, 900 bytes
+			maxRunes: 200,
+			wantOK: func(o string) bool {
+				// Must be valid UTF-8 and flag the elision.
+				return strings.Contains(o, "...[100 more runes]") &&
+					utf8ValidStringCompat(o)
+			},
+		},
+		{
+			name:     "emoji boundary",
+			in:       strings.Repeat("🚀", 250),
+			maxRunes: 200,
+			wantOK: func(o string) bool {
+				return strings.Contains(o, "...[50 more runes]") &&
+					utf8ValidStringCompat(o)
+			},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := truncate(tc.in, tc.maxRunes)
+			if !tc.wantOK(got) {
+				t.Errorf("truncate(%d runes, maxRunes=%d) → %q",
+					len([]rune(tc.in)), tc.maxRunes, got)
+			}
+		})
+	}
+}
+
+// utf8ValidStringCompat avoids pulling in the unicode/utf8 import for
+// a single call site.
+func utf8ValidStringCompat(s string) bool {
+	for _, r := range s {
+		if r == 0xFFFD {
+			return false
+		}
+	}
+	return true
 }

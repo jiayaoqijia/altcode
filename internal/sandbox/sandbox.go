@@ -42,10 +42,86 @@ func (s *Sandbox) Check(command string) error {
 	if s.policy == PolicyNone {
 		return nil
 	}
+	// Any policy stricter than "none" must block commands that embed
+	// shell operators capable of subverting token-based allow/block
+	// matching — redirections, process substitutions, command
+	// substitutions, or piped shell invocations. `echo owned > file`
+	// would otherwise pass an allow-list containing just "echo",
+	// because matchPattern never sees what the redirection writes to.
+	// Found by Codex round-F adversarial review.
+	if reason := unsafeShellSyntax(command); reason != "" {
+		return fmt.Errorf(
+			"command blocked by sandbox policy: %s: %q",
+			reason, truncateCmd(command),
+		)
+	}
 	if s.policy == PolicyStrict {
 		return s.checkStrict(command)
 	}
 	return s.checkBlocked(command)
+}
+
+// unsafeShellSyntax returns a non-empty reason if the command contains
+// shell syntax that cannot be safely analysed by token-based
+// allow/block matching. Quoted occurrences are part of an argument to
+// one command and are ignored. Covered: redirections, process
+// substitution, command substitution, AND top-level command chaining
+// (`;`, `&&`, `||`, `|`, `&`, newline). Codex round-G caught that
+// chaining defeated even a strict allowlist: `echo hi; touch /pwn`
+// passed because "echo" appeared as a token — but the second command
+// in the chain was never vetted.
+func unsafeShellSyntax(command string) string {
+	var inSingle, inDouble bool
+	for i := 0; i < len(command); i++ {
+		c := command[i]
+		// Honor backslash escapes outside single quotes: bash treats
+		// `\"` as a LITERAL `"` (not as opening a quoted region), and
+		// `\;` / `\|` / `\>` pass the operator through as argument
+		// text. Without this, an attacker could hide a chained
+		// separator behind a pair of escaped quotes:
+		//   echo \" ; touch /pwn
+		// Before this fix we toggled inDouble on `\"` and then read
+		// the `;` as "still inside quotes" — letting the chain pass.
+		// Found by Codex round-I adversarial review.
+		if c == '\\' && !inSingle {
+			// Skip the escaped char — it's not a syntax-level
+			// character regardless of what it is.
+			i++
+			continue
+		}
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		switch c {
+		case '>':
+			return "output redirection is not allowed"
+		case '<':
+			return "input redirection is not allowed"
+		case '`':
+			return "backtick command substitution is not allowed"
+		case ';', '\n':
+			return "command chaining is not allowed"
+		case '|':
+			// | (pipe) and || (or-list) both chain; treat the same.
+			return "pipes and or-lists are not allowed"
+		case '&':
+			// & (background) and && (and-list) both chain.
+			return "background and and-lists are not allowed"
+		case '$':
+			if i+1 < len(command) && command[i+1] == '(' {
+				return "command substitution $(...) is not allowed"
+			}
+		}
+	}
+	return ""
 }
 
 // Wrap is deprecated and no-op. The original intent was to prepend

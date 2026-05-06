@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/x/exp/teatest"
 )
@@ -29,9 +29,18 @@ func TestTUIView_StartupRender(t *testing.T) {
 
 	out := readOutput(t, tm)
 
-	// Verify key UI elements render
+	// Verify key UI elements render. Iter-8 rune-safe diagnostic:
+	// if a future startup banner contains multibyte characters that
+	// straddle byte 200, byte-index slicing would emit invalid UTF-8
+	// into the t.Errorf message (or panic on a test runner that
+	// treats invalid UTF-8 strictly). Rune-slice prevents that.
 	if !strings.Contains(out, "altcode") {
-		t.Error("missing 'altcode' header in startup view")
+		head := out
+		if rs := []rune(head); len(rs) > 200 {
+			head = string(rs[:200])
+		}
+		t.Errorf("missing 'altcode' header in startup view (len=%d, head=%q)",
+			len(out), head)
 	}
 }
 
@@ -1429,7 +1438,7 @@ func TestCCStyle_EditDiffOutput(t *testing.T) {
 func TestCCStyle_BashCommandOutput(t *testing.T) {
 	tree := newToolTree()
 	tree.Start("", "Bash", "go test ./... -race")
-	bashOutput := "ok  github.com/altcode-ai/altcode/internal/tui  2.902s\nok  github.com/altcode-ai/altcode/cmd/altcode  1.2s"
+	bashOutput := "ok  github.com/jiayaoqijia/altcode/internal/tui  2.902s\nok  github.com/jiayaoqijia/altcode/cmd/altcode  1.2s"
 	tree.DoneWithOutput("","go test", 2500*time.Millisecond, bashOutput)
 
 	output := tree.Render(DefaultTheme, 120)

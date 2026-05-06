@@ -4,9 +4,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/sysctl"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/sysctl"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 func TestDetectEnv(t *testing.T) {

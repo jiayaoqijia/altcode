@@ -36,7 +36,13 @@ func (d *SSEDecoder) Next() (eventType string, data string, err error) {
 	var evtType string
 	var evtData strings.Builder
 	for d.scanner.Scan() {
-		line := d.scanner.Text()
+		// Trim a trailing \r so CRLF-encoded SSE streams (the
+		// spec-compliant line ending — used by most real servers) parse
+		// correctly. Without this, a separator line arrives as "\r"
+		// instead of "" and events get buffered until EOF; data: lines
+		// keep a trailing \r that corrupts the downstream JSON parse.
+		// Found by Codex round-J adversarial review.
+		line := strings.TrimSuffix(d.scanner.Text(), "\r")
 		if line == "" {
 			if evtType != "" || evtData.Len() > 0 {
 				return evtType, strings.TrimRight(evtData.String(), "\n"), nil

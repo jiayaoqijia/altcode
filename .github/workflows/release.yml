@@ -8,11 +8,14 @@ permissions:
   contents: write
 
 jobs:
+  # Pre-release sanity only — CI already ran the full race+vet suite
+  # on the PR before merge, so the release job just confirms the
+  # tagged SHA still builds and the 4 core packages still pass smoke
+  # tests. ubuntu-only: multi-OS build sanity is covered by the
+  # `build` matrix below, and running the test suite on macOS/Windows
+  # at tag time was pure duplication of merged CI.
   test:
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,15 +24,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: '1.23'
+          cache: true
 
-      - name: Build
-        run: go build -mod=mod ./...
+      - name: Build + Vet
+        run: |
+          go build -mod=mod ./cmd/altcode/...
+          go vet -mod=mod ./cmd/altcode/... ./internal/...
 
-      - name: Test
-        run: go test -mod=mod ./... -race -count=1 -timeout=180s -parallel=8
-
-      - name: Vet
-        run: go vet -mod=mod ./...
+      - name: Smoke test
+        run: go test -mod=mod -short -count=1 -timeout=60s ./internal/engine/... ./internal/daemon/... ./internal/tui/... ./internal/exec/...
 
   build:
     needs: test

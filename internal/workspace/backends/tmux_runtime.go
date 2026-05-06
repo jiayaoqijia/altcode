@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/workspace"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 // validEnvKey matches POSIX-compliant env var names: [A-Za-z_][A-Za-z0-9_]*

@@ -292,7 +292,16 @@ func applyFilePatch(pf patchFile) error {
 	}
 
 	result := joinLines(lines)
-	return os.WriteFile(pf.Path, []byte(result), 0o644)
+	// Preserve the existing file's mode bits so patching a 0600
+	// credential file doesn't silently downgrade it to 0644, and an
+	// executable script doesn't silently lose its +x bits. Fall
+	// back to 0644 only for genuinely new files. Codex round-K
+	// adversarial review — parity with the edit.go fix.
+	mode := os.FileMode(0o644)
+	if info, err := os.Stat(pf.Path); err == nil {
+		mode = info.Mode().Perm()
+	}
+	return os.WriteFile(pf.Path, []byte(result), mode)
 }
 
 func splitLines(s string) []string {
@@ -313,23 +322,44 @@ func applyHunk(lines []string, h hunk) ([]string, error) {
 		start = 0
 	}
 
-	// Build the new content for this region
+	// Build the new content for this region, verifying context and
+	// deleted lines actually match what's in the file at each step.
+	// Previously this fallback applier blindly trusted the hunk's
+	// line numbers — a stale or partially-mismatched diff got
+	// reported as success while silently corrupting whatever lines
+	// happened to be at those offsets. Codex round-J caught this as
+	// a silent-data-corruption bug in the non-`patch` fallback path.
 	var newLines []string
 	pos := start
 
-	for _, dl := range h.Lines {
+	for i, dl := range h.Lines {
 		switch dl.Op {
 		case ' ':
-			// Context line — keep it, advance position
-			if pos < len(lines) {
-				newLines = append(newLines, lines[pos])
+			if pos >= len(lines) {
+				return nil, fmt.Errorf(
+					"hunk line %d: context line past EOF (pos=%d len=%d)",
+					i, pos, len(lines))
 			}
+			if lines[pos] != dl.Text {
+				return nil, fmt.Errorf(
+					"hunk line %d: context mismatch at line %d:\n  want: %q\n  got:  %q",
+					i, pos+1, dl.Text, lines[pos])
+			}
+			newLines = append(newLines, lines[pos])
 			pos++
 		case '-':
-			// Remove line — skip it
+			if pos >= len(lines) {
+				return nil, fmt.Errorf(
+					"hunk line %d: delete line past EOF (pos=%d len=%d)",
+					i, pos, len(lines))
+			}
+			if lines[pos] != dl.Text {
+				return nil, fmt.Errorf(
+					"hunk line %d: delete mismatch at line %d:\n  want: %q\n  got:  %q",
+					i, pos+1, dl.Text, lines[pos])
+			}
 			pos++
 		case '+':
-			// Add line
 			newLines = append(newLines, dl.Text)
 		}
 	}

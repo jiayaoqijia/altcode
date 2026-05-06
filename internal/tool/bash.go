@@ -6,11 +6,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/sandbox"
+	"github.com/jiayaoqijia/altcode/internal/envscrub"
+	"github.com/jiayaoqijia/altcode/internal/sandbox"
 )
 
 const maxOutputBytes = 512 * 1024 // 512KB
@@ -85,6 +87,12 @@ func (t *bashTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 	defer cancel()
 
 	cmd := exec.CommandContext(ctx, "bash", "-c", params.Command)
+	// Strip credential-bearing and CLI-internal envs (OTEL_*,
+	// CLAUDE_*, ALTCODE_*, *_API_KEY, etc.) before handing the env
+	// to a tool-invoked shell. Codex round-R adversarial finding —
+	// parity with claude-code 2.1.128's OTEL fix and altcode's own
+	// hooks subsystem (which already used scrubSecrets).
+	cmd.Env = envscrub.Scrub(os.Environ())
 	// Run the command in its own process group so background children
 	// (e.g. 'sleep 1000 &') get killed along with bash on timeout.
 	// Without Setpgid the timeout fires, exec.CommandContext kills only

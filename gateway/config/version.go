@@ -8,10 +8,10 @@ import (
 // Build-time variables injected via ldflags during build process.
 // These are set by the Makefile or .goreleaser.yaml using the -X flag:
 //
-//	-X github.com/altcode-ai/altcode/gateway/config.Version=<version>
-//	-X github.com/altcode-ai/altcode/gateway/config.GitCommit=<commit>
-//	-X github.com/altcode-ai/altcode/gateway/config.BuildTime=<timestamp>
-//	-X github.com/altcode-ai/altcode/gateway/config.GoVersion=<go-version>
+//	-X github.com/jiayaoqijia/altcode/gateway/config.Version=<version>
+//	-X github.com/jiayaoqijia/altcode/gateway/config.GitCommit=<commit>
+//	-X github.com/jiayaoqijia/altcode/gateway/config.BuildTime=<timestamp>
+//	-X github.com/jiayaoqijia/altcode/gateway/config.GoVersion=<go-version>
 var (
 	Version   = "dev" // Default value when not built with ldflags
 	GitCommit string  // Git commit SHA (short)

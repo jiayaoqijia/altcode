@@ -14,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/exec"
+	"github.com/jiayaoqijia/altcode/internal/exec"
 )
 
 func TestValidate_Matrix(t *testing.T) {

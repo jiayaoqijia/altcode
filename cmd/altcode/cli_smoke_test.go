@@ -209,3 +209,50 @@ func TestCLI_PrintConfigRedactsSecrets(t *testing.T) {
 		t.Error("possible unredacted API key in --print-config output")
 	}
 }
+
+// TestCLI_PrintParamsShowsMaxTurns is the end-to-end test Codex
+// asked for in iteration-3: prove that a CLI flag (`--max-turns 7`)
+// flows through Cobra → exec.Params → engine-ready state. Without
+// this, budget semantics can regress silently at any boundary.
+func TestCLI_PrintParamsShowsMaxTurns(t *testing.T) {
+	bin := buildCLI(t)
+	stdout, stderr, code := runCLI(t, bin,
+		"--max-turns", "7", "--max-cost", "1.25",
+		"--print-params", "hello")
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0; stderr=%q stdout=%q", code, stderr, stdout)
+	}
+	// JSON must contain the flag values at both the Params level and
+	// after threading into EngineParams.
+	for _, want := range []string{
+		`"max_turns": 7`,
+		`"max_cost": 1.25`,
+		`"engine_max_turns": 7`,
+		`"engine_cost_budget_wired": true`,
+		`"prompt": "hello"`,
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q\ngot: %s", want, stdout)
+		}
+	}
+}
+
+// TestCLI_PrintParamsDefaults verifies the zero-flags baseline so
+// regressions that accidentally wire a budget (e.g. hardcoding
+// MaxTurns=50 somewhere) are caught.
+func TestCLI_PrintParamsDefaults(t *testing.T) {
+	bin := buildCLI(t)
+	stdout, stderr, code := runCLI(t, bin, "--print-params", "hi")
+	if code != 0 {
+		t.Fatalf("exit=%d, want 0; stderr=%q", code, stderr)
+	}
+	for _, want := range []string{
+		`"max_turns": 0`,
+		`"max_cost": 0`,
+		`"engine_cost_budget_wired": false`,
+	} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout missing %q\ngot: %s", want, stdout)
+		}
+	}
+}

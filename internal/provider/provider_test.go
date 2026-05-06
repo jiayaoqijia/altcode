@@ -5,7 +5,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 func TestAnthropicStream(t *testing.T) {

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 )
 
 func TestIntegration_TwoPhaseWorkflow(t *testing.T) {

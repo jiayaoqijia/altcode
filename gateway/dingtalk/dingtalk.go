@@ -16,7 +16,7 @@ import (
 	"github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Config holds DingTalk bot configuration.

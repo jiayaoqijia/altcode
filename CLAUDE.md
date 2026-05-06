@@ -237,20 +237,25 @@ func TestTUIView_WorkspaceViewRender(t *testing.T) {
 
 See `internal/tui/tui_view_test.go` for the reference test suite (8 tests).
 
-#### Level 2: tmux E2E Testing (REQUIRED for agent/workspace changes)
+#### Level 2: tmux E2E Testing (AUTOMATED + REQUIRED for agent/workspace changes)
 
 tmux creates a real PTY so Bubbletea renders properly. This catches issues that
 view tests miss: actual agent spawning, output streaming, key binding conflicts.
 
-```bash
-# Build the binary
-GOFLAGS=-mod=mod go build -o /tmp/altcode-test ./cmd/altcode/
+**Automated suite:** `internal/tui/tmux_pty_test.go` runs the core probes
+(startup, /help, /doctor, real PageUp/PageDown) in CI on every push — builds
+altcode in `t.TempDir`, starts a detached tmux session, polls for the TUI
+header, and asserts content. Skipped when `tmux` is absent or
+`ALTCODE_TMUX_TEST=0` is set.
 
-# Start in tmux with controlled size
+```bash
+# Run the automated tmux suite locally:
+GOFLAGS=-mod=mod go test ./internal/tui/ -race -count=1 -run TestTmuxPTY -v
+
+# Manual ad-hoc probes for scenarios the automated suite doesn't cover:
+GOFLAGS=-mod=mod go build -o /tmp/altcode-test ./cmd/altcode/
 tmux new-session -d -s altcode-tui -x 120 -y 30 "/tmp/altcode-test"
 sleep 3
-
-# Send commands and capture output
 tmux send-keys -t altcode-tui "/help" Enter
 sleep 2
 tmux capture-pane -t altcode-tui -p  # verify help renders
@@ -297,7 +302,8 @@ GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1 -run TestTUIView -v
 # 2. Full TUI test suite passes
 GOFLAGS=-mod=mod go test ./internal/tui/... -race -count=1
 
-# 3. tmux E2E (manual — run before every PR)
+# 3. tmux E2E (automated — TestTmuxPTY runs on every `go test ./internal/tui/`;
+#    the block below is for ad-hoc manual probes beyond the 4 automated subtests)
 tmux new-session -d -s test -x 120 -y 30 "/tmp/altcode-test"
 tmux send-keys -t test "/workspace test task" Enter
 sleep 10

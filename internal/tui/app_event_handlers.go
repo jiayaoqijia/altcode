@@ -6,7 +6,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/event"
 	tea "github.com/charmbracelet/bubbletea"
 )
 

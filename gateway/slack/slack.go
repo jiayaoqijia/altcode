@@ -1,4 +1,4 @@
-// Adapted from github.com/altcode-ai/altcode/gateway/slack/slack.go
+// Adapted from github.com/jiayaoqijia/altcode/gateway/slack/slack.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 //
 // Stripped ottie-specific dependencies (bus, identity, media, config).
@@ -17,7 +17,7 @@ import (
 	"github.com/slack-go/slack/socketmode"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 // Config holds Slack bot configuration.

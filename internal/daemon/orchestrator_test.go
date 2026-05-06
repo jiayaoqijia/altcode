@@ -277,14 +277,18 @@ func TestOrchestrator_MalformedPlanJSON(t *testing.T) {
 		t.Errorf("status = %q, want %q", got.Status, "merged")
 	}
 
-	// Fallback plan uses task description as the single step prompt.
+	// Fallback plan uses task description as the single step prompt;
+	// iteration-2 sanitisation now wraps it in a PLAN_STEP boundary.
 	if len(implCalls) != 1 {
 		t.Fatalf("implementer calls = %d, want 1 (fallback single step)",
 			len(implCalls))
 	}
-	if implCalls[0] != task.TaskDescription {
-		t.Errorf("fallback prompt = %q, want %q",
+	if !strings.Contains(implCalls[0], task.TaskDescription) {
+		t.Errorf("fallback prompt = %q, want to contain %q",
 			implCalls[0], task.TaskDescription)
+	}
+	if !strings.Contains(implCalls[0], "BEGIN PLAN_STEP") {
+		t.Errorf("fallback prompt not wrapped: %q", implCalls[0])
 	}
 }
 

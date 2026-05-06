@@ -64,3 +64,9 @@
 [submodule "vendor/openhands-pr-dashboard"]
 	path = vendor/openhands-pr-dashboard
 	url = https://github.com/OpenHands/community-pr-dashboard
+[submodule "vendor/symphony"]
+	path = vendor/symphony
+	url = https://github.com/openai/symphony
+[submodule "vendor/karpathy-autoresearch"]
+	path = vendor/karpathy-autoresearch
+	url = https://github.com/karpathy/autoresearch

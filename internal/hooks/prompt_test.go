@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/hooks"
-	"github.com/altcode-ai/altcode/internal/provider"
+	"github.com/jiayaoqijia/altcode/internal/hooks"
+	"github.com/jiayaoqijia/altcode/internal/provider"
 )
 
 func sseResponse(text string) string {

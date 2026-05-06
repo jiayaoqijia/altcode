@@ -7,8 +7,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/altcode-ai/altcode/internal/config"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // ToolProvider is the common interface for MCP tool sources (stdio or SSE).

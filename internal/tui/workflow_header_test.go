@@ -5,7 +5,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
 )
 
 // TestWorkflowHeader_RenderEmpty returns "" when no phases set.

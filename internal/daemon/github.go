@@ -58,6 +58,10 @@ func (g *GitHubClient) repo() string {
 }
 
 // CreateDraftPR opens a draft PR and returns the number and URL.
+// gh pr create does NOT support --json (that's a common mistake found
+// by the adversarial review loop); instead it prints the PR URL on
+// stdout. We parse the URL, then extract the number from its trailing
+// /pull/<n> segment.
 func (g *GitHubClient) CreateDraftPR(
 	ctx context.Context, branch, title, body string,
 ) (prNumber int, prURL string, err error) {
@@ -67,23 +71,42 @@ func (g *GitHubClient) CreateDraftPR(
 		"--title", title,
 		"--body", body,
 		"--repo", g.repo(),
-		"--json", "number,url",
 	)
 	if err != nil {
 		return 0, "", fmt.Errorf(
 			"gh pr create: %w: %s", err, string(out),
 		)
 	}
-	var result struct {
-		Number int    `json:"number"`
-		URL    string `json:"url"`
+	prURL = strings.TrimSpace(string(out))
+	// Extract the last /pull/<n> segment. gh prints other log lines
+	// on stdout occasionally ("Creating draft pull request for ..."),
+	// so scan line-by-line for the canonical URL.
+	for _, line := range strings.Split(prURL, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.Contains(line, "/pull/") {
+			prURL = line
+			break
+		}
 	}
-	if err := json.Unmarshal(out, &result); err != nil {
+	idx := strings.LastIndex(prURL, "/pull/")
+	if idx < 0 {
 		return 0, "", fmt.Errorf(
-			"parse pr create output: %w: %s", err, string(out),
-		)
+			"gh pr create: cannot locate /pull/ in output: %q", prURL)
 	}
-	return result.Number, result.URL, nil
+	numStr := prURL[idx+len("/pull/"):]
+	// Strip any trailing fragment or query.
+	for i, r := range numStr {
+		if r < '0' || r > '9' {
+			numStr = numStr[:i]
+			break
+		}
+	}
+	n, convErr := strconv.Atoi(numStr)
+	if convErr != nil {
+		return 0, "", fmt.Errorf(
+			"gh pr create: parse number from %q: %w", prURL, convErr)
+	}
+	return n, prURL, nil
 }
 
 // UpdatePRBody replaces the PR description.
@@ -105,19 +128,23 @@ func (g *GitHubClient) UpdatePRBody(
 
 // ciCheck is the JSON shape returned by gh pr checks.
 type ciCheck struct {
-	Name       string `json:"name"`
-	State      string `json:"state"`
-	Conclusion string `json:"conclusion"`
+	Name  string `json:"name"`
+	State string `json:"state"`
 }
 
 // GetCIStatus returns "pass", "fail", or "pending".
+// gh pr checks --json does NOT expose a "conclusion" field (that was
+// a stale field name — gh 2.88+ returns "state" only, whose values
+// encode both progress and outcome: SUCCESS, FAILURE, PENDING,
+// IN_PROGRESS, QUEUED, SKIPPED, etc). Found by the adversarial review
+// loop — real callers never saw pass/fail before this fix.
 func (g *GitHubClient) GetCIStatus(
 	ctx context.Context, prNumber int,
 ) (string, error) {
 	out, err := g.run(ctx, g.workDir, "gh", "pr", "checks",
 		strconv.Itoa(prNumber),
 		"--repo", g.repo(),
-		"--json", "name,state,conclusion",
+		"--json", "name,state",
 	)
 	if err != nil {
 		return "", fmt.Errorf(
@@ -140,7 +167,9 @@ func (g *GitHubClient) GetCIStatus(
 		}
 	}
 	for _, c := range checks {
-		if c.Conclusion == "FAILURE" || c.Conclusion == "failure" {
+		if c.State == "FAILURE" || c.State == "failure" ||
+			c.State == "CANCELLED" || c.State == "TIMED_OUT" ||
+			c.State == "ACTION_REQUIRED" || c.State == "STARTUP_FAILURE" {
 			return "fail", nil
 		}
 	}

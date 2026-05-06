@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 	"sync/atomic"
 	"time"
 )
@@ -40,14 +41,17 @@ func RecoverOrphanedTasks(store *Store) (int, error) {
 
 // TaskRunner manages a single task's execution lifecycle.
 type TaskRunner struct {
-	task     *Task
-	store    *Store
-	orch     *Orchestrator
+	task    *Task
+	store   *Store
+	orch    *Orchestrator
+	logger  *slog.Logger
+	timeout time.Duration
+	stopped atomic.Bool
+	steerCh chan string // buffered channel for steer messages
+	// cancelMu guards writes to cancel in Run and reads in Stop.
+	// Without this mutex Run races Stop under the race detector.
+	cancelMu sync.Mutex
 	cancel   context.CancelFunc
-	logger   *slog.Logger
-	timeout  time.Duration
-	stopped  atomic.Bool
-	steerCh  chan string // buffered channel for steer messages
 }
 
 // NewTaskRunner creates a runner for a task.
@@ -80,8 +84,36 @@ func (r *TaskRunner) SetTimeout(d time.Duration) {
 
 // Run executes the task with timeout and panic recovery.
 func (r *TaskRunner) Run(ctx context.Context) {
-	ctx, r.cancel = context.WithTimeout(ctx, r.timeout)
-	defer r.cancel()
+	ctx, cancel := context.WithTimeout(ctx, r.timeout)
+	r.cancelMu.Lock()
+	r.cancel = cancel
+	r.cancelMu.Unlock()
+	defer cancel()
+
+	// Stop() may have been called before we installed `cancel`.
+	// Honour that request immediately so we don't run side-effects
+	// for a task the caller has already cancelled.
+	if r.stopped.Load() {
+		if err := r.store.MarkCancelled(r.task.ID); err != nil {
+			r.logger.Warn("mark cancelled", "task", r.task.ID, "err", err)
+		}
+		if err := r.store.AppendEvent(r.task.ID, "cancelled_by_user", ""); err != nil {
+			r.logger.Warn("append cancel event", "task", r.task.ID, "err", err)
+		}
+		return
+	}
+
+	// Re-read status from the store. A POST /stop that lands during the
+	// brief window when only the nil placeholder was in s.runners cannot
+	// flip our `stopped` flag (the runner did not exist yet) — instead
+	// it writes status="cancelled" via handleStopTask's queued-task path.
+	// Likewise RecoverOrphanedTasks (on fast restart) may already have
+	// marked the task "failed". Either way we must not transition the
+	// row back through MarkStarted and run side-effects on it.
+	if current, err := r.store.GetTask(r.task.ID); err == nil &&
+		isTerminal(current.Status) {
+		return
+	}
 
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -94,16 +126,15 @@ func (r *TaskRunner) Run(ctx context.Context) {
 		}
 	}()
 
-	if err := r.store.MarkStarted(r.task.ID); err != nil {
-		r.logger.Warn("mark started", "task", r.task.ID, "err", err)
-	}
-
+	// Note: MarkStarted is the orchestrator's responsibility (called
+	// once at the top of RunTask). Calling it here too would overwrite
+	// started_at with a later timestamp.
 	err := r.orch.RunTask(ctx, r.task, r.steerCh)
 
 	// Check stop flag first — user cancellation takes priority.
 	if r.stopped.Load() {
-		if err := r.store.UpdateStatus(r.task.ID, "cancelled"); err != nil {
-			r.logger.Warn("update cancelled status", "task", r.task.ID, "err", err)
+		if err := r.store.MarkCancelled(r.task.ID); err != nil {
+			r.logger.Warn("mark cancelled", "task", r.task.ID, "err", err)
 		}
 		if err := r.store.AppendEvent(r.task.ID, "cancelled_by_user", ""); err != nil {
 			r.logger.Warn("append cancel event", "task", r.task.ID, "err", err)
@@ -129,9 +160,14 @@ func (r *TaskRunner) Run(ctx context.Context) {
 }
 
 // Stop cancels the running task. Safe to call before or during Run.
+// The stopped flag is set first so Run observes it even if Stop fires
+// before cancel is installed.
 func (r *TaskRunner) Stop() {
 	r.stopped.Store(true)
-	if r.cancel != nil {
-		r.cancel()
+	r.cancelMu.Lock()
+	cancel := r.cancel
+	r.cancelMu.Unlock()
+	if cancel != nil {
+		cancel()
 	}
 }

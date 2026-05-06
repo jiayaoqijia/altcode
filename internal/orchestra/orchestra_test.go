@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/wfdef"
+	"github.com/jiayaoqijia/altcode/internal/wfdef"
 )
 
 func TestRunWorkflow_SinglePhase(t *testing.T) {

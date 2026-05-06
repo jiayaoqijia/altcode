@@ -90,8 +90,8 @@ func TestGitHubClient_CreateDraftPR_Error(t *testing.T) {
 func TestGitHubClient_GetCIStatus_Pass(t *testing.T) {
 	gc := newGHClient()
 	checks := []ciCheck{
-		{Name: "build", State: "COMPLETED", Conclusion: "SUCCESS"},
-		{Name: "lint", State: "COMPLETED", Conclusion: "SUCCESS"},
+		{Name: "build", State: "SUCCESS"},
+		{Name: "lint", State: "SUCCESS"},
 	}
 	data, _ := json.Marshal(checks)
 	gc.run = mockRunner(map[string]struct {
@@ -113,8 +113,8 @@ func TestGitHubClient_GetCIStatus_Pass(t *testing.T) {
 func TestGitHubClient_GetCIStatus_Fail(t *testing.T) {
 	gc := newGHClient()
 	checks := []ciCheck{
-		{Name: "build", State: "COMPLETED", Conclusion: "SUCCESS"},
-		{Name: "test", State: "COMPLETED", Conclusion: "FAILURE"},
+		{Name: "build", State: "SUCCESS"},
+		{Name: "test", State: "FAILURE"},
 	}
 	data, _ := json.Marshal(checks)
 	gc.run = mockRunner(map[string]struct {
@@ -136,7 +136,7 @@ func TestGitHubClient_GetCIStatus_Fail(t *testing.T) {
 func TestGitHubClient_GetCIStatus_Pending(t *testing.T) {
 	gc := newGHClient()
 	checks := []ciCheck{
-		{Name: "build", State: "IN_PROGRESS", Conclusion: ""},
+		{Name: "build", State: "IN_PROGRESS"},
 	}
 	data, _ := json.Marshal(checks)
 	gc.run = mockRunner(map[string]struct {
@@ -334,7 +334,7 @@ func TestRunCIAutofix_PassesFirst(t *testing.T) {
 
 	// CI passes on first check — no fix agent needed.
 	checks := []ciCheck{
-		{Name: "build", State: "COMPLETED", Conclusion: "SUCCESS"},
+		{Name: "build", State: "SUCCESS"},
 	}
 	data, _ := json.Marshal(checks)
 	gc.run = mockRunner(map[string]struct {
@@ -367,10 +367,10 @@ func TestRunCIAutofix_FixesOnRetry(t *testing.T) {
 	// First call: fail. Second call: pass.
 	var ciCalls int32
 	failChecks, _ := json.Marshal([]ciCheck{
-		{Name: "test", State: "COMPLETED", Conclusion: "FAILURE"},
+		{Name: "test", State: "FAILURE"},
 	})
 	passChecks, _ := json.Marshal([]ciCheck{
-		{Name: "test", State: "COMPLETED", Conclusion: "SUCCESS"},
+		{Name: "test", State: "SUCCESS"},
 	})
 	runList, _ := json.Marshal([]ghRun{
 		{DatabaseID: 100, Status: "completed", Conclusion: "failure"},
@@ -428,7 +428,7 @@ func TestRunCIAutofix_ExhaustsAttempts(t *testing.T) {
 	gc := newGHClient()
 
 	failChecks, _ := json.Marshal([]ciCheck{
-		{Name: "test", State: "COMPLETED", Conclusion: "FAILURE"},
+		{Name: "test", State: "FAILURE"},
 	})
 	runList, _ := json.Marshal([]ghRun{
 		{DatabaseID: 200, Status: "completed", Conclusion: "failure"},
@@ -483,7 +483,7 @@ func TestRunCIAutofix_ContextCancelled(t *testing.T) {
 
 	// CI always pending, context cancelled immediately.
 	pendingChecks, _ := json.Marshal([]ciCheck{
-		{Name: "build", State: "PENDING", Conclusion: ""},
+		{Name: "build", State: "PENDING"},
 	})
 	gc.run = mockRunner(map[string]struct {
 		out []byte

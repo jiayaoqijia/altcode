@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/auth"
-	"github.com/altcode-ai/altcode/internal/config"
+	"github.com/jiayaoqijia/altcode/internal/auth"
+	"github.com/jiayaoqijia/altcode/internal/config"
 )
 
 func TestLoadClaudeCodeAuth(t *testing.T) {

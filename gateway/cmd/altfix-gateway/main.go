@@ -21,9 +21,9 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/altcode-ai/altcode/gateway"
-	"github.com/altcode-ai/altcode/gateway/slack"
-	"github.com/altcode-ai/altcode/gateway/telegram"
+	"github.com/jiayaoqijia/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway/slack"
+	"github.com/jiayaoqijia/altcode/gateway/telegram"
 )
 
 func main() {

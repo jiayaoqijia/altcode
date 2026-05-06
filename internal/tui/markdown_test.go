@@ -3,7 +3,7 @@ package tui_test
 import (
 	"testing"
 
-	"github.com/altcode-ai/altcode/internal/tui"
+	"github.com/jiayaoqijia/altcode/internal/tui"
 )
 
 func TestRenderPlainText(t *testing.T) {

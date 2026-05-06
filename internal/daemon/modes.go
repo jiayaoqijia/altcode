@@ -1,6 +1,9 @@
 package daemon
 
-import "strings"
+import (
+	"encoding/json"
+	"strings"
+)
 
 // WorkspaceMode determines how many agents are spawned for a task.
 type WorkspaceMode string
@@ -118,4 +121,43 @@ func AgentsForMode(mode WorkspaceMode) []string {
 	default:
 		return []string{"lead", "implementer", "reviewer", "tester"}
 	}
+}
+
+// taskAgentOverride is the in-memory shape encoded into Task.AgentConfig
+// so the orchestrator can pick up per-task overrides without a schema
+// change. Blank fields fall back to server-level defaults.
+type taskAgentOverride struct {
+	Mode  string `json:"mode,omitempty"`  // "solo"|"pair"|"team"
+	Model string `json:"model,omitempty"` // per-task model override
+}
+
+// encodeAgentConfig serialises per-task overrides as JSON. Returns
+// the legacy plain-string form when only a mode is provided so
+// existing tasks round-trip unchanged.
+func encodeAgentConfig(mode, model string) string {
+	if mode == "" && model == "" {
+		return ""
+	}
+	if model == "" {
+		return mode
+	}
+	b, _ := json.Marshal(taskAgentOverride{Mode: mode, Model: model})
+	return string(b)
+}
+
+// decodeAgentConfig parses Task.AgentConfig back into (mode, model).
+// Tolerates the legacy plain-string form where only mode was stored.
+func decodeAgentConfig(raw string) (mode, model string) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return "", ""
+	}
+	if !strings.HasPrefix(raw, "{") {
+		return raw, ""
+	}
+	var o taskAgentOverride
+	if err := json.Unmarshal([]byte(raw), &o); err != nil {
+		return raw, ""
+	}
+	return o.Mode, o.Model
 }

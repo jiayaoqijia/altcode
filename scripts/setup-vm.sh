@@ -58,7 +58,7 @@ echo "[7/8] Installing altcode..."
 if [ -f /tmp/altcode ]; then
     cp /tmp/altcode /usr/local/bin/altcode
 elif command -v go > /dev/null; then
-    go install github.com/altcode-ai/altcode/cmd/altcode@latest
+    go install github.com/jiayaoqijia/altcode/cmd/altcode@latest
     cp "$(go env GOPATH)/bin/altcode" /usr/local/bin/altcode
 else
     curl -fsSL https://altcode.io/install.sh | bash

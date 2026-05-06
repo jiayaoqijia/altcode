@@ -5,9 +5,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"net/http"
 	"net"
+	"net/http"
 	"net/url"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -388,8 +389,12 @@ func ssrfGuardedTransport() *http.Transport {
 }
 
 // ssrfBlockReason checks an IP against the SSRF deny list and returns
-// (true, reason) if it should be blocked. Loopback is intentionally
-// allowed — see guardSSRF for the threat-model rationale.
+// (true, reason) if it should be blocked. Loopback is blocked by
+// default so Docker socket proxies, IDE debug servers, local admin
+// panels, and per-container metadata sidecars can't be reached by a
+// prompt-injected LLM. Set ALTCODE_ALLOW_LOOPBACK_FETCH=1 to permit
+// localhost explicitly when the user is dev-testing against a local
+// server. Codex round-O adversarial finding.
 func ssrfBlockReason(ip net.IP, host string) (bool, string) {
 	if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
 		return true, fmt.Sprintf("%s resolves to link-local address %s (likely cloud metadata)", host, ip)
@@ -400,7 +405,19 @@ func ssrfBlockReason(ip net.IP, host string) (bool, string) {
 	if ip.IsUnspecified() {
 		return true, fmt.Sprintf("%s resolves to unspecified address %s", host, ip)
 	}
+	if ip.IsLoopback() && !loopbackFetchAllowed() {
+		return true, fmt.Sprintf(
+			"%s resolves to loopback address %s "+
+				"(set ALTCODE_ALLOW_LOOPBACK_FETCH=1 for local dev servers)",
+			host, ip)
+	}
 	return false, ""
+}
+
+// loopbackFetchAllowed reports whether the user has opted into
+// loopback fetches. Off by default.
+func loopbackFetchAllowed() bool {
+	return os.Getenv("ALTCODE_ALLOW_LOOPBACK_FETCH") == "1"
 }
 
 func guardSSRF(rawURL string) error {
@@ -425,20 +442,14 @@ func guardSSRF(rawURL string) error {
 		// error rather than guessing.
 		return nil
 	}
-	// Loopback is intentionally allowed: developers commonly point
-	// web_fetch at local dev servers (localhost:3000, etc.) and the
-	// SSRF threat model is fetching cloud metadata or internal
-	// network services, not the user's own machine.
+	// Every resolved address is checked against ssrfBlockReason,
+	// which covers link-local, private, unspecified, AND loopback
+	// (unless ALTCODE_ALLOW_LOOPBACK_FETCH=1). Loopback was
+	// previously exempt; Codex round-O flagged that as a real SSRF
+	// bypass reaching Docker socket proxies, IDE debug servers, etc.
 	for _, ip := range ips {
-		if ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-			// Catches AWS/GCP metadata 169.254.169.254 specifically.
-			return fmt.Errorf("blocked by SSRF guard: %s resolves to link-local address %s (likely cloud metadata)", host, ip)
-		}
-		if ip.IsPrivate() {
-			return fmt.Errorf("blocked by SSRF guard: %s resolves to private address %s", host, ip)
-		}
-		if ip.IsUnspecified() {
-			return fmt.Errorf("blocked by SSRF guard: %s resolves to unspecified address %s", host, ip)
+		if blocked, reason := ssrfBlockReason(ip, host); blocked {
+			return fmt.Errorf("blocked by SSRF guard: %s", reason)
 		}
 	}
 	return nil

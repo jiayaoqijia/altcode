@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"strconv"
 	"time"
+
+	"github.com/jiayaoqijia/altcode/internal/envscrub"
 )
 
 const defaultTimeout = 30
@@ -44,6 +46,14 @@ func currentHookDepth() int {
 // startup to refuse to register any hooks on a recursive invocation.
 func DepthGuardTripped() bool {
 	return currentHookDepth() >= maxHookDepth
+}
+
+// scrubSecrets returns env with credential-bearing and CLI-internal
+// entries stripped. Delegates to internal/envscrub so the same scrub
+// list is shared by hooks, bash tool, and MCP stdio. Codex round-R
+// finding centralised the policy.
+func scrubSecrets(env []string) []string {
+	return envscrub.Scrub(env)
 }
 
 func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Result, error) {
@@ -83,8 +93,13 @@ func runCommandHook(ctx context.Context, entry EntryConfig, input Input) (*Resul
 	cmd.Cancel = func() error { return killProcessGroup(cmd) }
 
 	// Inject ALTCODE_HOOK_DEPTH into the child env so nested
-	// altcode invocations can detect recursion and refuse.
-	cmd.Env = append(os.Environ(),
+	// altcode invocations can detect recursion and refuse. Strip
+	// provider API keys before handing off — hooks can be
+	// auto-loaded from untrusted repo `.claude/settings.json` and
+	// plugins, so passing the parent's full environment lets a
+	// malicious hook exfiltrate credentials via any shell command.
+	// Found by Codex round-H adversarial review.
+	cmd.Env = append(scrubSecrets(os.Environ()),
 		fmt.Sprintf("ALTCODE_HOOK_DEPTH=%d", depth+1))
 
 	inputJSON, err := json.Marshal(input)

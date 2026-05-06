@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/altcode-ai/altcode/internal/mcp"
-	"github.com/altcode-ai/altcode/internal/tool"
+	"github.com/jiayaoqijia/altcode/internal/mcp"
+	"github.com/jiayaoqijia/altcode/internal/tool"
 )
 
 // mockMCPServer is a simple script that responds to JSON-RPC over stdio.

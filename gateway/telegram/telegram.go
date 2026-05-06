@@ -1,4 +1,4 @@
-// Adapted from github.com/altcode-ai/altcode/gateway/telegram/telegram.go
+// Adapted from github.com/jiayaoqijia/altcode/gateway/telegram/telegram.go
 // Copyright (c) 2026 Ottie contributors — MIT License
 //
 // Stripped ottie-specific dependencies (bus, identity, media, config, swarm).
@@ -22,7 +22,7 @@ import (
 	tu "github.com/mymmrac/telego/telegoutil"
 	"golang.org/x/time/rate"
 
-	"github.com/altcode-ai/altcode/gateway"
+	"github.com/jiayaoqijia/altcode/gateway"
 )
 
 var (

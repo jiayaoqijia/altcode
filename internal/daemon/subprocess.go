@@ -72,6 +72,10 @@ func SpawnAgent(ctx context.Context, cfg AgentConfig) (
 	cmd.Stderr = &stderrBuf
 
 	if err := cmd.Start(); err != nil {
+		// Close stdin pipe we allocated before Start — otherwise repeated
+		// spawn failures leak fds. The reader half is owned by the child
+		// (which never launched), and the writer half is ours to clean up.
+		_ = stdin.Close()
 		return nil, fmt.Errorf("start %s: %w", cfg.Binary, err)
 	}
 
@@ -130,11 +134,14 @@ func (p *AgentProcess) Kill() error {
 	// SIGTERM first for graceful shutdown.
 	_ = syscall.Kill(-pgid, syscall.SIGTERM)
 
-	// Wait up to 5s, then SIGKILL.
+	// Wait up to 5s, then SIGKILL. Use NewTimer + Stop so the happy
+	// path (process exits quickly) doesn't leak the timer fd.
+	t := time.NewTimer(5 * time.Second)
+	defer t.Stop()
 	select {
 	case <-p.closed:
 		return nil
-	case <-time.After(5 * time.Second):
+	case <-t.C:
 		_ = syscall.Kill(-pgid, syscall.SIGKILL)
 		<-p.closed
 		return nil
