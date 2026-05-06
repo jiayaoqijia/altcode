@@ -37,6 +37,106 @@ func TestExtractAtQuery(t *testing.T) {
 	}
 }
 
+// TestApp_DismissFilePopup_ClearsState covers the explicit-dismiss path.
+func TestApp_DismissFilePopup_ClearsState(t *testing.T) {
+	a := testApp()
+	a.filePopup.visible = true
+	a.filePopup.matches = []completions.Match{{Path: "a.go"}, {Path: "b.go"}}
+	a.filePopup.cursor = 1
+
+	a.dismissFilePopup()
+
+	if a.filePopup.visible {
+		t.Error("dismissFilePopup should hide")
+	}
+	if a.filePopup.matches != nil {
+		t.Errorf("matches not cleared: %v", a.filePopup.matches)
+	}
+	if a.filePopup.cursor != 0 {
+		t.Errorf("cursor not reset: %d", a.filePopup.cursor)
+	}
+}
+
+// TestApp_FilePopupMoveDown_ClampsAtVisibleCap
+func TestApp_FilePopupMoveDown_ClampsAtVisibleCap(t *testing.T) {
+	a := testApp()
+	a.filePopup.matches = make([]completions.Match, filePopupMaxVisible+5)
+	for i := range a.filePopup.matches {
+		a.filePopup.matches[i] = completions.Match{Path: "f" + string(rune('a'+i%26)) + ".go"}
+	}
+
+	for i := 0; i < filePopupMaxVisible*2; i++ {
+		a.filePopupMoveDown()
+	}
+
+	if a.filePopup.cursor != filePopupMaxVisible-1 {
+		t.Errorf("cursor = %d, want %d (cap)", a.filePopup.cursor, filePopupMaxVisible-1)
+	}
+}
+
+// TestApp_FilePopupMoveUp_ClampsAtZero
+func TestApp_FilePopupMoveUp_ClampsAtZero(t *testing.T) {
+	a := testApp()
+	a.filePopup.matches = []completions.Match{{Path: "a.go"}, {Path: "b.go"}}
+	a.filePopup.cursor = 1
+	a.filePopupMoveUp()
+	a.filePopupMoveUp()
+	a.filePopupMoveUp() // try going past zero
+	if a.filePopup.cursor != 0 {
+		t.Errorf("cursor = %d, want 0", a.filePopup.cursor)
+	}
+}
+
+// TestApp_FilePopupMoveDown_FewerMatchesThanCap covers the small-list
+// branch where len(matches) < filePopupMaxVisible.
+func TestApp_FilePopupMoveDown_FewerMatchesThanCap(t *testing.T) {
+	a := testApp()
+	a.filePopup.matches = []completions.Match{{Path: "a.go"}, {Path: "b.go"}, {Path: "c.go"}}
+	for i := 0; i < 10; i++ {
+		a.filePopupMoveDown()
+	}
+	if a.filePopup.cursor != 2 {
+		t.Errorf("cursor = %d, want 2 (clamped at len-1)", a.filePopup.cursor)
+	}
+}
+
+// TestMin covers the local int helper.
+func TestMin(t *testing.T) {
+	cases := []struct{ a, b, want int }{
+		{1, 2, 1},
+		{2, 1, 1},
+		{0, 0, 0},
+		{-3, -1, -3},
+	}
+	for _, c := range cases {
+		if got := min(c.a, c.b); got != c.want {
+			t.Errorf("min(%d,%d) = %d, want %d", c.a, c.b, got, c.want)
+		}
+	}
+}
+
+// TestApp_FilePopupView_HiddenReturnsEmpty
+func TestApp_FilePopupView_HiddenReturnsEmpty(t *testing.T) {
+	a := testApp()
+	a.width = 80
+	a.filePopup.visible = false
+	if got := a.filePopupView(); got != "" {
+		t.Errorf("hidden filePopupView = %q, want empty", got)
+	}
+}
+
+// TestApp_FilePopupView_NoMatchesReturnsEmpty exercises the second
+// guard — visible but no matches → no rendered popup.
+func TestApp_FilePopupView_NoMatchesReturnsEmpty(t *testing.T) {
+	a := testApp()
+	a.width = 80
+	a.filePopup.visible = true
+	a.filePopup.matches = nil
+	if got := a.filePopupView(); got != "" {
+		t.Errorf("empty-matches view = %q, want empty", got)
+	}
+}
+
 // TestAcceptFileCompletion_PreservesTrailingText is a regression guard
 // for the bug where typing `look at @ma<TAB> for the bug` would lose
 // ` for the bug` because acceptFileCompletion spliced on idx alone.
