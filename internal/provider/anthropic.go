@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 const (
@@ -65,7 +66,13 @@ func (a *anthropicProvider) Stream(ctx context.Context, req *Request) (<-chan St
 	}
 
 	ch := make(chan StreamEvent, 32)
-	go processSSE(resp.Body, ch)
+	// Wrap the response body with an idle-read deadline so a half-dead
+	// TCP connection (server crash, NAT timeout, ELB silent disconnect)
+	// surfaces as ErrSSEIdleTimeout instead of hanging the agent loop
+	// forever. 120s without any byte from the server is the cutoff —
+	// well above normal token-emission gaps but tight enough to recover
+	// in <2 min instead of "until the user kills altcode".
+	go processSSE(newIdleReader(ctx, resp.Body, 120*time.Second), ch)
 	return ch, nil
 }
 

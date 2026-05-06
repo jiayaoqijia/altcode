@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 )
 
 const (
@@ -96,9 +97,12 @@ func (p *openaiProvider) Stream(ctx context.Context, req *Request) (<-chan Strea
 	// Detect by content-type and convert to synthetic events.
 	ct := resp.Header.Get("Content-Type")
 	if strings.Contains(ct, "application/json") && !strings.Contains(ct, "event-stream") {
+		// Non-streaming JSON path — single ReadAll, no idle window needed.
 		go processOpenAINonStream(resp.Body, ch)
 	} else {
-		go processOpenAISSE(resp.Body, ch)
+		// Streaming SSE — wrap with idleReader so half-dead TCP doesn't
+		// hang the agent loop forever. 120s no-data is the cutoff.
+		go processOpenAISSE(newIdleReader(ctx, resp.Body, 120*time.Second), ch)
 	}
 	return ch, nil
 }

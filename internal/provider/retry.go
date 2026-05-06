@@ -104,6 +104,11 @@ func isTransientError(err error) bool {
 	if err == nil {
 		return false
 	}
+	// SSE idle timeout is transient by definition: the server stopped
+	// sending mid-stream, but a fresh request typically succeeds.
+	if errors.Is(err, ErrSSEIdleTimeout) {
+		return true
+	}
 	if re, ok := err.(retryableError); ok {
 		_ = re
 		return true
