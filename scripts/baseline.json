@@ -1,0 +1,28 @@
+{
+  "_comment": "Locked baseline for the altcode TUI autoresearch loop. All numbers measured fresh on the recorded commit, in the recorded env. Editing this file requires a row in autoresearch-altcode.tsv with rationale.",
+  "baseline_commit": "4c99606",
+  "baseline_date": "2026-05-05",
+  "env": {
+    "GOOS": "linux",
+    "GOARCH": "amd64",
+    "GOMAXPROCS": 8,
+    "GOGC": 100,
+    "go_version_min": "1.22",
+    "tmux_version_min": "3.2",
+    "node_version_min": "20",
+    "playwright_version_min": "1.48"
+  },
+  "M1_density_commands_per_kloc": 5.5604,
+  "M1_command_count": 51,
+  "M1_prod_loc_internal_tui": 9172,
+  "M2_render_ns_per_op": {
+    "10": 83921,
+    "100": 676452,
+    "500": 3425001,
+    "1000": 7897849
+  },
+  "M3_coverage_pct_internal_tui": 32.4,
+  "M3_covered_statement_count_internal_tui": 1263,
+  "M4_resize_to_stable_frame_ms": 123,
+  "M5_discoverability_pct_le_3char_prefix": 80.39
+}
