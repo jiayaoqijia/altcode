@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -43,14 +44,20 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 			if a.engine == nil {
 				a.appendInfo("[model] engine not initialised — restart altcode with --model " + parts[1])
 			} else {
-				prev := a.engine.Config().Model
-				if err := a.engine.SwitchModel(parts[1]); err != nil {
-					a.appendInfo(fmt.Sprintf("[model] switch failed: %v", err))
+				query := parts[1]
+				resolved, err := a.resolveModelQuery(query)
+				if err != nil {
+					a.appendInfo(fmt.Sprintf("[model] %v", err))
 				} else {
-					a.builtinClear()
-					a.appendInfo(fmt.Sprintf(
-						"[model] switched %s → %s (history cleared so the new model starts fresh)",
-						prev, a.engine.Config().Model))
+					prev := a.engine.Config().Model
+					if err := a.engine.SwitchModel(resolved); err != nil {
+						a.appendInfo(fmt.Sprintf("[model] switch failed: %v", err))
+					} else {
+						a.builtinClear()
+						a.appendInfo(fmt.Sprintf(
+							"[model] switched %s → %s (history cleared so the new model starts fresh)",
+							prev, a.engine.Config().Model))
+					}
 				}
 			}
 		} else {
@@ -583,7 +590,116 @@ func countRole(msgs []provider.Message, role string) int {
 }
 
 func (a *App) builtinModelText() string {
-	return fmt.Sprintf("Current model: %s", a.activeModel())
+	current := a.activeModel()
+	known := a.knownModels()
+	if len(known) == 0 {
+		return fmt.Sprintf("Current model: %s\n\nUse /model <name> to switch (e.g. /model gpt-5.4 or /model anthropic/claude-haiku-4-5).",
+			current)
+	}
+	var sb strings.Builder
+	sb.WriteString("Current model: ")
+	sb.WriteString(current)
+	sb.WriteString("\n\nKnown models (cached from provider /v1/models, last 24h):\n")
+	for _, m := range known {
+		marker := "  "
+		if m == current || strings.HasSuffix(current, "/"+m) {
+			marker = " ▶"
+		}
+		sb.WriteString(marker + " ")
+		sb.WriteString(m)
+		sb.WriteString("\n")
+	}
+	sb.WriteString("\nSwitch with: /model <name>          (substring match)\n")
+	sb.WriteString("           /model <provider>/<id>   (exact)")
+	return sb.String()
+}
+
+// resolveModelQuery turns a free-form /model argument into a model
+// spec the engine can switch to. Three matching modes (in priority
+// order):
+//
+//  1. Fully-qualified ("provider/model") — passed through.
+//  2. Exact match against the disk-cached model id list.
+//  3. Substring match against the cache. Unique → switch. Multiple
+//     candidates → return an error listing them so the user can
+//     disambiguate.
+//
+// The substring branch is what makes /model feel like a fuzzy
+// picker: typing 'haiku' resolves to 'anthropic/claude-haiku-4-5'
+// when only one cache entry contains the substring. DS-TUI parity
+// for the modal-style picker without a separate overlay component.
+func (a *App) resolveModelQuery(q string) (string, error) {
+	if strings.Contains(q, "/") {
+		return q, nil
+	}
+	known := a.knownModels()
+	// Exact id match.
+	for _, m := range known {
+		if m == q {
+			return m, nil
+		}
+	}
+	// Substring match.
+	q = strings.ToLower(q)
+	var matches []string
+	for _, m := range known {
+		if strings.Contains(strings.ToLower(m), q) {
+			matches = append(matches, m)
+		}
+	}
+	switch len(matches) {
+	case 0:
+		// No cache hits — pass through and let SwitchModel try with
+		// the current provider prefix (matches existing behaviour).
+		return q, nil
+	case 1:
+		return matches[0], nil
+	default:
+		// Cap the candidate list to a sane number for the error message.
+		head := matches
+		if len(head) > 8 {
+			head = head[:8]
+		}
+		return "", fmt.Errorf("ambiguous %q matches %d models: %s — be more specific",
+			q, len(matches), strings.Join(head, ", "))
+	}
+}
+
+// knownModels returns the model IDs the local /v1/models disk cache
+// has seen for any configured provider. The cache lives in
+// ~/.altcode/models-cache.json (populated by FetchModelInfoCached
+// at engine startup) — this function de-duplicates and returns a
+// sorted slice. Empty when no cache hits exist yet.
+func (a *App) knownModels() []string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil
+	}
+	body, err := os.ReadFile(filepath.Join(home, ".altcode", "models-cache.json"))
+	if err != nil {
+		return nil
+	}
+	// File shape: { "<sha1>": { "info": { "id": "..." }, ... } }
+	type entry struct {
+		Info struct {
+			ID string `json:"id"`
+		} `json:"info"`
+	}
+	cache := map[string]entry{}
+	if err := json.Unmarshal(body, &cache); err != nil {
+		return nil
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, e := range cache {
+		if e.Info.ID == "" || seen[e.Info.ID] {
+			continue
+		}
+		seen[e.Info.ID] = true
+		out = append(out, e.Info.ID)
+	}
+	sort.Strings(out)
+	return out
 }
 
 func (a *App) builtinClear() {
