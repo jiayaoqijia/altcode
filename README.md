@@ -43,7 +43,7 @@ The harness layer is doing real work. The question is **who owns it** and whethe
 > **Independent dual-reviewer scoring (round 5)** — altcode TUI vs [DeepSeek-TUI](https://github.com/Hmbown/DeepSeek-TUI):
 > Features **9.15** vs 8.5 · UI **8.30** vs 8.5 · Stability **7.70** vs 7.0. *altcode leads 2 of 3 unanimously.*
 
-Long-form positioning piece: **["Why DeepSeek and GPT need AltCode to beat Claude Code"](https://altcode.io/article/v8.html)** (April 2026).
+Long-form positioning piece: **["Why DeepSeek and GPT need AltCode to beat Claude Code"](https://x.com/yq_acc/status/2052398685947126102?s=20)** (April 2026).
 
 ## Quick start
 
