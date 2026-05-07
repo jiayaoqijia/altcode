@@ -285,8 +285,10 @@ func main() {
 		"Append a file's contents to the system prompt")
 
 	// --- Phase 4: session / history ---
-	root.Flags().BoolVar(&flags.continueSession, "continue", false,
-		"Resume most recent session (CC-compat alias for --last)")
+	root.Flags().BoolVarP(&flags.continueSession, "continue", "c", false,
+		"Resume most recent session (CC-compat alias for --last; -c short form)")
+	root.Flags().BoolVar(&flags.last, "resume", false,
+		"Resume most recent session (CC-compat alias; opens session picker if a sessionID is also passed via positional arg)")
 	root.Flags().StringVar(&flags.forkSession, "fork-session", "",
 		"Branch off a past session into a new one (by session ID)")
 	// Named --session-db (not --session-dir) because store.Open takes

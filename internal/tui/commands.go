@@ -1769,15 +1769,43 @@ func (a *App) builtinQueueText(parts []string) string {
 	return "[queue] usage: /queue [list|clear|drop <n>]"
 }
 
+// builtinResumeText resumes a session in-place — Claude Code parity.
+// CC's `/resume <id>` swaps the running engine to the loaded session;
+// no relaunch needed. With no argument it opens the session switcher
+// overlay (same as Ctrl+A). DS-TUI parity bonus.
+//
+// Args:
+//
+//	/resume                    open the session-switcher overlay
+//	/resume <session-id>       hot-swap to that session in this TUI
+//	/resume last               resume the most-recently-active session
 func (a *App) builtinResumeText(parts []string) string {
-	if len(parts) >= 2 {
-		return fmt.Sprintf("[resume] To resume session %q, restart altcode with:\n  altcode --resume %s",
-			parts[1], parts[1])
+	if a.engine == nil || a.engine.StoreInstance() == nil {
+		return "[resume] no session store available — restart with --session-db pointing at altcode.db"
 	}
-	return "Usage: /resume <session-id>\n\n" +
-		"Recent sessions are shown in /sessions. Resume happens at\n" +
-		"the CLI boundary: relaunch altcode with --resume <id>.\n" +
-		"Use --fork-session to copy a session under a new id."
+	if len(parts) < 2 {
+		// No arg: pop the existing session switcher overlay.
+		a.toggleSessionSwitcher()
+		return "[resume] showing recent sessions — pick one with arrow keys + Enter"
+	}
+	target := parts[1]
+	if target == "last" || target == "-" {
+		// Resolve the most-recently-active session id.
+		db := a.engine.StoreInstance()
+		sessions, err := db.ListSessions()
+		if err != nil || len(sessions) == 0 {
+			return "[resume] no recent sessions found"
+		}
+		// Skip the current session if it's at index 0.
+		current := a.engine.Config().Model // any session-distinguishing read
+		_ = current
+		target = sessions[0].ID
+		if len(sessions) > 1 && sessions[0].ID == a.engine.SessionID() {
+			target = sessions[1].ID
+		}
+	}
+	a.switchToSession(target)
+	return fmt.Sprintf("[resume] switched to session %s", target)
 }
 
 // builtinForkText prints the fork-session affordance.
