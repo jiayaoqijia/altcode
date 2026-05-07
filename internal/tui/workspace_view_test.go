@@ -130,22 +130,6 @@ func TestWorkspaceView_AppendOutput_ThreadSafe(t *testing.T) {
 	<-done
 }
 
-// stripANSI removes ANSI escape sequences for width checking.
-func stripANSI(s string) string {
-	var result []rune
-	inEscape := false
-	for _, r := range s {
-		if r == '\033' {
-			inEscape = true
-			continue
-		}
-		if inEscape {
-			if (r >= 'A' && r <= 'Z') || (r >= 'a' && r <= 'z') {
-				inEscape = false
-			}
-			continue
-		}
-		result = append(result, r)
-	}
-	return string(result)
-}
+// stripANSI moved to internal/tui/ansi.go so production code (e.g.
+// /share's markdown export) can use it without depending on a _test
+// build tag.

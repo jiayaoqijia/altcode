@@ -1735,9 +1735,18 @@ func (a *App) builtinRenameText(parts []string) string {
 	return fmt.Sprintf("[rename] session display title set to %q.", a.sessionTitle)
 }
 
-// builtinShareText prints a markdown export the user can paste into
-// any sharing destination. Network-backed sharing (gist, paste.rs)
-// is a follow-up — markdown is the common denominator.
+// builtinShareText writes the current session to a markdown file
+// under ~/.altcode/shares/ and returns the path so the user can
+// open / scp / paste it.
+//
+// DeepSeek-TUI #393 parity. Network-backed sharing (gist, paste
+// services) is intentionally NOT here — the local .md file is the
+// common denominator that works offline, behind firewalls, and
+// without picking a third-party host on the user's behalf.
+//
+// Optional second arg overrides the output path:
+//   /share                    → ~/.altcode/shares/<ts>-<slug>.md
+//   /share /tmp/transcript.md → /tmp/transcript.md
 func (a *App) builtinShareText(parts []string) string {
 	count := 0
 	for _, m := range a.messages {
@@ -1748,15 +1757,91 @@ func (a *App) builtinShareText(parts []string) string {
 	if count == 0 {
 		return "[share] nothing to share — conversation is empty."
 	}
-	target := "stdout"
-	if len(parts) >= 2 {
-		target = parts[1]
+
+	// Build target path.
+	var path string
+	if len(parts) >= 2 && parts[1] != "" {
+		path = parts[1]
+	} else {
+		home, err := os.UserHomeDir()
+		if err != nil {
+			return fmt.Sprintf("[share] could not resolve home dir: %v", err)
+		}
+		dir := filepath.Join(home, ".altcode", "shares")
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return fmt.Sprintf("[share] mkdir %s: %v", dir, err)
+		}
+		ts := time.Now().Format("20060102-150405")
+		slug := a.sessionSlug
+		if slug == "" {
+			slug = "session"
+		}
+		path = filepath.Join(dir, ts+"-"+slug+".md")
 	}
-	return fmt.Sprintf(
-		"[share] %d messages ready for export → %s.\n"+
-			"Tip: pipe `altcode --print --output-format=stream-json` to a paste\n"+
-			"service for stable shareable URLs.",
-		count, target)
+
+	body := a.buildSessionMarkdown()
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		return fmt.Sprintf("[share] write %s: %v", path, err)
+	}
+	return fmt.Sprintf("[share] %d messages → %s (%d bytes)",
+		count, path, len(body))
+}
+
+// buildSessionMarkdown serialises the visible conversation as a
+// portable markdown document. Roles map to:
+//   roleUser      → '## User' header
+//   roleAssistant → '## Assistant (model · duration)' header
+//   roleInfo      → block-quoted '> [info] ...' line (one per message)
+//   roleThinking  → fenced ```thinking block (collapsible in many viewers)
+//   roleTool      → fenced ```tool block
+//
+// Tool-tree info messages with embedded ANSI / lipgloss styling get
+// stripped to plain text via stripANSI so the markdown stays readable.
+func (a *App) buildSessionMarkdown() string {
+	var sb strings.Builder
+	sb.WriteString("# altcode session\n\n")
+	sb.WriteString(fmt.Sprintf("- **Session**: `%s`\n", a.sessionSlug))
+	sb.WriteString(fmt.Sprintf("- **Started**: %s\n", a.sessionStart.Format(time.RFC3339)))
+	if a.engine != nil {
+		sb.WriteString(fmt.Sprintf("- **Model**: `%s`\n", a.engine.Config().Model))
+	}
+	if a.gitBranch != "" {
+		sb.WriteString(fmt.Sprintf("- **Branch**: `%s`\n", a.gitBranch))
+	}
+	if a.tokensIn+a.tokensOut > 0 {
+		sb.WriteString(fmt.Sprintf("- **Tokens**: %d in / %d out\n",
+			a.tokensIn, a.tokensOut))
+	}
+	if a.costUSD > 0 {
+		sb.WriteString(fmt.Sprintf("- **Cost**: $%.4f\n", a.costUSD))
+	}
+	sb.WriteString("\n---\n\n")
+
+	for _, m := range a.messages {
+		switch m.role {
+		case roleUser:
+			sb.WriteString("## User\n\n")
+			sb.WriteString(m.content + "\n\n")
+		case roleAssistant:
+			header := "## Assistant"
+			if m.meta != "" {
+				header += " (" + m.meta + ")"
+			}
+			sb.WriteString(header + "\n\n")
+			sb.WriteString(m.content + "\n\n")
+		case roleInfo:
+			sb.WriteString("> " + stripANSI(m.content) + "\n\n")
+		case roleThinking:
+			sb.WriteString("```thinking\n")
+			sb.WriteString(m.content)
+			sb.WriteString("\n```\n\n")
+		case roleTool:
+			sb.WriteString("```tool\n")
+			sb.WriteString(stripANSI(m.content))
+			sb.WriteString("\n```\n\n")
+		}
+	}
+	return sb.String()
 }
 
 // builtinThemeText prints the current theme + available list.
