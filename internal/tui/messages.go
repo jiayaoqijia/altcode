@@ -33,6 +33,17 @@ func (a *App) renderMessage(msg chatMessage) string {
 		width = 20
 	}
 
+	// Tool-tree snapshot info messages already start with their own
+	// `⏺` bullet (set by tooltree.Render). The default roleInfo path
+	// would wrap them with a `┃ ◈` border, producing the noisy stack
+	// `┃ ◈ ⏺ ✓ read(...)`. Detect snapshots by their leading marker
+	// and render them as plain text — the `⏺` bullets are sufficient
+	// visual signal on their own. Single-line info messages don't
+	// match (no leading `⏺`) so the existing border still wraps them.
+	if msg.role == roleInfo && strings.HasPrefix(msg.content, "⏺") {
+		return strings.TrimRight(msg.content, " \n")
+	}
+
 	var rendered string
 	if msg.role == roleTool && looksLikeDiff(msg.content) {
 		rendered = renderInlineDiff(msg.content, a.theme, 15)
