@@ -95,29 +95,60 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	return a, a.waitForEvent()
 }
 
-// handlePermDialogKey routes y/n/a/! while the permission modal is up.
-// Sends the user's choice on the pending response channel and hides
-// the dialog. Returns (handled, cmd) — caller should swallow handled
-// keystrokes and skip the rest of the input router.
+// handlePermDialogKey routes input while the permission modal is up.
+// CC-parity: arrow keys move the highlight, Enter activates the
+// selected row, Esc denies. Power-user single-char shortcuts
+// (y/a/!/n) still work and also move the highlight to match what
+// just fired so the visible state never lies about the action.
+// Returns (handled, cmd) — caller should swallow handled keystrokes
+// and skip the rest of the input router.
 func (a *App) handlePermDialogKey(s string) (bool, tea.Cmd) {
 	if a.permDialog == nil || !a.permDialog.IsVisible() || a.pendingPermission == nil {
 		return false, nil
 	}
-	resp := event.PermResponse{}
+
+	// Navigation: move highlight without firing.
 	switch s {
-	case "y":
-		resp.Action = event.Allow
-	case "a":
-		resp.Action = event.Allow
-		resp.Persistent = true // session-allow this exact pattern
-	case "!":
-		resp.Action = event.Allow
-		resp.Persistent = true // tool-wide allow (engine treats Persistent as global)
-	case "n", "esc":
-		resp.Action = event.Deny
-	default:
-		return false, nil // unrecognized key — let the rest of the router handle it
+	case "up", "k":
+		a.permDialog.MoveUp()
+		a.updateViewport()
+		return true, nil
+	case "down", "j":
+		a.permDialog.MoveDown()
+		a.updateViewport()
+		return true, nil
 	}
+
+	// Decide which option to fire.
+	var opt permOption
+	switch s {
+	case "enter", " ", "space":
+		opt = a.permDialog.Selected()
+	case "esc":
+		// Esc is a hard deny that doesn't depend on which row is
+		// highlighted — matches CC's "press Esc to dismiss/deny"
+		// muscle memory. Equivalent to selecting Deny directly.
+		opt = permOption{allow: false, persist: false}
+	case "y", "a", "!", "n":
+		// Power-user shortcut: move the highlight to match what's
+		// about to fire (visible state stays honest), then fire.
+		if a.permDialog.SelectByShortcut(s) {
+			opt = a.permDialog.Selected()
+		} else {
+			return false, nil
+		}
+	default:
+		return false, nil // let the rest of the router handle it
+	}
+
+	resp := event.PermResponse{}
+	if opt.allow {
+		resp.Action = event.Allow
+		resp.Persistent = opt.persist
+	} else {
+		resp.Action = event.Deny
+	}
+
 	select {
 	case a.pendingPermission.Response <- resp:
 	default:
