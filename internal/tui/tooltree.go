@@ -431,10 +431,17 @@ func formatToolOutput(toolName, output string, theme Theme, maxWidth int, projec
 	lines := strings.Split(strings.TrimRight(output, "\n"), "\n")
 	maxLines := 8 // show at most 8 lines of output
 
-	switch toolName {
-	case "Edit", "Write":
+	// Tool names are normalized to lowercase here so the switch matches
+	// the actual values returned by Tool.Name() (read/write/edit/bash/
+	// apply_patch — lowercase) AND any mid-stream variants the model
+	// might emit (some providers send "Bash" / "Edit"). The previous
+	// switch keyed on capitalized strings so EVERY edit/write/bash
+	// output landed in the default branch with no diff/+- coloring.
+	// DeepSeek-TUI #380 parity once the case fix is in.
+	switch strings.ToLower(toolName) {
+	case "edit", "write", "apply_patch":
 		return formatDiffOutput(lines, theme, maxWidth, maxLines)
-	case "Bash":
+	case "bash":
 		return formatBashOutput(lines, theme, maxWidth, maxLines, projectRoot)
 	default:
 		return formatGenericOutput(lines, theme, maxWidth, maxLines, projectRoot)
