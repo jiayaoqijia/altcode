@@ -41,19 +41,29 @@ echo -e "  Version:   ${VERSION}"
 echo -e "  Target:    ${INSTALL_DIR}/altcode"
 echo ""
 
-# Step 1: Download
+# Step 1: Download. Three ladders (in order):
+#   1. https://altcode.io/bin/<binary> — fast, served by GitHub Pages
+#      directly from this repo's docs/bin/ directory. No release-tag
+#      lookup needed; always tracks main.
+#   2. https://github.com/<repo>/releases/{latest,<version>}/download/...
+#      — versioned binaries when the user passes ALTCODE_VERSION.
+#   3. Source build via `go build` if Go is on PATH.
+SITE_URL="https://altcode.io/bin/$BINARY_NAME"
 if [ "$VERSION" = "latest" ]; then
-    DOWNLOAD_URL="https://github.com/$REPO/releases/latest/download/$BINARY_NAME"
+    RELEASE_URL="https://github.com/$REPO/releases/latest/download/$BINARY_NAME"
 else
-    DOWNLOAD_URL="https://github.com/$REPO/releases/download/${VERSION}/$BINARY_NAME"
+    RELEASE_URL="https://github.com/$REPO/releases/download/${VERSION}/$BINARY_NAME"
 fi
 
 TMP=$(mktemp)
 info "Downloading $BINARY_NAME ..."
 
-if curl -fsSL -o "$TMP" "$DOWNLOAD_URL" 2>/dev/null; then
+if [ "$VERSION" = "latest" ] && curl -fsSL -o "$TMP" "$SITE_URL" 2>/dev/null; then
     chmod +x "$TMP"
-    ok "Downloaded pre-built binary"
+    ok "Downloaded pre-built binary from altcode.io"
+elif curl -fsSL -o "$TMP" "$RELEASE_URL" 2>/dev/null; then
+    chmod +x "$TMP"
+    ok "Downloaded pre-built binary from GitHub releases"
 elif command -v go &>/dev/null; then
     warn "Pre-built binary not available, building from source..."
     rm -f "$TMP"
