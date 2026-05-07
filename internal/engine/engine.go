@@ -200,6 +200,11 @@ type Engine struct {
 	// costBudget is a session-wide USD cap. Sibling of tokenBudget
 	// for Phase 8. Nil = unlimited.
 	costBudget *CostBudget
+	// loopGuard catches runaway tool-call loops where the model
+	// repeats the same (tool, input) over and over because it
+	// didn't understand the previous result. DS-TUI parity.
+	// Lazy-initialised on first dispatch via ensureLoopGuard().
+	loopGuard *LoopGuard
 	// maxTurns overrides the default agent-loop iteration cap.
 	// 0 = use the package-level maxIterations constant.
 	maxTurns          int
@@ -474,6 +479,22 @@ func (e *Engine) ClearMessages() {
 	e.msgMu.Lock()
 	defer e.msgMu.Unlock()
 	e.messages = []provider.Message{}
+	// Forget loop-guard state too — a fresh session shouldn't
+	// inherit the previous conversation's tool-repeat counts or
+	// consecutive-error tally.
+	if e.loopGuard != nil {
+		e.loopGuard.Reset()
+	}
+}
+
+// ensureLoopGuard lazy-initialises the per-engine LoopGuard. Calling
+// it from dispatchTools means we don't pay the construction cost for
+// engines that never run tools (e.g. text-only test harnesses).
+func (e *Engine) ensureLoopGuard() *LoopGuard {
+	if e.loopGuard == nil {
+		e.loopGuard = NewLoopGuard()
+	}
+	return e.loopGuard
 }
 
 // TruncateMessages keeps only the first n messages, discarding the rest.
@@ -766,6 +787,24 @@ func (e *Engine) loop(ctx context.Context, input string, out chan<- event.Event)
 		e.appendAssistantWithTools(turn)
 		results := e.dispatchTools(ctx, turn.ToolCalls, out)
 		e.appendToolResults(turn.ToolCalls, results)
+
+		// LoopGuard hardCap: count consecutive failures across all
+		// tools this turn; halt the agent loop if too many in a row.
+		// Distinct from softCap (per-input repeat) — catches a model
+		// that's churning on flaky network calls or transient errors
+		// without ever winning. Failures here include both real
+		// tool errors AND loop-guard short-circuits.
+		for _, r := range results {
+			e.ensureLoopGuard().RecordResult(r.Error != nil)
+		}
+		if halt, why := e.ensureLoopGuard().AgentShouldHalt(); halt {
+			sendEvent(ctx, out, event.Event{
+				Type: event.BudgetExceeded,
+				Info: why,
+			})
+			return
+		}
+
 		e.maybeCompact(ctx)
 	}
 
@@ -974,6 +1013,20 @@ func (e *Engine) dispatchTools(
 		}
 
 		e.perm.RecordCall(tc.Name, t.PermissionPattern(tc.Input))
+
+		// LoopGuard: short-circuit identical (tool, input) calls
+		// after softCap repeats. Synthetic result tells the model
+		// the loop was detected so it can change strategy. Skipped
+		// for calls already short-circuited above (permission deny,
+		// ask-deny) — those have EagerResult set.
+		if i := len(calls) - 1; calls[i].EagerResult == nil {
+			if looped, msg := e.ensureLoopGuard().Check(tc.Name, tc.Input); looped {
+				calls[i].EagerResult = &tool.Result{
+					Output: msg,
+					Title:  tc.Name + " (loop guard)",
+				}
+			}
+		}
 	}
 
 	// Fire PreToolUse hooks — may deny individual calls.
