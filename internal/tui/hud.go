@@ -36,6 +36,15 @@ type hudState struct {
 	SessionStart time.Time
 	SessionName  string // e.g. "starry-waddling-tulip"
 
+	// TurnStart is set on each user submit and zeroed when the turn
+	// settles. Busy mirrors App.busy. When Busy && !TurnStart.IsZero()
+	// the HUD shows "⟳ {turn}" instead of "⏱ {session}" so a fresh
+	// observer can tell at a glance which clock the number is on —
+	// avoids the round-5 confusion where the inline answer said "(8s)"
+	// and the footer said "31s" with no label to disambiguate.
+	TurnStart time.Time
+	Busy      bool
+
 	// Git
 	GitBranch  string
 	GitProject string
@@ -146,10 +155,23 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		}
 	}
 
-	// Session duration with emoji — CC style: ⏱️ 2m33s
-	if !h.SessionStart.IsZero() && width >= 50 {
-		dur := time.Since(h.SessionStart).Truncate(time.Second)
-		parts1 = append(parts1, dim.Render(formatDuration(dur)))
+	// Time chip — disambiguated with a glyph so users don't confuse the
+	// session clock with per-turn elapsed (round-5 dual-reviewer
+	// finding). When the engine is busy and a turn is in progress, show
+	// the TURN clock with ⟳; otherwise show the SESSION clock with ⏱.
+	// Two states, never both, always glyph-prefixed.
+	if width >= 50 {
+		if h.Busy && !h.TurnStart.IsZero() {
+			turn := time.Since(h.TurnStart).Truncate(time.Second)
+			if turn >= time.Second {
+				parts1 = append(parts1, dim.Render("⟳ "+formatDuration(turn)))
+			}
+		} else if !h.SessionStart.IsZero() {
+			dur := time.Since(h.SessionStart).Truncate(time.Second)
+			if dur >= time.Second {
+				parts1 = append(parts1, dim.Render("⏱ "+formatDuration(dur)))
+			}
+		}
 	}
 
 	line1 := strings.Join(parts1, sep)

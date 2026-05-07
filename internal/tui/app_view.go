@@ -146,6 +146,8 @@ func (a *App) buildHUDState() hudState {
 		ContextLimit:   ctxLimit,
 		SessionStart:   a.sessionStart,
 		SessionName:    a.sessionDisplayName(),
+		TurnStart:      a.turnStart,
+		Busy:           a.busy,
 		GitProject:     a.gitProject,
 		GitBranch:      a.gitBranch,
 		GitDirty:       a.gitDirty,
