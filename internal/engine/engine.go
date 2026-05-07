@@ -205,6 +205,12 @@ type Engine struct {
 	// didn't understand the previous result. DS-TUI parity.
 	// Lazy-initialised on first dispatch via ensureLoopGuard().
 	loopGuard *LoopGuard
+	// anchors are free-form facts the user wants to survive every
+	// compaction. Re-injected at the head of e.messages after each
+	// Compact() so the summarised history can drop them but the
+	// model still sees them on the next turn. DeepSeek-TUI #anchor
+	// parity. Mutated only under e.msgMu.
+	anchors map[string]string
 	// maxTurns overrides the default agent-loop iteration cap.
 	// 0 = use the package-level maxIterations constant.
 	maxTurns          int
@@ -571,7 +577,81 @@ func (e *Engine) Compact() int {
 	before := len(e.messages)
 	mc := compact.NewMicrocompactor(20)
 	e.messages = mc.Apply(e.messages)
+	// Re-inject anchored facts at the head so they survive the
+	// compaction. Anchors live OUTSIDE the message list so they
+	// can't be summarised away. DeepSeek-TUI #anchor parity.
+	e.reinjectAnchors()
 	return before - len(e.messages)
+}
+
+// SetAnchor stores a free-form fact that survives every compaction.
+// Anchors are re-injected into the message list as a leading user
+// message immediately after Compact() and are persisted alongside
+// the session in SQLite. Useful for "always remember the user is on
+// macOS", "the GitHub repo is jiayaoqijia/altcode", etc.
+//
+// Pass an empty value to clear the anchor with the given key.
+func (e *Engine) SetAnchor(key, value string) {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	if e.anchors == nil {
+		e.anchors = make(map[string]string)
+	}
+	if value == "" {
+		delete(e.anchors, key)
+	} else {
+		e.anchors[key] = value
+	}
+}
+
+// Anchors returns a snapshot copy of the current anchor map.
+func (e *Engine) Anchors() map[string]string {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	out := make(map[string]string, len(e.anchors))
+	for k, v := range e.anchors {
+		out[k] = v
+	}
+	return out
+}
+
+// reinjectAnchors prepends a synthetic user message containing the
+// current anchor list, so it's visible to the model after compaction
+// drops earlier turns. Caller must already hold e.msgMu.
+func (e *Engine) reinjectAnchors() {
+	if len(e.anchors) == 0 {
+		return
+	}
+	var parts []string
+	for k, v := range e.anchors {
+		parts = append(parts, "- "+k+": "+v)
+	}
+	body := "Persistent anchored facts (these survive compaction):\n" +
+		strings.Join(parts, "\n")
+	anchor := provider.TextMessage("user", body)
+	// Drop any prior anchor message — there should only ever be one.
+	filtered := e.messages[:0]
+	for _, m := range e.messages {
+		if !isAnchorMessage(m) {
+			filtered = append(filtered, m)
+		}
+	}
+	e.messages = append([]provider.Message{anchor}, filtered...)
+}
+
+func isAnchorMessage(m provider.Message) bool {
+	if m.Role != "user" {
+		return false
+	}
+	for _, p := range m.Parts {
+		if p.Type == "text" && strings.HasPrefix(p.Text, "Persistent anchored facts") {
+			return true
+		}
+	}
+	if m.Content != "" && strings.HasPrefix(m.Content, "Persistent anchored facts") {
+		return true
+	}
+	return false
 }
 
 // appendMessageLocked appends m to e.messages under the mutex. Used

@@ -55,6 +55,8 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		} else {
 			a.appendInfo(a.builtinModelText())
 		}
+	case "/anchor":
+		a.appendInfo(a.builtinAnchorText(parts))
 	case "/clear":
 		a.builtinClear()
 	case "/tools":
@@ -1685,6 +1687,39 @@ func (a *App) builtinSendText(parts []string) string {
 // follow-up implementation is now scoped.
 
 // builtinResumeText prints recent sessions and the resume invocation.
+// builtinAnchorText sets / lists / clears anchored facts that survive
+// compaction. DeepSeek-TUI #anchor parity.
+//
+//   /anchor                    list current anchors
+//   /anchor key value...       set an anchor
+//   /anchor key                clear that anchor (no value supplied)
+func (a *App) builtinAnchorText(parts []string) string {
+	if a.engine == nil {
+		return "[anchor] engine not initialised"
+	}
+	if len(parts) < 2 {
+		anchors := a.engine.Anchors()
+		if len(anchors) == 0 {
+			return "[anchor] no anchored facts. " +
+				"Set with: /anchor <key> <value...> — e.g. " +
+				"/anchor stack the user is on macOS arm64."
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("[anchor] %d anchored facts (survive compaction):\n", len(anchors)))
+		for k, v := range anchors {
+			sb.WriteString("  - " + k + ": " + v + "\n")
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
+	key := parts[1]
+	value := strings.Join(parts[2:], " ")
+	a.engine.SetAnchor(key, value)
+	if value == "" {
+		return fmt.Sprintf("[anchor] cleared %q", key)
+	}
+	return fmt.Sprintf("[anchor] set %q → %q", key, value)
+}
+
 func (a *App) builtinResumeText(parts []string) string {
 	if len(parts) >= 2 {
 		return fmt.Sprintf("[resume] To resume session %q, restart altcode with:\n  altcode --resume %s",
