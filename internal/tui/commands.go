@@ -586,10 +586,26 @@ func (a *App) builtinClear() {
 	a.toolCounts = make(map[string]int)
 	a.tokensIn = 0
 	a.tokensOut = 0
+	a.currentContextTokens = 0
+	a.cachedTokens = 0
 	a.costUSD = 0
+	// Forget the per-tool auto-allow notices so a fresh session can
+	// surface the first one again instead of silently inheriting the
+	// "[auto-allow] bash" suppression from the cleared session.
+	a.autoAllowSeen = nil
 	a.tools.Clear()
 	a.messages = append(a.messages, chatMessage{role: roleInfo, content: "Conversation cleared."})
+	// Snap viewport back to the top — without this, when /clear
+	// follows /help (or any long-output command that scrolled the
+	// viewport past the visible window), the viewport would keep its
+	// stale YOffset, and the freshly-cleared content would render
+	// invisibly above the visible area until the next prompt grew
+	// the content past that offset. The userScrolledAway flag is
+	// also reset so subsequent prompts auto-scroll to the bottom
+	// like a fresh session.
+	a.userScrolledAway = false
 	a.updateViewport()
+	a.viewport.GotoTop()
 }
 
 func (a *App) builtinToolsText() string {
