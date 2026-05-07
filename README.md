@@ -410,7 +410,20 @@ internal/
 make build          # Build binary (dist/altcode)
 make test           # Run 400+ tests with race detector
 make lint           # Run go vet
+make verify         # Per-version pre-ship gate — walks every command in
+                    # README + altcode.io and confirms it works against
+                    # the binary you're about to ship. Run before every
+                    # release. (53 checks across 7 sections.)
+make verify-remote  # Same + also fetches https://altcode.io/bin/<asset>
+                    # and diffs the SHA against docs/bin/ to catch
+                    # "shipped a stale binary" regressions.
+make release VERSION=vX.Y.Z
+                    # Full release: verify → rebuild 4 platforms with
+                    # ldflags → bump docs/index.html chip → print the
+                    # 4 git/push steps you need to run by hand.
 ```
+
+The `verify-instructions.sh` script is the single source of truth for "is this version fit to ship". When you change a documented command, add it there. When `make verify` fails, the README/webpage drifted from reality — fix the README, the webpage, or the binary, never the test.
 
 ## Links
 
