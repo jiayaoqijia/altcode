@@ -145,6 +145,9 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 	paletteCmds := buildPaletteCommands(cmdMap)
 	pal := NewPalette(theme, paletteCmds)
 	sw := NewSessionSwitcher(theme)
+	projectRoot := detectProjectRoot()
+	tt := newToolTree()
+	tt.projectRoot = projectRoot
 
 	return &App{
 		engine:          eng,
@@ -156,8 +159,8 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		input:           ti,
 		palette:         pal,
 		sessionSwitcher: sw,
-		projectRoot:     detectProjectRoot(),
-		tools:           newToolTree(),
+		projectRoot:     projectRoot,
+		tools:           tt,
 		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
 		sessionSlug:     generateSessionSlug(),

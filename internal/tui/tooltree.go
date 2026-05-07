@@ -65,7 +65,11 @@ type toolEntry struct {
 // toolTree manages the list of tool calls for the current turn.
 type toolTree struct {
 	entries []toolEntry
-	active  int // index of currently running tool, -1 if none
+	active  int    // index of currently running tool, -1 if none
+	// projectRoot is captured by the App and used to absolutise file
+	// paths emitted in tool output, so the OSC-8 hyperlinks render
+	// correctly (file:// requires absolute paths).
+	projectRoot string
 }
 
 func newToolTree() *toolTree {
@@ -395,13 +399,18 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 			sb.WriteString(line)
 			sb.WriteByte('\n')
 
-			// Render output below the tool entry (CC style: ⎿ output lines)
+			// Render output below the tool entry (CC style: ⎿ output lines).
+			// Project root is captured at render time and passed to the
+			// output formatter so file:line refs in tool output become
+			// OSC-8 hyperlinks (DeepSeek-TUI #374). Empty root falls
+			// back to relative file:// URIs (some terminals still
+			// render those as clickable anyway).
 			if e.output != "" && e.status != "running" {
 				connColor := theme.Border
 				if e.status == "error" {
 					connColor = theme.Error // red connector for errors
 				}
-				outputLines := formatToolOutput(e.name, e.output, theme, max(10, width-6))
+				outputLines := formatToolOutput(e.name, e.output, theme, max(10, width-6), t.projectRoot)
 				for _, ol := range outputLines {
 					sb.WriteString("   " + lipgloss.NewStyle().Foreground(connColor).Render("⎿") + "  " + ol + "\n")
 				}
@@ -413,9 +422,9 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 
 // formatToolOutput formats tool result output for display below the tool entry.
 // Edit/Write: shows diff lines with +/- coloring and line numbers.
-// Bash: shows truncated output lines.
-// Other: shows first few lines of output.
-func formatToolOutput(toolName, output string, theme Theme, maxWidth int) []string {
+// Bash: shows truncated output lines (with file:line OSC-8 hyperlinks).
+// Other: shows first few lines of output (with file:line OSC-8 hyperlinks).
+func formatToolOutput(toolName, output string, theme Theme, maxWidth int, projectRoot string) []string {
 	if output == "" {
 		return nil
 	}
@@ -426,9 +435,9 @@ func formatToolOutput(toolName, output string, theme Theme, maxWidth int) []stri
 	case "Edit", "Write":
 		return formatDiffOutput(lines, theme, maxWidth, maxLines)
 	case "Bash":
-		return formatBashOutput(lines, theme, maxWidth, maxLines)
+		return formatBashOutput(lines, theme, maxWidth, maxLines, projectRoot)
 	default:
-		return formatGenericOutput(lines, theme, maxWidth, maxLines)
+		return formatGenericOutput(lines, theme, maxWidth, maxLines, projectRoot)
 	}
 }
 
@@ -458,8 +467,10 @@ func formatDiffOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 	return result
 }
 
-// formatBashOutput renders command output with truncation.
-func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int) []string {
+// formatBashOutput renders command output with truncation. File-path
+// refs (path:line[:col]) get wrapped in OSC-8 hyperlinks before the
+// dim styling — the terminal nests color around the link cleanly.
+func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int, projectRoot string) []string {
 	var result []string
 	dim := lipgloss.NewStyle().Foreground(theme.Muted)
 
@@ -472,13 +483,18 @@ func formatBashOutput(lines []string, theme Theme, maxWidth, maxLines int) []str
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		result = append(result, dim.Render(truncateStr(line, maxWidth)))
+		// Truncate FIRST (visual-width math doesn't account for OSC-8
+		// escapes — lipgloss.Width returns 0 for them, but the regex
+		// matches the truncated text just as well as the full line).
+		truncated := truncateStr(line, maxWidth)
+		result = append(result, dim.Render(LinkifyFileRefs(truncated, projectRoot)))
 	}
 	return result
 }
 
-// formatGenericOutput renders generic tool output.
-func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int) []string {
+// formatGenericOutput renders generic tool output, wrapping file:line
+// refs in OSC-8 hyperlinks so users can click straight to the source.
+func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int, projectRoot string) []string {
 	var result []string
 	dim := lipgloss.NewStyle().Foreground(theme.Muted)
 
@@ -492,7 +508,8 @@ func formatGenericOutput(lines []string, theme Theme, maxWidth, maxLines int) []
 		if trimmed == "" {
 			continue
 		}
-		result = append(result, dim.Render(truncateStr(trimmed, maxWidth)))
+		truncated := truncateStr(trimmed, maxWidth)
+		result = append(result, dim.Render(LinkifyFileRefs(truncated, projectRoot)))
 	}
 	return result
 }
