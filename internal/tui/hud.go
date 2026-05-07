@@ -260,11 +260,22 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		}
 	}
 
-	// Build line 2: left progress │ right resources
-	parts2 := append(leftParts, rightParts...)
+	// Build line 2: left progress │ right resources. When both sides
+	// are populated, render an emphasised separator between them so
+	// the visual grouping reads at a glance even on narrow terminals.
+	// CC round-5 nit: at narrow widths the left/right halves looked
+	// "run-together" without a clear divider.
 	line2 := ""
-	if len(parts2) > 0 {
-		line2 = "  " + strings.Join(parts2, sep)
+	switch {
+	case len(leftParts) > 0 && len(rightParts) > 0:
+		spacer := lipgloss.NewStyle().Foreground(theme.Border).Render(" │ ")
+		left := strings.Join(leftParts, sep)
+		right := strings.Join(rightParts, sep)
+		line2 = "  " + left + spacer + right
+	case len(leftParts) > 0:
+		line2 = "  " + strings.Join(leftParts, sep)
+	case len(rightParts) > 0:
+		line2 = "  " + strings.Join(rightParts, sep)
 	}
 
 	// Pad both lines to width

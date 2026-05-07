@@ -207,12 +207,22 @@ func (a *App) welcomeHeader(logoStyle, mutedStyle lipgloss.Style, version string
 	if i := strings.LastIndex(short, "/"); i >= 0 {
 		short = short[i+1:]
 	}
+	// Quiet two-tone tip palette so the welcome screen feels like a
+	// finished product, not a placeholder. Round-5 polish pass.
+	keyStyle := lipgloss.NewStyle().Foreground(a.theme.Warning).Bold(true)
+	codeStyle := lipgloss.NewStyle().Foreground(a.theme.Secondary)
+	bullet := mutedStyle.Render("  •")
 	return []string{
 		logoStyle.Render("⌬ altcode") +
 			mutedStyle.Render("  v"+displayVersion(version)) +
 			lipgloss.NewStyle().Foreground(a.theme.Secondary).Bold(true).Render("  ["+short+"]"),
+		mutedStyle.Render("  the universal agent harness for coding"),
 		"",
-		mutedStyle.Render("  Type a prompt to start. /help for commands. Ctrl+K for palette."),
+		bullet + mutedStyle.Render(" type a prompt and press ") + keyStyle.Render("Enter") + mutedStyle.Render(" to start"),
+		bullet + mutedStyle.Render(" press ") + keyStyle.Render("Ctrl+K") + mutedStyle.Render(" for the command palette, ") + keyStyle.Render("/help") + mutedStyle.Render(" for keys"),
+		bullet + mutedStyle.Render(" attach files with ") + keyStyle.Render("@path") + mutedStyle.Render(" — fuzzy match on tab"),
+		bullet + mutedStyle.Render(" cycle thinking effort with ") + keyStyle.Render("Shift+Tab") + mutedStyle.Render(" (when supported)"),
+		bullet + mutedStyle.Render(" hot-swap model: ") + codeStyle.Render("/model haiku") + mutedStyle.Render(" or ") + codeStyle.Render("/model deepseek-v4-pro"),
 	}
 }
 
