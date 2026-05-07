@@ -23,11 +23,38 @@ type Theme struct {
 	DiffDel    lipgloss.Color // diff removed lines
 }
 
-// DefaultTheme — warm amber/teal palette (distinctive, not generic AI purple).
+// DefaultTheme — modern dusk palette (Tailwind-inspired). Soft violet
+// primary balanced by a teal secondary; semantic colors lifted from
+// Tailwind's 300/400 stops so the contrast against the dark slate
+// background is high enough for most terminals (≥ 7:1 on key surfaces)
+// while staying easy on the eyes for long sessions.
+//
+// The earlier amber/teal default felt like Atom One Dark from 2017;
+// modern terminal users (Catppuccin / Tokyo Night era) expect a
+// cooler, more saturated dusk palette. Old amber is preserved as
+// the "amber" named theme below.
 var DefaultTheme = Theme{
 	Name:       "default",
-	Primary:    lipgloss.Color("#E0A458"), // warm amber — distinctive identity
-	Secondary:  lipgloss.Color("#5BA8A0"), // teal — calm contrast
+	Primary:    lipgloss.Color("#A78BFA"), // violet-400 — distinctive AI accent
+	Secondary:  lipgloss.Color("#5EEAD4"), // teal-300 — calm contrast
+	Error:      lipgloss.Color("#FB7185"), // rose-400
+	Warning:    lipgloss.Color("#FCD34D"), // amber-300
+	Success:    lipgloss.Color("#86EFAC"), // green-300
+	Muted:      lipgloss.Color("#64748B"), // slate-500 — readable dim
+	Background: lipgloss.Color("#0F1419"), // near-black slate
+	Foreground: lipgloss.Color("#E2E8F0"), // slate-200
+	Border:     lipgloss.Color("#1E293B"), // slate-800 — soft frame
+	HeaderBg:   lipgloss.Color("#181C23"), // slightly lifted slate
+	DiffAdd:    lipgloss.Color("#34D399"), // emerald-400
+	DiffDel:    lipgloss.Color("#F87171"), // red-400
+}
+
+// AmberClassic preserves the original altcode default for users who
+// liked the warm amber/teal identity. Activate via /theme amber.
+var AmberClassic = Theme{
+	Name:       "amber",
+	Primary:    lipgloss.Color("#E0A458"),
+	Secondary:  lipgloss.Color("#5BA8A0"),
 	Error:      lipgloss.Color("#E06C75"),
 	Warning:    lipgloss.Color("#D19A66"),
 	Success:    lipgloss.Color("#98C379"),
@@ -38,6 +65,24 @@ var DefaultTheme = Theme{
 	HeaderBg:   lipgloss.Color("#1A1D23"),
 	DiffAdd:    lipgloss.Color("#98C379"),
 	DiffDel:    lipgloss.Color("#E06C75"),
+}
+
+// RosePine is the soft, dusty Rose Pine palette — gaining traction in
+// 2025/2026 alongside Catppuccin and Tokyo Night.
+var RosePine = Theme{
+	Name:       "rose-pine",
+	Primary:    lipgloss.Color("#C4A7E7"), // iris
+	Secondary:  lipgloss.Color("#9CCFD8"), // foam
+	Error:      lipgloss.Color("#EB6F92"), // love
+	Warning:    lipgloss.Color("#F6C177"), // gold
+	Success:    lipgloss.Color("#31748F"), // pine
+	Muted:      lipgloss.Color("#6E6A86"), // muted
+	Background: lipgloss.Color("#191724"), // base
+	Foreground: lipgloss.Color("#E0DEF4"), // text
+	Border:     lipgloss.Color("#26233A"), // overlay
+	HeaderBg:   lipgloss.Color("#1F1D2E"), // surface
+	DiffAdd:    lipgloss.Color("#31748F"), // pine
+	DiffDel:    lipgloss.Color("#EB6F92"), // love
 }
 
 // CatppuccinMocha is the Catppuccin Mocha palette.
@@ -128,6 +173,8 @@ var SolarizedDark = Theme{
 // Themes maps theme names to their definitions.
 var Themes = map[string]Theme{
 	"default":          DefaultTheme,
+	"amber":            AmberClassic,
+	"rose-pine":        RosePine,
 	"catppuccin-mocha": CatppuccinMocha,
 	"dracula":          Dracula,
 	"nord":             Nord,
