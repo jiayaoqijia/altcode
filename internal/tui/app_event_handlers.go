@@ -56,8 +56,17 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	if ev.Permission == nil || ev.Permission.Response == nil {
 		return a, a.waitForEvent()
 	}
-	a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json",
-		ev.Permission.ToolName))
+	// Surface the auto-allow info ONCE per tool name per session.
+	// A 6-bash-call turn used to print the same line 6 times, drowning
+	// the actual tool tree in repeated boilerplate.
+	if a.autoAllowSeen == nil {
+		a.autoAllowSeen = make(map[string]bool)
+	}
+	if !a.autoAllowSeen[ev.Permission.ToolName] {
+		a.autoAllowSeen[ev.Permission.ToolName] = true
+		a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json",
+			ev.Permission.ToolName))
+	}
 	// Non-blocking send: respCh has cap=1 (set in engine.askPermission),
 	// so the first send always succeeds. Default branch is defensive
 	// against a future change to channel capacity.

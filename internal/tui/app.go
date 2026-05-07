@@ -105,6 +105,11 @@ type App struct {
 	// 66.7ms → 0.5ms per updateViewport once the prefix is cached.
 	renderCache    string
 	renderCacheLen int
+	// autoAllowSeen tracks which tool names have already had their
+	// "[auto-allow]" info note shown this session. Prevents the same
+	// 1-line note from repeating once per tool call (a 6-bash turn
+	// used to print 6 identical lines drowning the real tool tree).
+	autoAllowSeen map[string]bool
 	// userScrolledAway tracks whether the user has actively scrolled the
 	// viewport away from the bottom. Set on pgup / ctrl+up, cleared on
 	// pgdown-to-bottom or on prompt submit. Iteration-2 of autoresearch

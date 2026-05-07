@@ -79,3 +79,59 @@ func TestOnPermissionRequest_NilResponseChannelNoOps(t *testing.T) {
 		t.Errorf("nil response channel produced spurious info: %+v", a.messages)
 	}
 }
+
+// TestOnPermissionRequest_InfoEmittedOncePerTool guards against the
+// info-message spam regression: a 6-bash-call turn was producing 6
+// identical "[auto-allow] bash" lines that drowned the actual tool
+// tree. The handler now tracks per-tool-name and surfaces ONCE.
+func TestOnPermissionRequest_InfoEmittedOncePerTool(t *testing.T) {
+	a := testApp()
+
+	for i := 0; i < 5; i++ {
+		respCh := make(chan event.PermResponse, 1)
+		a.handleEvent(event.Event{
+			Type: event.PermissionRequest,
+			Permission: &event.PermReq{
+				ToolName: "bash",
+				Pattern:  "bash:ls",
+				Response: respCh,
+			},
+		})
+		// Drain the response so each loop matches a real tool dispatch.
+		<-respCh
+	}
+
+	infoCount := 0
+	for _, m := range a.messages {
+		if m.role == roleInfo && strings.Contains(m.content, "auto-allow") &&
+			strings.Contains(m.content, "bash") {
+			infoCount++
+		}
+	}
+	if infoCount != 1 {
+		t.Errorf("got %d auto-allow info messages, want 1 (per-tool dedup)", infoCount)
+	}
+
+	// A different tool name must still surface its own first-time note.
+	respCh := make(chan event.PermResponse, 1)
+	a.handleEvent(event.Event{
+		Type: event.PermissionRequest,
+		Permission: &event.PermReq{
+			ToolName: "write",
+			Pattern:  "write:/tmp/x",
+			Response: respCh,
+		},
+	})
+	<-respCh
+
+	writeNotices := 0
+	for _, m := range a.messages {
+		if m.role == roleInfo && strings.Contains(m.content, "auto-allow") &&
+			strings.Contains(m.content, "write") {
+			writeNotices++
+		}
+	}
+	if writeNotices != 1 {
+		t.Errorf("got %d write notices, want 1", writeNotices)
+	}
+}
