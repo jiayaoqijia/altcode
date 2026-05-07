@@ -286,8 +286,34 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 			a.lastBell = time.Now()
 		}
 	}
+
+	// Drain the type-ahead queue: if the user typed prompts while
+	// this turn was running, fire the next one automatically. One
+	// drain per onDone keeps each prompt distinct (each gets its
+	// own turn / cost / context). DeepSeek-TUI parity.
+	if cmd := a.drainQueue(); cmd != nil {
+		a.updateViewport()
+		return a, cmd
+	}
+
 	a.updateViewport()
 	return a, nil
+}
+
+// drainQueue pops the head of the type-ahead queue (if any) and
+// returns the submit command for it. Called from onDone() after a
+// turn completes. Empty queue → nil.
+func (a *App) drainQueue() tea.Cmd {
+	if len(a.queue) == 0 {
+		return nil
+	}
+	next := a.queue[0]
+	a.queue = a.queue[1:]
+	a.input.SetValue(next)
+	if len(a.queue) > 0 {
+		a.appendInfo(fmt.Sprintf("[queue] dequeued — %d remaining", len(a.queue)))
+	}
+	return a.submit()
 }
 
 // buildTurnSummary creates a compact "✓ 2 files · 1 command · $0.03 · 45s" line.

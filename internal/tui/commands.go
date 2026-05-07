@@ -9,6 +9,7 @@ import (
 	"runtime"
 	"runtime/debug"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,8 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		}
 	case "/anchor":
 		a.appendInfo(a.builtinAnchorText(parts))
+	case "/queue":
+		a.appendInfo(a.builtinQueueText(parts))
 	case "/clear":
 		a.builtinClear()
 	case "/tools":
@@ -1718,6 +1721,52 @@ func (a *App) builtinAnchorText(parts []string) string {
 		return fmt.Sprintf("[anchor] cleared %q", key)
 	}
 	return fmt.Sprintf("[anchor] set %q → %q", key, value)
+}
+
+// builtinQueueText inspects/edits/clears the type-ahead prompt queue.
+// DeepSeek-TUI parity for `/queue list|clear|drop <n>`.
+//
+//   /queue                    list queued prompts (1-indexed)
+//   /queue clear              drop all queued prompts
+//   /queue drop <n>           drop the n-th queued prompt
+func (a *App) builtinQueueText(parts []string) string {
+	if len(parts) < 2 || parts[1] == "list" {
+		if len(a.queue) == 0 {
+			return "[queue] empty. Type a prompt while a turn is running and it'll be queued automatically."
+		}
+		var sb strings.Builder
+		sb.WriteString(fmt.Sprintf("[queue] %d prompt(s) waiting:\n", len(a.queue)))
+		for i, p := range a.queue {
+			snippet := p
+			if len(snippet) > 80 {
+				snippet = snippet[:77] + "…"
+			}
+			sb.WriteString(fmt.Sprintf("  %d. %s\n", i+1, snippet))
+		}
+		return strings.TrimRight(sb.String(), "\n")
+	}
+	switch parts[1] {
+	case "clear":
+		n := len(a.queue)
+		a.queue = nil
+		return fmt.Sprintf("[queue] cleared %d prompt(s)", n)
+	case "drop":
+		if len(parts) < 3 {
+			return "[queue] drop needs an index: /queue drop 2"
+		}
+		idx, err := strconv.Atoi(parts[2])
+		if err != nil || idx < 1 || idx > len(a.queue) {
+			return fmt.Sprintf("[queue] invalid index %q (have %d items)", parts[2], len(a.queue))
+		}
+		dropped := a.queue[idx-1]
+		a.queue = append(a.queue[:idx-1], a.queue[idx:]...)
+		snippet := dropped
+		if len(snippet) > 60 {
+			snippet = snippet[:57] + "…"
+		}
+		return fmt.Sprintf("[queue] dropped #%d: %q", idx, snippet)
+	}
+	return "[queue] usage: /queue [list|clear|drop <n>]"
 }
 
 func (a *App) builtinResumeText(parts []string) string {

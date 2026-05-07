@@ -98,6 +98,10 @@ type App struct {
 	turnTokenStart int64            // tokens at turn start (for delta)
 	cachedTokens   int64            // last turn's cached prompt tokens (HUD chip)
 	lastFrame      time.Time        // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
+	// queue is the type-ahead FIFO for prompts entered while the
+	// current turn is running. Drained by drainQueue() in onDone().
+	// DeepSeek-TUI parity for `/queue` workflow.
+	queue          []string
 	prevContentLen int              // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common
@@ -413,6 +417,21 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.inputHistory.Add(text)
 	a.inputHistory.Reset()
+
+	// Type-ahead queue (DeepSeek-TUI parity): if a turn is already
+	// running, push this prompt onto a FIFO queue and surface a
+	// non-blocking info note. The queue is drained automatically
+	// when onDone() fires for the in-flight turn — see drainQueue().
+	// Slash commands still execute immediately because they're
+	// metadata, not LLM turns.
+	if a.busy && !strings.HasPrefix(text, "/") {
+		a.queue = append(a.queue, text)
+		a.appendInfo(fmt.Sprintf("[queue] +1 — %d prompt(s) waiting; will run after the current turn",
+			len(a.queue)))
+		a.updateViewport()
+		return nil
+	}
+
 	a.messages = append(a.messages, chatMessage{role: roleUser, content: text})
 	a.streaming = ""
 	// Submitting a new prompt re-engages auto-follow. Autoresearch
