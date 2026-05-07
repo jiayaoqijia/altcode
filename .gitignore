@@ -15,6 +15,11 @@ target/
 *.so
 *.dylib
 
+# Screenshot/debug artifacts at repo root — TUI captures, Playwright bug
+# series, etc. Real docs imagery lives under docs/images/ (negation below).
+/*.png
+!/docs/images/*.png
+
 # IDE
 .idea/
 .vscode/
