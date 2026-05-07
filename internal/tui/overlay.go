@@ -52,16 +52,9 @@ func (a *App) toggleSessionSwitcher() {
 	a.input.Blur()
 }
 
-// mainBodyWidth returns the width of the main area (total minus sidebar).
-// Overlays render into this space, not the full terminal width.
+// mainBodyWidth returns the width of the main area. With the sidebar
+// removed, this is simply the full terminal width.
 func (a *App) mainBodyWidth() int {
-	if a.width >= 100 {
-		sidebar := a.width / 4
-		if sidebar > 30 {
-			sidebar = 30
-		}
-		return a.width - sidebar
-	}
 	return a.width
 }
 

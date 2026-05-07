@@ -86,11 +86,7 @@ func (a *App) renderMainBody() string {
 			mainBody = panes
 		}
 	}
-	body := mainBody
-	if a.sidebar.width > 0 && !a.teamView.IsActive() {
-		body = lipgloss.JoinHorizontal(lipgloss.Top, mainBody, a.sidebar.View())
-	}
-	return body
+	return mainBody
 }
 
 // buildToolActive returns the HUD tool activity string.

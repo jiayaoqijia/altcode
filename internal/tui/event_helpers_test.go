@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -129,43 +128,6 @@ func TestExtractToolOutput_ErrorOverridesOutput(t *testing.T) {
 	_, output := extractToolOutput(ev)
 	if output != "permission denied" {
 		t.Errorf("output = %q, want error message", output)
-	}
-}
-
-// TestToolFilePath_NilCallReturnsEmpty covers the nil guard.
-func TestToolFilePath_NilCallReturnsEmpty(t *testing.T) {
-	if got := toolFilePath(nil); got != "" {
-		t.Errorf("nil call = %q, want empty", got)
-	}
-}
-
-// TestToolFilePath_HappyPath extracts the file_path key from JSON input.
-func TestToolFilePath_HappyPath(t *testing.T) {
-	input, _ := json.Marshal(map[string]string{
-		"file_path": "/tmp/hello.go",
-		"content":   "package main",
-	})
-	tc := &event.ToolCall{Input: input}
-	if got := toolFilePath(tc); got != "/tmp/hello.go" {
-		t.Errorf("got %q, want /tmp/hello.go", got)
-	}
-}
-
-// TestToolFilePath_MissingKeyReturnsEmpty
-func TestToolFilePath_MissingKeyReturnsEmpty(t *testing.T) {
-	input, _ := json.Marshal(map[string]string{"some_other_key": "x"})
-	tc := &event.ToolCall{Input: input}
-	if got := toolFilePath(tc); got != "" {
-		t.Errorf("got %q, want empty", got)
-	}
-}
-
-// TestToolFilePath_BadJSONReturnsEmpty exercises the unmarshal-error
-// branch.
-func TestToolFilePath_BadJSONReturnsEmpty(t *testing.T) {
-	tc := &event.ToolCall{Input: json.RawMessage("not valid json {{{")}
-	if got := toolFilePath(tc); got != "" {
-		t.Errorf("got %q, want empty for bad JSON", got)
 	}
 }
 

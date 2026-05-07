@@ -41,32 +41,15 @@ func TestApp_ToggleSessionSwitcher(t *testing.T) {
 	}
 }
 
-// TestApp_MainBodyWidth_NarrowReturnsFullWidth covers the small-terminal
-// branch where the sidebar is suppressed.
-func TestApp_MainBodyWidth_NarrowReturnsFullWidth(t *testing.T) {
-	a := testApp()
-	a.width = 80
-	if got := a.mainBodyWidth(); got != 80 {
-		t.Errorf("narrow mainBodyWidth = %d, want 80", got)
-	}
-}
-
-// TestApp_MainBodyWidth_WideReservesSidebar covers the >=100 branch
-// where 1/4 of the width (capped at 30) goes to the sidebar.
-func TestApp_MainBodyWidth_WideReservesSidebar(t *testing.T) {
-	cases := []struct {
-		width    int
-		wantMain int
-	}{
-		{100, 75},  // 100/4 = 25; main = 100-25
-		{120, 90},  // 120/4 = 30 (cap); main = 120-30
-		{200, 170}, // 200/4 = 50, capped at 30; main = 200-30
-	}
-	for _, c := range cases {
+// TestApp_MainBodyWidth_AlwaysFullWidth covers the simplified width
+// calculation after the sidebar was removed — overlays now use the full
+// terminal width regardless of size.
+func TestApp_MainBodyWidth_AlwaysFullWidth(t *testing.T) {
+	for _, w := range []int{60, 80, 100, 120, 200} {
 		a := testApp()
-		a.width = c.width
-		if got := a.mainBodyWidth(); got != c.wantMain {
-			t.Errorf("width=%d: mainBodyWidth = %d, want %d", c.width, got, c.wantMain)
+		a.width = w
+		if got := a.mainBodyWidth(); got != w {
+			t.Errorf("width=%d: mainBodyWidth = %d, want %d", w, got, w)
 		}
 	}
 }

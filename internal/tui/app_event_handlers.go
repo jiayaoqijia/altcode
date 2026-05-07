@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -459,10 +458,10 @@ func (a *App) recordToolSuccess(ev event.Event, toolID, title string, elapsed ti
 	}
 }
 
-// recordToolMeta updates tool counts, task tracking, and sidebar.
-// hasError tools still get a turn tick (they happened) but don't
-// inflate the per-type success counters shown in the HUD / turn summary.
-func (a *App) recordToolMeta(ev event.Event, title string, hasError bool) {
+// recordToolMeta updates tool counts and task tracking. hasError tools
+// still get a turn tick (they happened) but don't inflate the per-type
+// success counters shown in the HUD / turn summary.
+func (a *App) recordToolMeta(ev event.Event, _ string, hasError bool) {
 	toolName := ""
 	if ev.ToolCall != nil {
 		toolName = ev.ToolCall.Name
@@ -487,42 +486,4 @@ func (a *App) recordToolMeta(ev event.Event, title string, hasError bool) {
 	if ev.ToolCall != nil {
 		a.trackTaskFromTool(ev.ToolCall)
 	}
-	if !hasError {
-		switch strings.ToLower(toolName) {
-		case "edit", "write", "apply_patch":
-			// Use the raw file_path from the tool input, not the
-			// tool's Title. Write returns 'write /path' and Edit
-			// returns 'edit /path' — different strings, so the
-			// sidebar would list the same file twice after a
-			// Write→Edit cycle. Pulling from tool input gives a
-			// stable key for dedup.
-			if path := toolFilePath(ev.ToolCall); path != "" {
-				a.sidebar.AddFile(path, 1, 0)
-			} else if title != "" {
-				a.sidebar.AddFile(title, 1, 0)
-			}
-		}
-	}
-}
-
-// toolFilePath extracts the file_path argument from a file-touching
-// tool call so the sidebar can key changes by absolute path instead of
-// each tool's bespoke Title format.
-func toolFilePath(tc *event.ToolCall) string {
-	if tc == nil || len(tc.Input) == 0 {
-		return ""
-	}
-	var input map[string]json.RawMessage
-	if json.Unmarshal(tc.Input, &input) != nil {
-		return ""
-	}
-	v, ok := input["file_path"]
-	if !ok {
-		return ""
-	}
-	var s string
-	if json.Unmarshal(v, &s) != nil {
-		return ""
-	}
-	return s
 }

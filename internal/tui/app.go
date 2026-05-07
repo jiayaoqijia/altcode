@@ -59,7 +59,6 @@ type App struct {
 	sessionTitle string // Display label set by /rename
 	tools        *toolTree
 	toolStart   time.Time
-	sidebar     *sidebar
 	spinner     spinner.Model
 
 	messages         []chatMessage
@@ -178,7 +177,6 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		sessionSwitcher: sw,
 		projectRoot:     projectRoot,
 		tools:           tt,
-		sidebar:         newSidebar(theme),
 		sessionStart:    time.Now(),
 		sessionSlug:     generateSessionSlug(),
 		inputHistory:    newPersistentInputHistory(DefaultHistoryPath()),
@@ -273,20 +271,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		// Split: sidebar gets 25% on wide terminals, hidden on narrow
-		sidebarWidth := 0
 		mainWidth := msg.Width
-		if msg.Width >= 100 {
-			sidebarWidth = msg.Width / 4
-			if sidebarWidth > 30 {
-				sidebarWidth = 30
-			}
-			mainWidth = msg.Width - sidebarWidth
-		}
 		// Height: header(1) + sep(1) + body + HUD(2) + input(3) = 7 lines overhead
 		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
 		a.mdRenderer = NewMarkdownRenderer(max(10, mainWidth-4))
-		a.sidebar.SetSize(sidebarWidth, max(1, msg.Height-6))
 		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
 		if a.wsView != nil {
 			a.wsView.SetSize(msg.Width, max(1, msg.Height-6))
@@ -296,10 +284,6 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		a.input.SetWidth(max(1, msg.Width-2))
 		a.setupInput.Width = max(1, msg.Width-2)
-		// Overlays (palette + session switcher) render into mainBody,
-		// which lives inside mainWidth — NOT the full terminal width.
-		// Passing msg.Width makes the rounded border spill into the
-		// sidebar column and stack '╮│' / '╯│' at the right edge.
 		a.palette.SetWidth(mainWidth)
 		a.sessionSwitcher.SetWidth(mainWidth)
 		a.updateViewport()
