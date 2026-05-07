@@ -1131,7 +1131,9 @@ func TestCCParity_HUD_ContextBar(t *testing.T) {
 	if !strings.Contains(plain, "░") {
 		t.Error("missing empty blocks in context bar")
 	}
-	if !strings.Contains(plain, "$0.1234") {
+	// Adaptive precision per formatUSD: 0.1234 → "$0.123" (sub-$1 uses
+	// 3 decimals so cents read clearly without losing precision).
+	if !strings.Contains(plain, "$0.123") {
 		t.Errorf("missing cost display in:\n%s", plain)
 	}
 }
@@ -1404,7 +1406,9 @@ func TestCCParity_FullHUD_AllFeatures(t *testing.T) {
 		"git branch":  "main*",
 		"context %":   "48%",
 		"context bar": "█",
-		"cost":        "$1.2345",
+		// Adaptive precision per formatUSD: 1.2345 → "$1.23" (≥$1 uses 2 decimals
+		// so big costs read naturally; sub-$1 keeps more precision elsewhere).
+		"cost":        "$1.23",
 		"CLAUDE.md":   "2 CLAUDE.md",
 		"MCPs":        "4 MCPs",
 		"hooks":       "3 hooks",

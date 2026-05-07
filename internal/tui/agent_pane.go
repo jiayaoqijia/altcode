@@ -101,8 +101,7 @@ func (p *wsAgentPane) Render(
 		fmt.Sprintf("turns:%d", p.Turns),
 	}
 	if p.CostUSD > 0 {
-		statusParts = append(statusParts,
-			fmt.Sprintf("$%.2f", p.CostUSD))
+		statusParts = append(statusParts, formatUSD(p.CostUSD))
 	}
 	if p.PRID > 0 {
 		statusParts = append(statusParts,

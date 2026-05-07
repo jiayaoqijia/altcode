@@ -256,10 +256,11 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		rightParts = append(rightParts, dim.Render(strings.Join(cfgParts, " | ")))
 	}
 
-	// Cost (right)
+	// Cost (right) — adaptive precision via formatUSD so the chip
+	// matches the inline turn summary (round-5 finding).
 	if info.CostUSD > 0 {
 		rightParts = append(rightParts, lipgloss.NewStyle().Foreground(theme.Success).Render(
-			fmt.Sprintf("$%.4f", info.CostUSD)))
+			formatUSD(info.CostUSD)))
 	}
 
 	// Merge into parts2 — left progress first, then right resources

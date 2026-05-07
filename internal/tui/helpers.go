@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -34,6 +35,30 @@ func displayVersion(version string) string {
 		return "dev"
 	}
 	return v
+}
+
+// formatUSD renders a dollar amount with adaptive precision so the
+// HUD chip ($0.0026), the inline turn summary ($0.0053), and the /cost
+// command all show the SAME number for the SAME cost — round-5
+// dual-reviewer finding flagged the inconsistency between the
+// 4-decimal HUD and the 2-decimal inline summary ($0.0052 vs $0.01).
+//
+// Rules:
+//   - < $0.01 → 4 decimals so half-cent precision is preserved
+//   - < $1.00 → 3 decimals (e.g. $0.523)
+//   - ≥ $1.00 → 2 decimals (e.g. $12.34) so big costs read naturally
+func formatUSD(amount float64) string {
+	switch {
+	case amount < 0:
+		// Negative shouldn't happen, but render the magnitude
+		return "-" + formatUSD(-amount)
+	case amount < 0.01:
+		return fmt.Sprintf("$%.4f", amount)
+	case amount < 1.0:
+		return fmt.Sprintf("$%.3f", amount)
+	default:
+		return fmt.Sprintf("$%.2f", amount)
+	}
 }
 
 func welcomeWordmark() string {

@@ -108,6 +108,31 @@ func TestDisplayVersion(t *testing.T) {
 	}
 }
 
+// TestFormatUSD covers the adaptive precision rules: 4-decimal under
+// $0.01 (preserves half-cent), 3-decimal $0.01–$1 (e.g. $0.523), and
+// 2-decimal at $1+ (natural reading for big costs). Round-5 finding:
+// the HUD chip and inline turn summary used to disagree at the same
+// cost level ($0.0052 vs $0.01); formatUSD makes them consistent.
+func TestFormatUSD(t *testing.T) {
+	cases := map[float64]string{
+		0:       "$0.0000",
+		0.0026:  "$0.0026", // sub-cent: 4-decimal preserves half-cents
+		0.0099:  "$0.0099",
+		0.01:    "$0.010",  // boundary: 3-decimal kicks in at exactly $0.01
+		0.123:   "$0.123",
+		0.999:   "$0.999",
+		1.0:     "$1.00", // ≥ $1: 2-decimal
+		1.2345:  "$1.23",
+		12.34:   "$12.34",
+		-0.0053: "-$0.0053", // negative: render magnitude with sign prefix
+	}
+	for in, want := range cases {
+		if got := formatUSD(in); got != want {
+			t.Errorf("formatUSD(%v) = %q, want %q", in, got, want)
+		}
+	}
+}
+
 func TestLooksLikeAuthError(t *testing.T) {
 	cases := []struct {
 		msg, provider string

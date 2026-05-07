@@ -386,10 +386,12 @@ func (a *App) buildTurnSummary() string {
 	if bashes > 0 {
 		parts = append(parts, fmt.Sprintf("%d command%s", bashes, plural(bashes)))
 	}
-	// Per-turn cost delta (not cumulative session cost)
+	// Per-turn cost delta (not cumulative session cost) — adaptive
+	// precision so the inline summary matches the HUD chip for the
+	// same number (round-5 finding).
 	turnCost := a.costUSD - a.turnCostStart
-	if turnCost > 0.001 {
-		parts = append(parts, fmt.Sprintf("$%.2f", turnCost))
+	if turnCost > 0.0001 {
+		parts = append(parts, formatUSD(turnCost))
 	}
 	// Per-turn token delta
 	turnTokens := (a.tokensIn + a.tokensOut) - a.turnTokenStart

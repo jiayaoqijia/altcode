@@ -912,8 +912,8 @@ func (a *App) builtinCostText() string {
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("Cost breakdown (%d turns):\n", len(turns)))
 	for i, t := range turns {
-		sb.WriteString(fmt.Sprintf("  Turn %d: %s — %d in / %d out — $%.4f\n",
-			i+1, t.Model, t.InputTokens, t.OutputTokens, t.CostUSD))
+		sb.WriteString(fmt.Sprintf("  Turn %d: %s — %d in / %d out — %s\n",
+			i+1, t.Model, t.InputTokens, t.OutputTokens, formatUSD(t.CostUSD)))
 	}
 	sb.WriteString(fmt.Sprintf("\nTotal: %s", tracker.Summary()))
 	return strings.TrimRight(sb.String(), "\n")
@@ -1366,7 +1366,7 @@ func (a *App) builtinAgentsText() string {
 	sb.WriteString(fmt.Sprintf("  Tokens:         %s in / %s out\n",
 		formatTokens(a.tokensIn), formatTokens(a.tokensOut)))
 	if a.costUSD > 0 {
-		sb.WriteString(fmt.Sprintf("  Cost:           $%.4f\n", a.costUSD))
+		sb.WriteString(fmt.Sprintf("  Cost:           %s\n", formatUSD(a.costUSD)))
 	}
 
 	// Context window — show current OCCUPANCY (last turn's input
@@ -2111,7 +2111,7 @@ func (a *App) buildSessionMarkdown() string {
 			a.tokensIn, a.tokensOut))
 	}
 	if a.costUSD > 0 {
-		sb.WriteString(fmt.Sprintf("- **Cost**: $%.4f\n", a.costUSD))
+		sb.WriteString(fmt.Sprintf("- **Cost**: %s\n", formatUSD(a.costUSD)))
 	}
 	sb.WriteString("\n---\n\n")
 

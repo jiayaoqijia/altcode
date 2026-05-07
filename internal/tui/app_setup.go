@@ -246,7 +246,7 @@ func (a *App) costSummaryShort() string {
 	if in+out == 0 {
 		return ""
 	}
-	return fmt.Sprintf("%dk tokens · $%.4f", (in+out)/1000, ct.TotalCost())
+	return fmt.Sprintf("%dk tokens · %s", (in+out)/1000, formatUSD(ct.TotalCost()))
 }
 
 func (a *App) activeModel() string {

@@ -55,7 +55,7 @@ func (a *App) renderStatusBar(info statusBarInfo) string {
 	if info.CostUSD > 0 {
 		segments = append(segments, lipgloss.NewStyle().
 			Foreground(t.Success).
-			Render(fmt.Sprintf("$%.4f", info.CostUSD)))
+			Render(formatUSD(info.CostUSD)))
 	}
 
 	if info.ToolActive != "" {
