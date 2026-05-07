@@ -2,8 +2,10 @@ BINARY  := altcode
 CMD     := ./cmd/altcode
 DIST    := ./dist
 VERSION ?= dev
+COMMIT  := $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+DATE    := $(shell date -u +%Y-%m-%dT%H:%M:%SZ)
 
-LDFLAGS := -ldflags "-X main.Version=$(VERSION)"
+LDFLAGS := -ldflags "-s -w -X main.Version=$(VERSION) -X main.BuildCommit=$(COMMIT) -X main.BuildDate=$(DATE)"
 # vendor/ contains git submodules (codex, claude-code), not Go deps
 GOFLAGS := -mod=mod
 

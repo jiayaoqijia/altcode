@@ -125,7 +125,9 @@ elif command -v go &>/dev/null; then
     BUILD_TMP=$(mktemp -d)
     git clone --depth 1 "https://github.com/$REPO.git" "$BUILD_TMP/altcode" 2>/dev/null
     cd "$BUILD_TMP/altcode"
-    GOFLAGS=-mod=mod go build -ldflags="-s -w -X main.Version=$VERSION" -o "$TMP" ./cmd/altcode
+    BUILD_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "source")
+    BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+    GOFLAGS=-mod=mod go build -ldflags="-s -w -X main.Version=$VERSION -X main.BuildCommit=$BUILD_COMMIT -X main.BuildDate=$BUILD_DATE" -o "$TMP" ./cmd/altcode
     chmod +x "$TMP"
     cd - >/dev/null
     rm -rf "$BUILD_TMP"

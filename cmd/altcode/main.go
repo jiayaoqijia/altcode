@@ -8,6 +8,8 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
+	"runtime/debug"
 	"strings"
 	"syscall"
 	"time"
@@ -32,8 +34,48 @@ import (
 	"github.com/spf13/cobra"
 )
 
-// Version is set at build time via -ldflags.
-var Version = "dev"
+// Version, BuildCommit, BuildDate are set at build time via -ldflags.
+// The default values keep `altcode --version` informative even on a
+// raw `go build` without flags. Enriched output via versionString()
+// surfaces commit + date + Go version so users can tell exactly
+// which build they're running — both reviewers asked for this.
+var (
+	Version     = "dev"
+	BuildCommit = "unknown"
+	BuildDate   = "unknown"
+)
+
+// versionString produces a multi-line --version output:
+//   altcode v0.10.1
+//   commit:    abc1234
+//   built:     2026-05-07T10:00:00Z
+//   go:        go1.26.0
+//   platform:  linux/amd64
+func versionString() string {
+	commit := BuildCommit
+	// Fall back to debug.ReadBuildInfo for `go install` paths that
+	// don't set the ldflag — Go records the VCS commit there.
+	if commit == "unknown" {
+		if info, ok := debug.ReadBuildInfo(); ok {
+			for _, s := range info.Settings {
+				if s.Key == "vcs.revision" && s.Value != "" {
+					commit = s.Value
+					if len(commit) > 7 {
+						commit = commit[:7]
+					}
+					break
+				}
+			}
+		}
+	}
+	if len(commit) > 7 && commit != "unknown" {
+		commit = commit[:7]
+	}
+	return fmt.Sprintf(
+		"altcode %s\n  commit:   %s\n  built:    %s\n  go:       %s\n  platform: %s/%s",
+		Version, commit, BuildDate, runtime.Version(), runtime.GOOS, runtime.GOARCH,
+	)
+}
 
 // cliFlags bundles exec-mode flags so run() / runExec() don't grow
 // a parameter list per phase. Each Cobra RunE populates one.
@@ -133,7 +175,7 @@ func main() {
   altcode --json "prompt"           Alias for --output-format stream-json
   altcode --last                    Resume last session in TUI
   altcode --last "prompt"           Resume last session with new prompt`,
-		Version:      Version,
+		Version:      versionString(),
 		SilenceUsage: true,
 		Args:         cobra.ArbitraryArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
@@ -159,6 +201,10 @@ func main() {
 		},
 	}
 
+	// Custom version template — Cobra's default prepends "altcode version "
+	// before our multi-line versionString(), producing "altcode version altcode v0.10.1".
+	// We want our string verbatim so the output starts cleanly with "altcode v0.10.1".
+	root.SetVersionTemplate("{{.Version}}\n")
 	root.PersistentFlags().StringVar(&modelFlag, "model", "", "Model override")
 	root.PersistentFlags().StringVar(&configFlag, "config", "", "Config file path")
 	root.PersistentFlags().StringVar(&themeFlag, "theme", "", "Theme name")
@@ -881,7 +927,16 @@ func runTUI(params engine.EngineParams) error {
 
 	theme := tui.GetTheme(params.Config.Theme)
 	app := tui.New(eng, theme, Version, auth.MissingCredentialPrompt(params.Config), cmds...)
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Mouse mode opts: disable bubbletea's mouse capture when the user
+	// sets ALTCODE_NO_MOUSE=1 — needed when they want native terminal
+	// text selection (the macOS Terminal / iTerm trick is to Shift+drag,
+	// but some users never click panes and prefer outright opting out).
+	// Without mouse capture, workspace pane click-focus stops working.
+	teaOpts := []tea.ProgramOption{tea.WithAltScreen()}
+	if os.Getenv("ALTCODE_NO_MOUSE") != "1" {
+		teaOpts = append(teaOpts, tea.WithMouseCellMotion())
+	}
+	p := tea.NewProgram(app, teaOpts...)
 	_, err = p.Run()
 	return err
 }

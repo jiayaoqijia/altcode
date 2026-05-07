@@ -278,13 +278,36 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		line2 = "  " + strings.Join(rightParts, sep)
 	}
 
-	// Pad both lines to width
-	pad := lipgloss.NewStyle().Width(width).Background(theme.HeaderBg)
+	// Pad both lines to width. macOS Terminal.app renders a slate-on-slate
+	// HUD as black-on-black (limited color profile / theme inheritance);
+	// detect it and drop the background so the user sees text on their
+	// terminal's natural background. ALTCODE_PLAIN_HUD=1 forces the same
+	// fallback for any environment where the colored bg looks wrong.
+	pad := lipgloss.NewStyle().Width(width)
+	if !plainHUD() {
+		pad = pad.Background(theme.HeaderBg)
+	}
 	result := pad.Render(line1)
 	if line2 != "" {
 		result += "\n" + pad.Render(line2)
 	}
 	return result
+}
+
+// plainHUD reports whether we should render the HUD without an
+// explicit Background() call — used so the macOS Terminal "all black"
+// rendering bug doesn't make the HUD invisible.
+func plainHUD() bool {
+	if os.Getenv("ALTCODE_PLAIN_HUD") == "1" {
+		return true
+	}
+	// Apple_Terminal (the default macOS Terminal.app) reports a 256-color
+	// profile but inherits the user's bg theme aggressively, producing
+	// a black-on-black HUD on common dark profiles. Skip the bg there.
+	if os.Getenv("TERM_PROGRAM") == "Apple_Terminal" {
+		return true
+	}
+	return false
 }
 
 // renderContextBar returns a visual bar like [████████░░░░] with color gradient.
@@ -376,7 +399,11 @@ func renderCompactHUD(h hudState, info statusBarInfo, theme Theme, width int, sp
 	}
 
 	line := strings.Join(parts, sep)
-	return lipgloss.NewStyle().Width(width).Background(theme.HeaderBg).Render(line)
+	style := lipgloss.NewStyle().Width(width)
+	if !plainHUD() {
+		style = style.Background(theme.HeaderBg)
+	}
+	return style.Render(line)
 }
 
 func capitalizeFirst(s string) string {
