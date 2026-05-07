@@ -107,8 +107,14 @@ desktop.ini
 .yarn/
 *.tgz
 
-# AI agent files (local only)
-.claude/settings.local.json
+# AI agent dev-environment files — kept on disk for working in this
+# repo with Claude Code / Codex CLI / Cursor, but never committed:
+# they're our dev harness, not part of the shipped altcode product,
+# and including them would make the repo confusing for downstream
+# users who use a different AI tool. Untracked en bloc.
+.claude/
+.codex/
+CLAUDE.md
 AGENTS.local.md
 PLAN.md
 .local/
@@ -169,7 +175,6 @@ internal/example_*.go
 # - Playwright MCP cache directory
 # - Repo-root binary builds (Makefile already builds to dist/)
 # - Backup / disabled files left behind by editors and revert flows
-.claude/memory/
 .playwright-mcp/
 /altcode
 /hello
