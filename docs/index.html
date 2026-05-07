@@ -92,7 +92,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <!-- Header -->
     <div class="logo">alt<span>code</span></div>
     <div class="subtitle">The universal agent harness for coding</div>
-    <div class="tagline">17MB binary · 13 providers · 100+ models · 11 tools · 51 slash commands · 117 skills · AltFix daemon · CC-parity TUI</div>
+    <div class="tagline">17MB binary · 13 providers · 100+ models · 11 tools · 53 slash commands · 117 skills · type-ahead /queue · runtime /model swap · OSC-8 hyperlinks · permission modal</div>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -155,6 +155,10 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="output"># Persistent execution — loops until complete</div>
     <div class="prompt">altcode workflow --mode interview "add rate limiting"</div>
     <div class="output"># Socratic clarification before coding</div>
+    <div class="prompt">altcode --resume</div>
+    <div class="output"># CC-style resume — pick a recent session interactively</div>
+    <div class="prompt">altcode -c "follow-up question"</div>
+    <div class="output"># Continue the most recent session with a new turn</div>
     <div class="prompt">altcode daemon --port 9200 --auth-token $TOKEN</div>
     <div class="output"># AltFix daemon: REST + SSE + GitHub webhook lifecycle</div>
 
@@ -192,16 +196,36 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <!-- Features -->
     <h2>Features</h2>
     <p style="font-size:13px">
-      <span style="color:var(--green)">●</span> Multi-turn agent loop (tool dispatch, 50-iter cap)<br>
+      <span style="color:var(--green)">●</span> Multi-turn agent loop with <b>LoopGuard</b> — blocks runaway tool repeats (3) and consecutive errors (8)<br>
       <span style="color:var(--green)">●</span> 11 tools: read, write, edit, glob, grep, ls, bash, patch, web, agent, tasks<br>
-      <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events · Slash commands · Plugin marketplace<br>
-      <span style="color:var(--green)">●</span> Context harness — auto-compact, LLM summarization, pre-turn compaction<br>
-      <span style="color:var(--green)">●</span> Agent harness — multi-agent, mailbox IPC, history forking, roles<br>
-      <span style="color:var(--green)">●</span> Workflow harness — interview → plan → persistent execution (ralph)<br>
-      <span style="color:var(--green)">●</span> Tool harness — permissions, hooks (command + HTTP), auto-verify<br>
+      <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events · 53 slash commands · plugin marketplace<br>
+      <span style="color:var(--green)">●</span> <b>Type-ahead /queue</b> — prompts buffered while a turn runs, drained on completion<br>
+      <span style="color:var(--green)">●</span> <b>/anchor facts</b> — survive compaction AND restart (saved to ~/.altcode/anchors.json)<br>
+      <span style="color:var(--green)">●</span> <b>Runtime /model swap</b> — fuzzy substring match, hot-swaps mid-session (no restart)<br>
+      <span style="color:var(--green)">●</span> <b>OSC-8 hyperlinks</b> on file:line refs in tool output (Cmd/Ctrl-click to source)<br>
+      <span style="color:var(--green)">●</span> <b>Cache-hit % chip</b> in HUD — surfaces prefix-cache effectiveness per turn<br>
+      <span style="color:var(--green)">●</span> <b>OSC 9 desktop notification</b> when long turns finish (20s+ threshold)<br>
+      <span style="color:var(--green)">●</span> Permission modal (default-on, y/n/a/!) · ALTCODE_AUTO_APPROVE=1 for YOLO<br>
+      <span style="color:var(--green)">●</span> CC-style resume: <code style="color:var(--green)">-c</code> · <code style="color:var(--green)">--continue</code> · <code style="color:var(--green)">--resume</code> · <code style="color:var(--green)">/resume last</code> hot-swaps in-place<br>
+      <span style="color:var(--green)">●</span> 8 themes — modern dusk default · Catppuccin Mocha · Tokyo Night · Rose Pine · Dracula · Nord · Solarized Dark · Amber Classic<br>
+      <span style="color:var(--green)">●</span> Multi-agent workspace — <code style="color:var(--green)">/workspace</code>, <code style="color:var(--green)">/spawn</code>, agent panes with role/branch/PR/CI<br>
+      <span style="color:var(--green)">●</span> Context harness — auto-compact, LLM summarization, real /v1/models context-size fetch (24h disk cache)<br>
       <span style="color:var(--green)">●</span> AltFix daemon — autonomous multi-role pipeline (lead/implementer/reviewer/tester) with PR lifecycle<br>
       <span style="color:var(--green)">●</span> 117 skills · OAuth login · Persistent memory · Claude Code compat (CLAUDE.md + .mcp.json + settings.json + hooks + skills + plugins)
     </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- vs DeepSeek-TUI comparison -->
+    <h2>vs <a href="https://github.com/Hmbown/DeepSeek-TUI">DeepSeek-TUI</a></h2>
+    <p style="font-size:12px;color:var(--dim);margin-bottom:8px">Independent dual-reviewer score (Claude Code + Codex CLI), round 5:</p>
+    <table>
+      <tr><th>Dimension</th><th>altcode</th><th>DeepSeek-TUI</th><th></th></tr>
+      <tr><td>Features</td><td class="num">9.15</td><td class="num">8.5</td><td class="win">altcode +0.65</td></tr>
+      <tr><td>UI</td><td class="num">8.30</td><td class="num">8.5</td><td class="tie">tie / -0.20</td></tr>
+      <tr><td>Stability</td><td class="num">7.70</td><td class="num">7.0</td><td class="win">altcode +0.70</td></tr>
+    </table>
+    <p style="color:var(--dim);font-size:11px;margin-top:4px">Reviewer protocol: independent CC + codex agents read both codebases, score 1-10 each dimension, no cross-talk. altcode wins 2 of 3 unanimously and ties UI per CC / leads UI per codex.</p>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 

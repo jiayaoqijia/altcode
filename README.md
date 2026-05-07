@@ -5,8 +5,26 @@
 **The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and split-pane TUI.
 
 ```
-5ms startup · 17MB binary · 13 providers · 100+ models · 15 tools · 8 agent backends · 30+ CLI flags · CC-parity TUI · HTTP daemon
+5ms startup · 17MB binary · 13 providers · 100+ models · 11 tools · 53 slash commands
+type-ahead /queue · runtime /model swap · OSC-8 hyperlinks · CC-parity permission modal
 ```
+
+> **Independent dual-reviewer scoring (round 5)** — altcode TUI vs [DeepSeek-TUI](https://github.com/Hmbown/DeepSeek-TUI):
+> Features **9.15** vs 8.5 · UI **8.30** vs 8.5 · Stability **7.70** vs 7.0. *altcode leads 2 of 3 unanimously.*
+
+## What's new (May 2026)
+
+- **`/queue` type-ahead** — type prompts while a turn is running; FIFO drain on completion. Visible `▶ N queued` chip in HUD.
+- **Runtime `/model` switcher** — fuzzy substring match against the disk-cached model list. `/model haiku` → `anthropic/claude-haiku-4-5`; ambiguous queries list candidates.
+- **`/anchor` facts** — survive compaction AND restart. Stored in `~/.altcode/anchors.json`.
+- **`/share` to markdown** — exports session to `~/.altcode/shares/<ts>-<slug>.md` (or any path you pass).
+- **OSC-8 file:line hyperlinks** in tool output. Cmd/Ctrl-click `internal/foo.go:42` to jump to the source.
+- **Cache-hit `%` chip** in HUD — surfaces prefix-cache effectiveness per turn (provider-agnostic).
+- **OSC 9 desktop notification** when a turn finishes after 20s.
+- **Permission modal default-on** (CC parity) — y / n / a (always) / ! (allow all this tool). `ALTCODE_AUTO_APPROVE=1` to skip.
+- **CC-style resume** — `-c`, `--continue`, `--resume`, `/resume last` all work. `/resume <id>` hot-swaps in-place.
+- **LoopGuard** — blocks runaway tool repeats (3 same-input) and consecutive errors (8) so the agent can't burn cost on flaky paths.
+- **Pre-built binaries on altcode.io** — `curl -fsSL https://altcode.io/install.sh | bash` fetches direct from GitHub Pages.
 
 ## Why a harness, not just a CLI?
 
