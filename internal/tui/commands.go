@@ -1332,10 +1332,18 @@ func (a *App) builtinAgentsText() string {
 		sb.WriteString(fmt.Sprintf("  Cost:           $%.4f\n", a.costUSD))
 	}
 
-	// Context window (use API-reported tokens for accuracy). Guard against
-	// a nil engine — /agents can be invoked before engine init completes
-	// (e.g. when provider auth failed during startup).
-	tokens := a.tokensIn + a.tokensOut
+	// Context window — show current OCCUPANCY (last turn's input
+	// tokens), NOT cumulative session tokens. Earlier path summed
+	// tokensIn+tokensOut which grows monotonically and produced a
+	// different % from the HUD bar (HUD uses currentContextTokens).
+	// Same fallback ladder the HUD uses: prefer currentContextTokens,
+	// fall back to tokensIn if usage events haven't landed yet.
+	// Guard against a nil engine — /agents can be invoked before
+	// engine init completes.
+	tokens := a.currentContextTokens
+	if tokens == 0 && a.tokensIn > 0 {
+		tokens = a.tokensIn
+	}
 	var limit int64
 	if a.engine != nil {
 		limit = int64(a.engine.ContextWindowSize())
