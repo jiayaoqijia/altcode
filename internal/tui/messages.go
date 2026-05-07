@@ -14,6 +14,7 @@ const (
 	roleUser messageRole = iota
 	roleAssistant
 	roleTool
+	roleTrace
 	roleInfo
 	roleThinking
 )
@@ -25,10 +26,9 @@ type chatMessage struct {
 	meta    string // e.g. "gpt-5.4 · 1.2s" or tool name
 }
 
-// renderMessage returns the message styled with a colored left border,
-// matching OpenCode's visual pattern.
+// renderMessage returns a chat message in the lightweight chat flow.
 func (a *App) renderMessage(msg chatMessage) string {
-	width := a.width - 4 // border + padding
+	width := a.width - 2
 	if width < 20 {
 		width = 20
 	}
@@ -47,7 +47,7 @@ func (a *App) renderMessage(msg chatMessage) string {
 	var rendered string
 	if msg.role == roleTool && looksLikeDiff(msg.content) {
 		rendered = renderInlineDiff(msg.content, a.theme, 15)
-	} else if msg.role == roleInfo || msg.role == roleUser {
+	} else if msg.role == roleInfo || msg.role == roleUser || msg.role == roleTrace {
 		// Info messages and user input are plain-text — skip markdown
 		// rendering so embedded newlines (Ctrl+J multi-line input,
 		// pasted code blocks) stay intact. Glamour collapses adjacent
@@ -66,62 +66,41 @@ func (a *App) renderMessage(msg chatMessage) string {
 		rendered = msg.content
 	}
 
-	// Trim trailing whitespace
 	rendered = strings.TrimRight(rendered, " \n")
 
-	var borderColor lipgloss.Color
-	var icon string
-	// Unified icon set — all geometric, same visual weight
+	muted := lipgloss.NewStyle().Foreground(a.theme.Muted)
+	metaLine := ""
+	if msg.meta != "" && a.showMessageMeta {
+		metaLine = "\n" + muted.Italic(true).Render("  "+msg.meta)
+	}
+
 	switch msg.role {
 	case roleUser:
-		borderColor = a.theme.Secondary
-		icon = "❯"
+		return lipgloss.NewStyle().
+			Foreground(a.theme.Secondary).
+			Width(width).
+			Render("> "+rendered) + metaLine
 	case roleAssistant:
-		borderColor = a.theme.Primary
-		icon = "●"
+		return lipgloss.NewStyle().
+			Width(width).
+			Render(rendered) + metaLine
 	case roleTool:
-		borderColor = a.theme.Muted
-		icon = "◇"
+		return muted.Width(width).Render(rendered) + metaLine
+	case roleTrace:
+		return muted.Width(width).Render(rendered) + metaLine
 	case roleInfo:
-		borderColor = a.theme.Warning
-		icon = "◈"
+		return muted.Width(width).Render(rendered) + metaLine
 	case roleThinking:
-		borderColor = a.theme.Muted
-		icon = "◌"
 		// CC-style: show first 3 lines + collapsible hint
 		lines := strings.Split(rendered, "\n")
 		if len(lines) > 4 {
 			rendered = strings.Join(lines[:3], "\n") +
 				"\n" + lipgloss.NewStyle().Foreground(a.theme.Muted).Italic(true).
-					Render(fmt.Sprintf("… +%d lines of reasoning", len(lines)-3))
+				Render(fmt.Sprintf("… +%d lines of reasoning", len(lines)-3))
 		}
+		return muted.Italic(true).Width(width).Render(rendered) + metaLine
 	}
-
-	// Meta line below message (model · duration · token count)
-	metaLine := ""
-	if msg.meta != "" {
-		metaLine = "\n" + lipgloss.NewStyle().
-			Foreground(a.theme.Muted).
-			Italic(true).
-			Render("╰ "+msg.meta)
-	}
-
-	// Icon + content
-	header := lipgloss.NewStyle().
-		Foreground(borderColor).
-		Bold(true).
-		Render(icon)
-
-	body := header + " " + rendered + metaLine
-
-	// Left border
-	return lipgloss.NewStyle().
-		BorderLeft(true).
-		BorderStyle(lipgloss.ThickBorder()).
-		BorderForeground(borderColor).
-		PaddingLeft(1).
-		Width(width).
-		Render(body)
+	return rendered + metaLine
 }
 
 // looksLikeDiff checks if content appears to be a unified diff.

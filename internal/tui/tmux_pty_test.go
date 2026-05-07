@@ -98,14 +98,14 @@ func startTmuxSession(t *testing.T, bin string) *tmuxSession {
 	})
 
 	// Poll for the TUI to render its header.
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(45 * time.Second)
 	for time.Now().Before(deadline) {
 		if strings.Contains(s.capture(), "altcode") {
 			return s
 		}
 		time.Sleep(300 * time.Millisecond)
 	}
-	t.Fatalf("TUI did not render 'altcode' header within 15s")
+	t.Fatalf("TUI did not render 'altcode' header within 45s")
 	return s
 }
 

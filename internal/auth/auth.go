@@ -367,6 +367,83 @@ func CredentialSource(cfg *config.Config) string {
 	return sources
 }
 
+// CredentialSourceForModel returns the credential source for the active model's
+// provider. The headless banner should describe the provider actually being
+// used, not every credential altcode happened to auto-load from local CLIs.
+func CredentialSourceForModel(cfg *config.Config, model string) string {
+	provider := credentialProviderFromModel(model)
+	if provider == "" {
+		return CredentialSource(cfg)
+	}
+	if provider == "ollama" || provider == "lmstudio" {
+		return "local"
+	}
+	if src := credentialSourceForProvider(cfg, provider); src != "" {
+		return src
+	}
+	return "no credentials"
+}
+
+func credentialSourceForProvider(cfg *config.Config, provider string) string {
+	home, _ := os.UserHomeDir()
+	p, ok := cfg.Provider[provider]
+	if !ok || p.APIKey == "" {
+		if env := providerEnvVar(provider); env != "" && os.Getenv(env) != "" {
+			return env + " env"
+		}
+		return ""
+	}
+	switch provider {
+	case "anthropic":
+		if _, err := os.Stat(filepath.Join(home, ".claude", ".credentials.json")); err == nil {
+			return "Claude subscription"
+		}
+	case "openai":
+		if _, err := os.Stat(filepath.Join(home, ".codex", "auth.json")); err == nil {
+			return "Codex subscription"
+		}
+	}
+	if env := providerEnvVar(provider); env != "" && os.Getenv(env) != "" {
+		return env + " env"
+	}
+	return "config file"
+}
+
+func credentialProviderFromModel(model string) string {
+	model = strings.TrimSpace(strings.ToLower(model))
+	if model == "" {
+		return ""
+	}
+	if i := strings.Index(model, "/"); i >= 0 {
+		provider := model[:i]
+		switch provider {
+		case "kimi":
+			return "moonshot"
+		case "glm":
+			return "zhipu"
+		default:
+			return provider
+		}
+	}
+	switch {
+	case strings.HasPrefix(model, "deepseek"):
+		return "deepseek"
+	case strings.HasPrefix(model, "moonshot"), strings.HasPrefix(model, "kimi"):
+		return "moonshot"
+	case strings.HasPrefix(model, "qwen"):
+		return "qwen"
+	case strings.HasPrefix(model, "zhipu"), strings.HasPrefix(model, "glm"):
+		return "zhipu"
+	case strings.HasPrefix(model, "minimax"):
+		return "minimax"
+	case strings.HasPrefix(model, "claude"):
+		return "anthropic"
+	case strings.HasPrefix(model, "gpt"):
+		return "openai"
+	}
+	return ""
+}
+
 // MissingCredentialPrompt returns a startup prompt when the active model
 // requires credentials that are not configured yet.
 func MissingCredentialPrompt(cfg *config.Config) string {

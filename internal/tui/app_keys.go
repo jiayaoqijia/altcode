@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/jiayaoqijia/altcode/internal/orchestra"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
 )
 
 // handleKey is the top-level key router. Delegates to focused sub-handlers.
@@ -173,6 +173,12 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	case "ctrl+a":
 		a.toggleSessionSwitcher()
 		return a, nil, true
+	case "/":
+		if a.input.Value() == "" {
+			a.showPaletteWithQuery("/")
+			return a, nil, true
+		}
+		return a, nil, false
 	case "esc":
 		return a.handleEscKey()
 	case "tab":
@@ -187,9 +193,7 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		// shortcut, but CC also accepts Shift+Enter and Alt/Meta+Enter
 		// because most users try those first. Recognize all three so
 		// new users don't bounce off a missing keybind.
-		if !a.busy {
-			a.input.InsertString("\n")
-		}
+		a.input.InsertString("\n")
 		return a, nil, true
 	case "up":
 		// Up arrow: recall previous prompt from history, but ONLY when
@@ -336,12 +340,13 @@ func (a *App) handleEscKey() (tea.Model, tea.Cmd, bool) {
 // handleEnterKey submits the prompt or starts setup.
 func (a *App) handleEnterKey() (tea.Model, tea.Cmd, bool) {
 	text := strings.TrimSpace(a.input.Value())
-	// Allow slash commands even when busy (control commands like /spawn, /quit)
-	if text != "" && strings.HasPrefix(text, "/") {
-		return a, a.submit(), true
+	if a.busy {
+		if text != "" && strings.HasPrefix(text, "/") && a.busyControlSlashCommand(text) {
+			return a, a.submitBusyControlSlash(text), true
+		}
+		return a, nil, true
 	}
-	// Normal prompts only when not busy
-	if !a.busy && text != "" {
+	if text != "" {
 		return a, a.submit(), true
 	}
 	// Empty input + startup prompt → start setup
@@ -350,6 +355,38 @@ func (a *App) handleEnterKey() (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 	}
 	return a, nil, true
+}
+
+func (a *App) busyControlSlashCommand(text string) bool {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return false
+	}
+	switch fields[0] {
+	case "/stop", "/quit", "/exit", "/q":
+		return true
+	case "/wf-pause", "/wf-resume", "/wf-cancel":
+		return a.wfRunning
+	default:
+		return false
+	}
+}
+
+func (a *App) submitBusyControlSlash(text string) tea.Cmd {
+	fields := strings.Fields(text)
+	if len(fields) == 0 {
+		return nil
+	}
+	a.input.Reset()
+	if fields[0] == "/stop" {
+		a.builtinStop()
+		return nil
+	}
+	handled, cmd := a.handleBuiltinCommand(text)
+	if !handled {
+		return nil
+	}
+	return cmd
 }
 
 // handleCtrlCKey is the primary quit shortcut.
@@ -373,6 +410,8 @@ func (a *App) handleCtrlCKey() (tea.Model, tea.Cmd, bool) {
 		a.appendInfo("[cancelled — Ctrl+C again to quit]")
 		return a, nil, true
 	}
+	// Cancel any in-flight engine context before quitting so tool
+	// subprocesses don't leak.
 	if a.cancel != nil {
 		a.cancel()
 	}

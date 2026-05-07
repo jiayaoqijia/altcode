@@ -9,6 +9,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/exp/teatest"
 	"github.com/jiayaoqijia/altcode/internal/event"
 	"github.com/jiayaoqijia/altcode/internal/workspace"
@@ -44,6 +45,145 @@ func TestTUIView_StartupRender(t *testing.T) {
 	}
 }
 
+func TestTUIView_DefaultChatShellUsesQuietChrome(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	plain := stripANSI(a.View())
+
+	for _, want := range []string{"altcode", "mode", "chat", "model", "Ask anything", "◆ altcode ready", "·", "● ready"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("default chat shell missing %q:\n%s", want, plain)
+		}
+	}
+	if got := strings.Count(plain, "altcode ready"); got != 1 {
+		t.Fatalf("default chat shell should show one ready state, got %d:\n%s", got, plain)
+	}
+}
+
+func TestTUIView_HeaderShowsSemanticSegments(t *testing.T) {
+	a := testApp()
+	a.gitProject = "altcode"
+	a.gitBranch = "feat/tui-improve"
+	a.gitDirty = true
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 30})
+
+	header := strings.SplitN(stripANSI(a.renderHeader()), "\n", 2)[0]
+
+	for _, want := range []string{
+		"◆ altcode",
+		"◐ mode chat",
+		"✦ model claude-sonnet-4-20250514",
+		"⎇ git altcode@feat/tui-improve*",
+		"·",
+	} {
+		if !strings.Contains(header, want) {
+			t.Fatalf("header missing %q:\n%s", want, header)
+		}
+	}
+}
+
+func TestTUIView_DefaultChatHidesWideSidebar(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 140, Height: 30})
+
+	plain := stripANSI(a.View())
+
+	if strings.Contains(plain, "Files") {
+		t.Fatalf("default chat shell rendered sidebar on a wide terminal:\n%s", plain)
+	}
+	if got := a.mainBodyWidth(); got != 140 {
+		t.Fatalf("mainBodyWidth() = %d, want full chat width 140", got)
+	}
+}
+
+func TestTUIView_ComposerBorderAndBusyStatus(t *testing.T) {
+	a := testApp()
+	a.busy = true
+	a.activeToolName = "Bash"
+	a.activeToolDetail = "go test ./..."
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	plain := stripANSI(a.View())
+
+	for _, want := range []string{"running", "Bash", "go test ./..."} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("busy composer/status missing %q:\n%s", want, plain)
+		}
+	}
+	if !strings.Contains(plain, "╭") || !strings.Contains(plain, "╰") {
+		t.Fatalf("composer should render with a border:\n%s", plain)
+	}
+}
+
+func TestTUIView_ComposerBorderDoesNotWrapStatusHint(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	plain := stripANSI(a.View())
+	lines := strings.Split(plain, "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "Ctrl+J newline") &&
+			i > 0 &&
+			strings.Contains(lines[i-1], "╭") {
+			t.Fatalf("status hint should not be inside composer border:\n%s", plain)
+		}
+	}
+	if strings.Contains(plain, "┃ Ask anything") {
+		t.Fatalf("textarea prompt bar should not masquerade as cursor:\n%s", plain)
+	}
+	if !strings.Contains(plain, "▌ Ask anything") {
+		t.Fatalf("empty composer should show a slim cursor before placeholder:\n%s", plain)
+	}
+}
+
+func TestTUIView_ComposerTypedTextDoesNotPaintCursorLineBackground(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	model, _ := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("h")})
+	a = model.(*App)
+
+	composer := a.renderComposerText()
+	for _, forbidden := range []string{
+		"\x1b[40m",
+		"\x1b[48;5;0m",
+		"\x1b[48;2;0;0;0m",
+	} {
+		if strings.Contains(composer, forbidden) {
+			t.Fatalf("typed composer painted textarea cursor-line background %q:\n%q", forbidden, composer)
+		}
+	}
+	if strings.HasSuffix(composer, strings.Repeat(" ", 10)) {
+		t.Fatalf("typed composer should not include textarea's full-width trailing fill:\n%q", composer)
+	}
+}
+
+func TestTUIView_TextareaCursorLineHasNoBackground(t *testing.T) {
+	a := testApp()
+	if _, ok := a.input.FocusedStyle.CursorLine.GetBackground().(lipgloss.NoColor); !ok {
+		t.Fatalf("focused textarea cursor line should not set a background")
+	}
+	if _, ok := a.input.BlurredStyle.CursorLine.GetBackground().(lipgloss.NoColor); !ok {
+		t.Fatalf("blurred textarea cursor line should not set a background")
+	}
+}
+
+func TestTUIView_CompactStatusTruncatesLongToolDetail(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 40, Height: 12})
+
+	status := stripANSI(a.renderCompactStatus(statusBarInfo{
+		ToolActive: "Bash: " + strings.Repeat("go test ./internal/tui/... ", 8),
+	}, ""))
+
+	if got := renderedLineCount(status); got != 1 {
+		t.Fatalf("compact status rendered %d rows, want 1:\n%s", got, status)
+	}
+	if got := lipgloss.Width(status); got > 40 {
+		t.Fatalf("compact status width = %d, want <= 40:\n%s", got, status)
+	}
+}
+
 func TestTUIView_HelpCommand(t *testing.T) {
 	// Test /help text content directly (not via teatest — viewport scrolling
 	// makes captured output incomplete). This verifies the help text function.
@@ -53,7 +193,8 @@ func TestTUIView_HelpCommand(t *testing.T) {
 		"/workflow",
 		"/rollback",
 		"/send",
-		"Workspace Mode",
+		"Workspace",
+		"Recovery",
 		"Ctrl+Z",
 		"Ctrl+Q",
 	}
@@ -61,6 +202,48 @@ func TestTUIView_HelpCommand(t *testing.T) {
 		if !strings.Contains(helpText, check) {
 			t.Errorf("missing %q in /help output", check)
 		}
+	}
+}
+
+func TestRenderMessage_UsesLightweightFlow(t *testing.T) {
+	a := testApp()
+	a.width = 100
+
+	user := stripANSI(a.renderMessage(chatMessage{
+		role:    roleUser,
+		content: "hello",
+		meta:    "hidden by default",
+	}))
+	if !strings.Contains(user, "> hello") {
+		t.Fatalf("user message should render as lightweight prompt line:\n%s", user)
+	}
+	if strings.Contains(user, "┃") || strings.Contains(user, "╰ hidden by default") {
+		t.Fatalf("user message should not use heavy border or default metadata:\n%s", user)
+	}
+
+	assistant := stripANSI(a.renderMessage(chatMessage{
+		role:    roleAssistant,
+		content: "assistant content",
+	}))
+	if !strings.Contains(assistant, "assistant content") {
+		t.Fatalf("assistant content missing:\n%s", assistant)
+	}
+	if strings.Contains(assistant, "┃") {
+		t.Fatalf("assistant message should not use heavy border:\n%s", assistant)
+	}
+}
+
+func TestBuiltinHelpText_Grouped(t *testing.T) {
+	helpText := builtinHelpText()
+	plain := stripANSI(helpText)
+
+	for _, want := range []string{"Chat", "Project", "Workspace", "Recovery", "/help", "/workspace"} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("grouped help missing %q:\n%s", want, plain)
+		}
+	}
+	if strings.Contains(plain, "```") {
+		t.Fatalf("help should be plain grouped text, not fenced markdown:\n%s", plain)
 	}
 }
 
@@ -1179,7 +1362,7 @@ func TestCCParity_ExtractToolTarget(t *testing.T) {
 			want:     "func.*Update",
 		},
 		{
-			name:     "Bash command truncated",
+			name:     "Bash command",
 			toolName: "Bash",
 			input:    map[string]any{"command": "GOFLAGS=-mod=mod go test ./... -race -count=1 -timeout=180s"},
 			want:     "GOFLAGS=-mod=mod go test ./.",
@@ -1773,18 +1956,51 @@ func TestTUIView_Height1_Fallback(t *testing.T) {
 		t.Errorf("expected 'too small' fallback at height=1, got: %q", out)
 	}
 
-	// Height=3 is still too small
-	a.Update(tea.WindowSizeMsg{Width: 80, Height: 3})
+	// Height=7 is still too small for header + body + status + bordered composer.
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 7})
 	out = a.View()
 	if !strings.Contains(out, "too small") {
-		t.Errorf("expected 'too small' fallback at height=3, got: %q", out)
+		t.Errorf("expected 'too small' fallback at height=7, got: %q", out)
 	}
 
-	// Height=4 should render normally
-	a.Update(tea.WindowSizeMsg{Width: 80, Height: 4})
+	// Height=8 should render normally for an idle chat shell.
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 8})
 	out = a.View()
 	if strings.Contains(out, "too small") {
-		t.Error("should render normally at height=4")
+		t.Error("should render normally at height=8")
+	}
+	if got := renderedLineCount(out); got > 8 {
+		t.Fatalf("height=8 rendered %d rows, want <= 8:\n%s", got, out)
+	}
+}
+
+func TestTUIView_ResponsiveDensity(t *testing.T) {
+	for _, tc := range []struct {
+		width  int
+		height int
+	}{
+		{40, 12},
+		{80, 24},
+		{120, 30},
+		{160, 40},
+	} {
+		t.Run(fmt.Sprintf("%dx%d", tc.width, tc.height), func(t *testing.T) {
+			a := testApp()
+			a.Update(tea.WindowSizeMsg{Width: tc.width, Height: tc.height})
+
+			plain := stripANSI(a.View())
+			for _, want := range []string{"altcode", "altcode ready", "Ask anything"} {
+				if !strings.Contains(plain, want) {
+					t.Fatalf("responsive shell missing %q at %dx%d:\n%s", want, tc.width, tc.height, plain)
+				}
+			}
+			if got := strings.Count(plain, "altcode ready"); got != 1 {
+				t.Fatalf("responsive shell rendered %d ready states at %dx%d:\n%s", got, tc.width, tc.height, plain)
+			}
+			if got := renderedLineCount(plain); got > tc.height {
+				t.Fatalf("responsive shell rendered %d rows at %dx%d, want <= %d:\n%s", got, tc.width, tc.height, tc.height, plain)
+			}
+		})
 	}
 }
 

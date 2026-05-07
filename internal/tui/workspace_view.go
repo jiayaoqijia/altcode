@@ -396,8 +396,8 @@ func (wv *WorkspaceView) renderHeader(theme Theme) string {
 		parts = append(parts, strings.Join(badges, sep))
 	}
 
-	return lipgloss.NewStyle().Width(wv.width).
-		Render(strings.Join(parts, "  "))
+	line := truncateStr(strings.Join(parts, "  "), wv.width)
+	return lipgloss.NewStyle().Width(wv.width).Render(line)
 }
 
 // renderPanes lays out agent panes side by side.

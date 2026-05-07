@@ -69,6 +69,8 @@ func keyOf(s string) tea.KeyMsg {
 		return tea.KeyMsg{Type: tea.KeyDown}
 	case "enter":
 		return tea.KeyMsg{Type: tea.KeyEnter}
+	case "alt+enter":
+		return tea.KeyMsg{Type: tea.KeyEnter, Alt: true}
 	default:
 		return tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(s)}
 	}
@@ -106,6 +108,27 @@ func TestHandleGlobalKey_CtrlL_ClearsVisualState(t *testing.T) {
 	}
 }
 
+func TestHandleGlobalKey_CtrlCQuitsEvenWithAssistantMessage(t *testing.T) {
+	a := testApp()
+	a.busy = false
+	a.messages = []chatMessage{
+		{role: roleUser, content: "hello"},
+		{role: roleAssistant, content: "world"},
+	}
+
+	_, cmd, ok := a.handleGlobalKey(keyOf("ctrl+c"))
+
+	if !ok {
+		t.Fatal("ctrl+c should be handled")
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+c should quit even when there is a response available to copy")
+	}
+	if got := len(a.messages); got != 2 {
+		t.Fatalf("ctrl+c should not append copy status, got %d messages", got)
+	}
+}
+
 // TestHandleGlobalKey_CtrlR_NoLastMessageReturnsHandled exercises the
 // retry path with no prior user message — should still be marked
 // handled (so it doesn't fall through to the global router).
@@ -116,6 +139,41 @@ func TestHandleGlobalKey_CtrlR_NoLastMessageReturnsHandled(t *testing.T) {
 	_, _, ok := a.handleGlobalKey(keyOf("ctrl+r"))
 	if !ok {
 		t.Error("ctrl+r should be marked handled even with no last message")
+	}
+}
+
+func TestHandleGlobalKey_SlashOpensPaletteOnEmptyInput(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	_, _, ok := a.handleGlobalKey(keyOf("/"))
+
+	if !ok {
+		t.Fatal("slash on empty input should be handled")
+	}
+	if !a.palette.IsVisible() {
+		t.Fatal("slash on empty input should open the command palette")
+	}
+	if got := a.palette.input.Value(); got != "/" {
+		t.Fatalf("palette query = %q, want /", got)
+	}
+	if got := a.input.Value(); got != "" {
+		t.Fatalf("composer input = %q, want empty after slash opens palette", got)
+	}
+}
+
+func TestHandleGlobalKey_SlashInDraftStaysInComposer(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	a.input.SetValue("look in ")
+
+	_, _, ok := a.handleGlobalKey(keyOf("/"))
+
+	if ok {
+		t.Fatal("slash in an existing draft should fall through to textarea")
+	}
+	if a.palette.IsVisible() {
+		t.Fatal("slash in an existing draft should not open palette")
 	}
 }
 
@@ -147,6 +205,144 @@ func TestHandleGlobalKey_CtrlJ_InsertsNewline(t *testing.T) {
 	// was inserted somewhere in the buffer.
 	if !strings.Contains(got, "\n") {
 		t.Errorf("expected newline inserted, got %q", got)
+	}
+}
+
+func TestHandleGlobalKey_NewlineShortcutsInsertWhileBusy(t *testing.T) {
+	for _, key := range []string{"ctrl+j", "shift+enter", "alt+enter"} {
+		t.Run(key, func(t *testing.T) {
+			a := testApp()
+			a.busy = true
+			a.input.SetValue("draft")
+
+			_, cmd, ok := a.handleGlobalKey(keyOf(key))
+
+			if !ok {
+				t.Fatalf("%s should be handled", key)
+			}
+			if cmd != nil {
+				t.Fatalf("%s while busy should not submit", key)
+			}
+			if got := a.input.Value(); !contains(got, "\n") {
+				t.Fatalf("expected newline inserted while busy, got %q", got)
+			}
+		})
+	}
+}
+
+func TestHandleGlobalKey_EnterWithDraftBlockedWhileBusy(t *testing.T) {
+	a := testApp()
+	a.busy = true
+	a.input.SetValue("ordinary draft")
+
+	_, cmd, ok := a.handleGlobalKey(keyOf("enter"))
+
+	if !ok {
+		t.Fatal("enter should be handled while busy")
+	}
+	if cmd != nil {
+		t.Fatal("ordinary enter while busy should not submit")
+	}
+	if got := a.input.Value(); got != "ordinary draft" {
+		t.Fatalf("ordinary draft changed while busy: %q", got)
+	}
+	if len(a.messages) != 0 {
+		t.Fatalf("ordinary enter while busy appended messages: %d", len(a.messages))
+	}
+}
+
+func TestHandleGlobalKey_BusyBlocksNonControlSlashCommands(t *testing.T) {
+	a := testApp()
+	a.busy = true
+	a.input.SetValue("/metadata on")
+
+	_, cmd, ok := a.handleGlobalKey(keyOf("enter"))
+
+	if !ok {
+		t.Fatal("enter should be handled while busy")
+	}
+	if cmd != nil {
+		t.Fatal("non-control slash command while busy should not submit")
+	}
+	if !a.busy {
+		t.Fatal("non-control slash command should not clear busy state")
+	}
+	if a.showMessageMeta {
+		t.Fatal("metadata command should not execute while busy")
+	}
+	if got := a.input.Value(); got != "/metadata on" {
+		t.Fatalf("blocked slash draft changed while busy: %q", got)
+	}
+	if len(a.messages) != 0 {
+		t.Fatalf("blocked slash command appended messages: %d", len(a.messages))
+	}
+}
+
+func TestHandleGlobalKey_BusyStopCommandCancels(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	a.busy = true
+	a.activeToolName = "Bash"
+	a.activeToolDetail = "go test ./..."
+	a.tools.Start("bash", "Bash", "go test ./...")
+	cancelled := false
+	a.cancel = func() { cancelled = true }
+	a.input.SetValue("/stop")
+
+	_, cmd, ok := a.handleGlobalKey(keyOf("enter"))
+
+	if !ok {
+		t.Fatal("enter should be handled while busy")
+	}
+	if cmd != nil {
+		t.Fatal("/stop should not submit to the engine")
+	}
+	if !cancelled {
+		t.Fatal("/stop did not call cancel")
+	}
+	if a.busy {
+		t.Fatal("/stop should clear busy state")
+	}
+	if got := a.input.Value(); got != "" {
+		t.Fatalf("/stop should clear composer, got %q", got)
+	}
+	if len(a.messages) != 1 || !contains(a.messages[0].content, "cancellation") {
+		t.Fatalf("/stop should append cancellation info, got %#v", a.messages)
+	}
+	if plain := stripANSI(a.View()); contains(plain, "Bash") || contains(plain, "Contemplating") {
+		t.Fatalf("/stop left stale running UI:\n%s", plain)
+	}
+}
+
+func TestHandlePaletteKey_BusyStopCommandCancelsCleanly(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+	a.busy = true
+	a.activeToolName = "Bash"
+	a.activeToolDetail = "go test ./..."
+	a.tools.Start("bash", "Bash", "go test ./...")
+	cancelled := false
+	a.cancel = func() { cancelled = true }
+	a.palette = NewPalette(DefaultTheme, []PaletteCommand{{Name: "/stop", Group: "Recovery"}})
+	a.palette.SetWidth(80)
+	a.palette.Show()
+
+	_, cmd, ok := a.handlePaletteKey(keyOf("enter"))
+
+	if !ok {
+		t.Fatal("palette enter should be handled")
+	}
+	if cmd != nil {
+		t.Fatal("palette /stop should not submit to the engine")
+	}
+	if !cancelled {
+		t.Fatal("palette /stop did not call cancel")
+	}
+	if a.busy {
+		t.Fatal("palette /stop should clear busy state")
+	}
+	if plain := stripANSI(a.View()); contains(plain, "Bash") || contains(plain, "Contemplating") {
+		t.Fatalf("palette /stop left stale running UI:\n%s", plain)
 	}
 }
 

@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
@@ -131,6 +133,68 @@ func TestExtractToolOutput_ErrorOverridesOutput(t *testing.T) {
 	}
 }
 
+// TestToolFilePath_NilCallReturnsEmpty covers the nil guard.
+func TestToolFilePath_NilCallReturnsEmpty(t *testing.T) {
+	if got := toolFilePath(nil); got != "" {
+		t.Errorf("nil call = %q, want empty", got)
+	}
+}
+
+// TestToolFilePath_HappyPath extracts the file_path key from JSON input.
+func TestToolFilePath_HappyPath(t *testing.T) {
+	input, _ := json.Marshal(map[string]string{
+		"file_path": "/tmp/hello.go",
+		"content":   "package main",
+	})
+	tc := &event.ToolCall{Input: input}
+	if got := toolFilePath(tc); got != "/tmp/hello.go" {
+		t.Errorf("got %q, want /tmp/hello.go", got)
+	}
+}
+
+func TestAppToolDeltaUpdatesRunningToolDetail(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+
+	a.handleEvent(event.Event{
+		Type:     event.ToolStart,
+		ToolCall: &event.ToolCall{ID: "bash-1", Name: "bash"},
+	})
+	a.handleEvent(event.Event{
+		Type:     event.ToolDelta,
+		ToolCall: &event.ToolCall{ID: "bash-1", Name: "bash"},
+		Text:     `{"command":"go test ./internal/tui/...`,
+	})
+	a.handleEvent(event.Event{
+		Type:     event.ToolDelta,
+		ToolCall: &event.ToolCall{ID: "bash-1", Name: "bash"},
+		Text:     ` -race -count=1"}`,
+	})
+
+	out := stripANSI(a.tools.RenderLive(DefaultTheme, 100))
+	if !strings.Contains(out, "go test ./internal/tui") || !strings.Contains(out, "-race -count=1") {
+		t.Fatalf("tool delta should surface running command detail:\n%s", out)
+	}
+}
+
+// TestToolFilePath_MissingKeyReturnsEmpty
+func TestToolFilePath_MissingKeyReturnsEmpty(t *testing.T) {
+	input, _ := json.Marshal(map[string]string{"some_other_key": "x"})
+	tc := &event.ToolCall{Input: input}
+	if got := toolFilePath(tc); got != "" {
+		t.Errorf("got %q, want empty", got)
+	}
+}
+
+// TestToolFilePath_BadJSONReturnsEmpty exercises the unmarshal-error
+// branch.
+func TestToolFilePath_BadJSONReturnsEmpty(t *testing.T) {
+	tc := &event.ToolCall{Input: json.RawMessage("not valid json {{{")}
+	if got := toolFilePath(tc); got != "" {
+		t.Errorf("got %q, want empty for bad JSON", got)
+	}
+}
+
 // TestTruncateLines_ShorterThanLimit returns text unchanged.
 func TestTruncateLines_ShorterThanLimit(t *testing.T) {
 	in := "a\nb\nc"
@@ -161,10 +225,10 @@ func TestTruncateLines_EmptyInputReturnsEmpty(t *testing.T) {
 // TestBase64Enc covers the OSC 52 clipboard helper.
 func TestBase64Enc(t *testing.T) {
 	cases := map[string]string{
-		"":          "",
-		"hello":     "aGVsbG8=",
-		"AB\nC":     "QUIKQw==",
-		"中":        "5Lit",
+		"":      "",
+		"hello": "aGVsbG8=",
+		"AB\nC": "QUIKQw==",
+		"中":     "5Lit",
 	}
 	for in, want := range cases {
 		if got := base64Enc(in); got != want {

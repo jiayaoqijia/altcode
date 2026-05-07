@@ -1,13 +1,14 @@
 package tui
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
-	"github.com/jiayaoqijia/altcode/internal/event"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
 // handleEvent routes a streaming event to the appropriate handler.
@@ -22,6 +23,8 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 		return a.onThinkingDelta(ev)
 	case event.ToolStart:
 		return a.onToolStart(ev)
+	case event.ToolDelta:
+		return a.onToolDelta(ev)
 	case event.ToolResultEvent:
 		return a.onToolResult(ev)
 	case event.UsageEvent:
@@ -44,10 +47,10 @@ func (a *App) handleEvent(ev event.Event) (tea.Model, tea.Cmd) {
 // the agent loop indefinitely (the original 1+ hour TUI hang).
 //
 // Auto-allow is the right TUI default because:
-//   1. Interactive users are implicitly consenting to tool calls;
-//      they can Esc-cancel any turn that goes wrong.
-//   2. CC/codex TUIs default to allowing in interactive mode too.
-//   3. Headless mode uses a different policy via permission rules.
+//  1. Interactive users are implicitly consenting to tool calls;
+//     they can Esc-cancel any turn that goes wrong.
+//  2. CC/codex TUIs default to allowing in interactive mode too.
+//  3. Headless mode uses a different policy via permission rules.
 //
 // Future work: replace this with a proper modal driven by
 // internal/tui/permission_dialog.go (struct already exists, just
@@ -166,6 +169,12 @@ func (a *App) onToolStart(ev event.Event) (tea.Model, tea.Cmd) {
 		target := extractToolTarget(ev.ToolCall)
 		a.activeToolDetail = target
 		a.tools.Start(ev.ToolCall.ID, ev.ToolCall.Name, target)
+		if ev.ToolCall.ID != "" {
+			if a.toolInputDeltas == nil {
+				a.toolInputDeltas = make(map[string]string)
+			}
+			a.toolInputDeltas[ev.ToolCall.ID] = ""
+		}
 		a.toolStart = time.Now()
 	}
 	a.updateViewport()
@@ -175,6 +184,33 @@ func (a *App) onToolStart(ev event.Event) (tea.Model, tea.Cmd) {
 		return stuckToolMsg{name: stuckName, startedAt: stuckStart}
 	})
 	return a, tea.Batch(a.waitForEvent(), stuckCmd)
+}
+
+func (a *App) onToolDelta(ev event.Event) (tea.Model, tea.Cmd) {
+	if ev.ToolCall == nil || ev.Text == "" {
+		return a, a.waitForEvent()
+	}
+	id := ev.ToolCall.ID
+	if id == "" {
+		return a, a.waitForEvent()
+	}
+	if a.toolInputDeltas == nil {
+		a.toolInputDeltas = make(map[string]string)
+	}
+	a.toolInputDeltas[id] += ev.Text
+	target := extractToolTarget(&event.ToolCall{
+		ID:    id,
+		Name:  ev.ToolCall.Name,
+		Input: json.RawMessage(a.toolInputDeltas[id]),
+	})
+	if target == "" {
+		return a, a.waitForEvent()
+	}
+	a.activeToolName = ev.ToolCall.Name
+	a.activeToolDetail = target
+	a.tools.UpdateDetail(id, target)
+	a.updateViewport()
+	return a, a.waitForEvent()
 }
 
 func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
@@ -194,6 +230,9 @@ func (a *App) onToolResult(ev event.Event) (tea.Model, tea.Cmd) {
 	toolID := ""
 	if ev.ToolCall != nil {
 		toolID = ev.ToolCall.ID
+	}
+	if toolID != "" && a.toolInputDeltas != nil {
+		delete(a.toolInputDeltas, toolID)
 	}
 
 	if hasError {
@@ -305,8 +344,10 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 	// otherwise the final snapshot shows a stale ⟳ next to the real results.
 	a.tools.SweepRunning()
 	if len(a.tools.entries) > 0 {
-		tree := a.tools.Render(a.theme, max(10, a.width-6))
-		a.messages = append(a.messages, chatMessage{role: roleInfo, content: tree})
+		tree := a.tools.RenderCompact(a.theme, max(10, a.width-6))
+		if strings.TrimSpace(tree) != "" {
+			a.messages = append(a.messages, chatMessage{role: roleTrace, content: tree})
+		}
 		// Clear immediately to avoid tools appearing TWICE (in messages + live tree)
 		// which causes them to physically jump positions on screen.
 		a.tools.Clear()
@@ -321,11 +362,13 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 	// Turn completion summary — compact line showing what happened
 	turnSummary := a.buildTurnSummary()
 	if turnSummary != "" {
+		a.lastCompletion = turnSummary
 		a.messages = append(a.messages, chatMessage{
 			role: roleInfo, content: turnSummary,
 		})
 	}
 	a.busy = false
+	a.applyLayout(false)
 	// OSC 9 desktop notification when the turn ran past the visibility
 	// threshold (DeepSeek-TUI parity). Suppressed in headless mode and
 	// when ALTCODE_NOTIFY=0. 30-second user-visible cooldown stops a
@@ -486,4 +529,26 @@ func (a *App) recordToolMeta(ev event.Event, _ string, hasError bool) {
 	if ev.ToolCall != nil {
 		a.trackTaskFromTool(ev.ToolCall)
 	}
+}
+
+// toolFilePath extracts the raw file_path argument from a file-touching
+// tool call. Unlike extractToolTarget, this keeps the full path for
+// stable deduping and test coverage.
+func toolFilePath(tc *event.ToolCall) string {
+	if tc == nil || len(tc.Input) == 0 {
+		return ""
+	}
+	var input map[string]json.RawMessage
+	if json.Unmarshal(tc.Input, &input) != nil {
+		return ""
+	}
+	v, ok := input["file_path"]
+	if !ok {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(v, &s) != nil {
+		return ""
+	}
+	return s
 }
