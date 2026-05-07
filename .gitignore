@@ -1,10 +1,18 @@
 # Dependencies
 node_modules/
-vendor/
 .venv/
 venv/
 __pycache__/
 *.pyc
+
+# Reference checkouts — kept locally for design study but never
+# committed (open-source policy: no submodule pointers in commits).
+# The directories may be cloned manually with:
+#   git clone <url> vendor/<name>
+# Listed explicitly so a stray `git add vendor` doesn't sneak them in.
+vendor/
+claude-code/
+opencode/
 
 # Build artifacts
 dist/
