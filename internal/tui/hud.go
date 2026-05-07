@@ -208,10 +208,15 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 	// type-ahead buffered. Warning color makes the chip pop so users
 	// SEE that their input was queued, not silently lost — fixes the
 	// "where did my Enter go" mental-model gap. DS-TUI parity.
+	//
+	// Glyph note: ▶ (U+25B6 BLACK RIGHT-POINTING TRIANGLE) is a
+	// universally-rendered Unicode geometric shape — no font fallback
+	// risk. Earlier ⏵ (U+23F5) had degraded glyph rendering in some
+	// terminal fonts (round-4 review).
 	if h.QueueDepth > 0 {
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).
-				Render(fmt.Sprintf("⏵ %d queued", h.QueueDepth)))
+				Render(fmt.Sprintf("▶ %d queued", h.QueueDepth)))
 	}
 
 	// Config counts (right)
