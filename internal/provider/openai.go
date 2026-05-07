@@ -350,8 +350,16 @@ type openaiSSEChunk struct {
 		FinishReason *string `json:"finish_reason"`
 	} `json:"choices"`
 	Usage *struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
+		PromptTokens        int `json:"prompt_tokens"`
+		CompletionTokens    int `json:"completion_tokens"`
+		PromptTokensDetails struct {
+			// OpenAI / OpenRouter / DeepSeek emit cached prefix tokens
+			// here as part of the final usage chunk. Reusing the
+			// CacheReadInputTokens field on UsageInfo keeps the
+			// downstream consumers (cost tracker, HUD chip) provider-
+			// agnostic.
+			CachedTokens int `json:"cached_tokens"`
+		} `json:"prompt_tokens_details"`
 	} `json:"usage"`
 }
 
@@ -390,11 +398,16 @@ func processOpenAISSE(body io.ReadCloser, ch chan<- StreamEvent) {
 			continue
 		}
 
-		// Usage can appear on any chunk (often alongside finish_reason)
+		// Usage can appear on any chunk (often alongside finish_reason).
+		// Cached prefix tokens land in prompt_tokens_details.cached_tokens
+		// for OpenAI/OpenRouter/DeepSeek; we forward them on the same
+		// CacheReadInputTokens field used by Anthropic so the HUD chip
+		// works across providers.
 		if chunk.Usage != nil {
 			ch <- StreamEvent{Type: StreamUsage, Usage: &UsageInfo{
-				InputTokens:  int64(chunk.Usage.PromptTokens),
-				OutputTokens: int64(chunk.Usage.CompletionTokens),
+				InputTokens:          int64(chunk.Usage.PromptTokens),
+				OutputTokens:         int64(chunk.Usage.CompletionTokens),
+				CacheReadInputTokens: int64(chunk.Usage.PromptTokensDetails.CachedTokens),
 			}}
 		}
 

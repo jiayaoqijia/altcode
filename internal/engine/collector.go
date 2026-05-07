@@ -131,6 +131,7 @@ func collectTurn(ctx context.Context, stream <-chan provider.StreamEvent, out ch
 				sendEvent(ctx, out, event.Event{Type: event.UsageEvent, Usage: &event.UsageInfo{
 					InputTokens:  sev.Usage.InputTokens,
 					OutputTokens: sev.Usage.OutputTokens,
+					CacheHits:    sev.Usage.CacheReadInputTokens,
 				}})
 			}
 

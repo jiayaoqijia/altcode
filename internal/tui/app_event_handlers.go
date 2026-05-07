@@ -179,6 +179,14 @@ func (a *App) onUsage(ev event.Event) (tea.Model, tea.Cmd) {
 		// within a turn; the last call's InputTokens is the best
 		// proxy for "what the model saw last".
 		a.currentContextTokens = ev.Usage.InputTokens
+		// Capture cache-hit count from the same usage chunk so the
+		// HUD chip reflects the latest turn's prefix-cache savings.
+		// Provider-agnostic: anthropic emits cache_read_input_tokens,
+		// openai/openrouter/deepseek emit prompt_tokens_details.cached_tokens
+		// — both land on event.UsageInfo.CacheHits via the collector.
+		if ev.Usage.CacheHits > 0 {
+			a.cachedTokens = ev.Usage.CacheHits
+		}
 		a.tokenInfo = fmt.Sprintf("tokens: %d in / %d out",
 			a.tokensIn, a.tokensOut)
 	}

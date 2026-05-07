@@ -96,6 +96,7 @@ type App struct {
 	turnBashes     int              // commands run this turn
 	turnCostStart  float64          // cost at turn start (for delta)
 	turnTokenStart int64            // tokens at turn start (for delta)
+	cachedTokens   int64            // last turn's cached prompt tokens (HUD chip)
 	prevContentLen int              // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common

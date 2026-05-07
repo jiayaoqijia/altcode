@@ -18,6 +18,13 @@ type hudState struct {
 	ContextTokens int64
 	ContextLimit  int64 // e.g. 128000 for GPT-4
 
+	// CachedTokens is the most-recent turn's prompt tokens served from
+	// the provider's prefix cache (cached_tokens for OpenAI/OpenRouter/
+	// DeepSeek, cache_read_input_tokens for Anthropic). When > 0 the
+	// HUD renders a "cache N%" chip — useful telemetry for users
+	// tuning long-running deepseek sessions.
+	CachedTokens int64
+
 	// Session
 	SessionStart time.Time
 	SessionName  string // e.g. "starry-waddling-tulip"
@@ -165,6 +172,29 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 	} else if info.TokensIn+info.TokensOut > 0 {
 		rightParts = append(rightParts, dim.Render(fmt.Sprintf("%s in / %s out",
 			formatTokens(info.TokensIn), formatTokens(info.TokensOut))))
+	}
+
+	// Cache-hit chip (right): show prefix-cache effectiveness when the
+	// last turn benefited from the provider's prompt cache. Hidden
+	// when cached==0 to keep the HUD quiet on cache-cold turns.
+	// DeepSeek-TUI #396 parity.
+	if h.CachedTokens > 0 && h.ContextTokens > 0 {
+		cachePct := h.CachedTokens * 100 / h.ContextTokens
+		if cachePct > 100 {
+			cachePct = 100
+		}
+		// Color the chip green when cache hit is high (80%+), yellow
+		// for moderate (40-79%), muted for low (<40%) — quick visual
+		// gauge of whether the prompt is reusing prior context.
+		chipColor := theme.Muted
+		if cachePct >= 80 {
+			chipColor = theme.Success
+		} else if cachePct >= 40 {
+			chipColor = theme.Warning
+		}
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(chipColor).
+				Render(fmt.Sprintf("cache %d%%", cachePct)))
 	}
 
 	// Config counts (right)
