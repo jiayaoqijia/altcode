@@ -140,6 +140,7 @@ func (a *App) buildHUDState() hudState {
 	return hudState{
 		ContextTokens:  contextTokens,
 		CachedTokens:   a.cachedTokens,
+		QueueDepth:     len(a.queue),
 		ContextLimit:   ctxLimit,
 		SessionStart:   a.sessionStart,
 		SessionName:    a.sessionDisplayName(),

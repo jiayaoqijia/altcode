@@ -25,6 +25,13 @@ type hudState struct {
 	// tuning long-running deepseek sessions.
 	CachedTokens int64
 
+	// QueueDepth is the number of prompts the user has typed ahead
+	// while the current turn is running (FIFO drained at onDone).
+	// Surfaced as a "[N queued]" chip in the HUD so users can SEE
+	// at a glance that their typed-ahead input was buffered, not
+	// silently lost. DeepSeek-TUI parity for visible queue depth.
+	QueueDepth int
+
 	// Session
 	SessionStart time.Time
 	SessionName  string // e.g. "starry-waddling-tulip"
@@ -195,6 +202,16 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		rightParts = append(rightParts,
 			lipgloss.NewStyle().Foreground(chipColor).
 				Render(fmt.Sprintf("cache %d%%", cachePct)))
+	}
+
+	// Queue depth chip (right): only render when prompts are
+	// type-ahead buffered. Warning color makes the chip pop so users
+	// SEE that their input was queued, not silently lost — fixes the
+	// "where did my Enter go" mental-model gap. DS-TUI parity.
+	if h.QueueDepth > 0 {
+		rightParts = append(rightParts,
+			lipgloss.NewStyle().Foreground(theme.Warning).Bold(true).
+				Render(fmt.Sprintf("⏵ %d queued", h.QueueDepth)))
 	}
 
 	// Config counts (right)
