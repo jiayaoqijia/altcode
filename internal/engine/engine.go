@@ -1294,17 +1294,24 @@ func (e *Engine) contextWindowSize() int {
 		return e.cachedContextWindow
 	}
 
-	// Query provider's /v1/models endpoint (skip for localhost test servers)
+	// Query provider's /v1/models endpoint (skip for localhost test servers).
+	// Uses the disk-cached variant so the API call only fires once per
+	// 24h per (baseURL,model) — saves 1-3s per altcode launch and works
+	// offline once the cache is warm.
 	provName, _ := parseModel(e.cfg.Model)
 	if pcfg, ok := e.cfg.Provider[provName]; ok && !strings.Contains(pcfg.BaseURL, "127.0.0.1") {
-		info := provider.FetchModelInfo(pcfg.BaseURL, pcfg.APIKey, e.model)
+		info := provider.FetchModelInfoCached(pcfg.BaseURL, pcfg.APIKey, e.model)
 		if info != nil && info.ContextSize() > 0 {
 			e.cachedContextWindow = info.ContextSize()
 			return e.cachedContextWindow
 		}
 	}
 
-	// Fallback: model-name heuristic
+	// Fallback: model-name heuristic. Refreshed 2026-05; check
+	// each provider's docs for current context windows when adding
+	// new entries. The API-fetch path above usually wins; this is
+	// only the safety net for providers without a /v1/models
+	// endpoint (or when the API call fails).
 	model := strings.ToLower(e.model)
 	switch {
 	case strings.Contains(model, "gpt-5"):
@@ -1317,8 +1324,12 @@ func (e *Engine) contextWindowSize() int {
 		return 128000 // GLM-4.7: 128K
 	case strings.Contains(model, "kimi"), strings.Contains(model, "k2"):
 		return 131072 // Kimi K2: 128K
+	case strings.Contains(model, "deepseek-v4"):
+		return 1000000 // DeepSeek V4 (pro / flash): 1M context
+	case strings.Contains(model, "deepseek-v3"):
+		return 128000 // DeepSeek V3.x: 128K
 	case strings.Contains(model, "deepseek"):
-		return 64000
+		return 64000 // older DeepSeek (V2 etc): 64K
 	default:
 		return 128000
 	}
