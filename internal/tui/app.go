@@ -102,6 +102,12 @@ type App struct {
 	// current turn is running. Drained by drainQueue() in onDone().
 	// DeepSeek-TUI parity for `/queue` workflow.
 	queue          []string
+	// permDialog shows a modal asking the user to approve a tool call.
+	// Wired only when ALTCODE_REQUIRE_APPROVAL=1 is set; otherwise the
+	// existing auto-allow path stays. DS-TUI parity. The pending PermReq
+	// holds the response channel until the user picks y/n/a/!.
+	permDialog        *PermissionDialog
+	pendingPermission *event.PermReq
 	prevContentLen int              // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common
@@ -176,6 +182,7 @@ func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ..
 		teamView:        newTeamView(),
 		wfHeader:        &workflowHeader{},
 		wfOverride:      make(chan orchestra.OverrideCmd, 4),
+		permDialog:      NewPermissionDialog(theme),
 	}
 }
 

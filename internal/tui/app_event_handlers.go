@@ -3,6 +3,7 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -56,7 +57,22 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	if ev.Permission == nil || ev.Permission.Response == nil {
 		return a, a.waitForEvent()
 	}
-	// Surface the auto-allow info ONCE per tool name per session.
+	// Modal flow (opt-in via ALTCODE_REQUIRE_APPROVAL=1): pop the
+	// approval dialog and stash the response channel until the user
+	// picks y/n/a/!. The TUI key handler in handleKey() routes the
+	// keystroke to handlePermDialogKey when permDialog.IsVisible().
+	// DS-TUI parity for the modal-driven approval flow.
+	if os.Getenv("ALTCODE_REQUIRE_APPROVAL") == "1" {
+		a.pendingPermission = ev.Permission
+		if a.permDialog == nil {
+			a.permDialog = NewPermissionDialog(a.theme)
+		}
+		a.permDialog.SetWidth(a.width)
+		a.permDialog.Show(ev.Permission.ToolName, ev.Permission.Pattern)
+		a.updateViewport()
+		return a, a.waitForEvent()
+	}
+	// Default flow: auto-allow with a one-time-per-tool info note.
 	// A 6-bash-call turn used to print the same line 6 times, drowning
 	// the actual tool tree in repeated boilerplate.
 	if a.autoAllowSeen == nil {
@@ -64,7 +80,7 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	}
 	if !a.autoAllowSeen[ev.Permission.ToolName] {
 		a.autoAllowSeen[ev.Permission.ToolName] = true
-		a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json",
+		a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json or set ALTCODE_REQUIRE_APPROVAL=1 for a modal",
 			ev.Permission.ToolName))
 	}
 	// Non-blocking send: respCh has cap=1 (set in engine.askPermission),
@@ -75,6 +91,39 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	default:
 	}
 	return a, a.waitForEvent()
+}
+
+// handlePermDialogKey routes y/n/a/! while the permission modal is up.
+// Sends the user's choice on the pending response channel and hides
+// the dialog. Returns (handled, cmd) — caller should swallow handled
+// keystrokes and skip the rest of the input router.
+func (a *App) handlePermDialogKey(s string) (bool, tea.Cmd) {
+	if a.permDialog == nil || !a.permDialog.IsVisible() || a.pendingPermission == nil {
+		return false, nil
+	}
+	resp := event.PermResponse{}
+	switch s {
+	case "y":
+		resp.Action = event.Allow
+	case "a":
+		resp.Action = event.Allow
+		resp.Persistent = true // session-allow this exact pattern
+	case "!":
+		resp.Action = event.Allow
+		resp.Persistent = true // tool-wide allow (engine treats Persistent as global)
+	case "n", "esc":
+		resp.Action = event.Deny
+	default:
+		return false, nil // unrecognized key — let the rest of the router handle it
+	}
+	select {
+	case a.pendingPermission.Response <- resp:
+	default:
+	}
+	a.pendingPermission = nil
+	a.permDialog.Hide()
+	a.updateViewport()
+	return true, nil
 }
 
 func (a *App) onTextDelta(ev event.Event) (tea.Model, tea.Cmd) {

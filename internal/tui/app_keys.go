@@ -10,6 +10,20 @@ import (
 
 // handleKey is the top-level key router. Delegates to focused sub-handlers.
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	// Permission approval modal takes precedence — when it's open the
+	// user must answer y/n/a/! before any other input is processed.
+	// This is the safe default: while the engine is parked waiting
+	// for the response, every other keystroke could otherwise drop
+	// into the wrong handler.
+	if a.permDialog != nil && a.permDialog.IsVisible() {
+		if handled, cmd := a.handlePermDialogKey(msg.String()); handled {
+			return a, cmd, true
+		}
+		// Unknown key while modal is open → swallow it so the user's
+		// stray keystrokes don't land in the textarea or trigger
+		// other handlers.
+		return a, nil, true
+	}
 	if a.palette.IsVisible() {
 		return a.handlePaletteKey(msg)
 	}

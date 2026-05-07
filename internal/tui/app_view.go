@@ -63,7 +63,13 @@ func (a *App) renderInputArea() string {
 // renderMainBody determines which view mode to show.
 func (a *App) renderMainBody() string {
 	mainBody := a.viewport.View()
-	if a.palette.IsVisible() {
+	if a.permDialog != nil && a.permDialog.IsVisible() {
+		// Permission modal sits on top of every other view — it's a
+		// blocking interaction. SetWidth tracks the current viewport
+		// since the dialog is built once and resized on demand.
+		a.permDialog.SetWidth(a.mainBodyWidth())
+		mainBody = a.permDialog.View()
+	} else if a.palette.IsVisible() {
 		mainBody = a.palette.View()
 	} else if a.sessionSwitcher.IsVisible() {
 		mainBody = a.sessionSwitcher.View()
