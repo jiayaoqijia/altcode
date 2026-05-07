@@ -22,10 +22,18 @@ func normalInputPlaceholder(startupPrompt string) string {
 }
 
 func displayVersion(version string) string {
-	if strings.TrimSpace(version) == "" {
+	v := strings.TrimSpace(version)
+	if v == "" {
 		return "dev"
 	}
-	return version
+	// Callers prepend a literal "v" (e.g. "v"+displayVersion(...)). Strip
+	// any leading 'v'/'V' on the input so we never render "vv0.10.4" when
+	// the build is tagged with -X main.Version=v0.10.4.
+	v = strings.TrimLeft(v, "vV")
+	if v == "" {
+		return "dev"
+	}
+	return v
 }
 
 func welcomeWordmark() string {

@@ -88,11 +88,18 @@ func TestNormalInputPlaceholder(t *testing.T) {
 }
 
 func TestDisplayVersion(t *testing.T) {
+	// displayVersion strips a leading 'v'/'V' and surrounding whitespace
+	// so callers can always prepend a literal "v" without producing
+	// "vv0.10.4" when the build is tagged with -X main.Version=v0.10.4.
 	cases := map[string]string{
 		"":         "dev",
 		"   ":      "dev",
-		"v1.2.3":   "v1.2.3",
-		"  pinned ": "  pinned ",
+		"v":        "dev", // pure-prefix collapses to dev
+		"v1.2.3":   "1.2.3",
+		"V1.2.3":   "1.2.3",
+		"vv1.2.3":  "1.2.3",
+		"  pinned ": "pinned",
+		"1.2.3":    "1.2.3",
 	}
 	for in, want := range cases {
 		if got := displayVersion(in); got != want {
