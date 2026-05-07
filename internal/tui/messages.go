@@ -66,8 +66,16 @@ func (a *App) renderMessage(msg chatMessage) string {
 		rendered = msg.content
 	}
 
-	// Trim trailing whitespace
-	rendered = strings.TrimRight(rendered, " \n")
+	// Trim BOTH leading and trailing whitespace. The markdown renderer
+	// (glamour) wraps output in block-level paragraphs which prepend a
+	// '\n' for visual breathing room — useful as a standalone block,
+	// but here we splice the result onto the same line as the role
+	// icon (header + " " + rendered). With a leading '\n', "● " ends
+	// up alone on its line and the answer drops to the next line,
+	// looking like a stale spinner above the content. Round-5
+	// dual-reviewer flagged this on multiple prompts. Trim left to
+	// inline the icon with the first content line.
+	rendered = strings.Trim(rendered, " \n\r\t")
 
 	var borderColor lipgloss.Color
 	var icon string
