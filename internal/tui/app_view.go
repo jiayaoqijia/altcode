@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
@@ -290,12 +291,34 @@ func (a *App) renderCompactStatus(info statusBarInfo, spinView string) string {
 	} else if a.busy {
 		left = "● thinking"
 	}
-	right := a.statusHint()
+	right := a.compactStatusRight(info)
 	line := joinStatusParts(left, right, a.width)
 	return lipgloss.NewStyle().
 		Foreground(a.theme.Muted).
 		Width(a.width).
 		Render(line)
+}
+
+func (a *App) compactStatusRight(info statusBarInfo) string {
+	parts := []string{}
+	h := a.buildHUDState()
+	if h.ContextLimit > 0 {
+		ctx := fmt.Sprintf("ctx %d%%", h.contextPercent())
+		if a.width >= 72 {
+			ctx += " " + formatTokens(h.ContextTokens) + "/" + formatTokens(h.ContextLimit)
+		}
+		parts = append(parts, ctx)
+	}
+	if total := info.TokensIn + info.TokensOut; total > 0 {
+		parts = append(parts, "tok "+formatTokens(total))
+	}
+	if info.CostUSD > 0 {
+		parts = append(parts, fmt.Sprintf("$%.4f", info.CostUSD))
+	}
+	if hint := a.statusHint(); hint != "" {
+		parts = append(parts, hint)
+	}
+	return strings.Join(parts, " · ")
 }
 
 func (a *App) statusHint() string {

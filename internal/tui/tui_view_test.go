@@ -184,6 +184,27 @@ func TestTUIView_CompactStatusTruncatesLongToolDetail(t *testing.T) {
 	}
 }
 
+func TestTUIView_CompactStatusShowsResourceMeters(t *testing.T) {
+	a := testApp()
+	a.Update(tea.WindowSizeMsg{Width: 120, Height: 24})
+	a.currentContextTokens = 64000
+	a.tokensIn = 100000
+	a.tokensOut = 25000
+	a.costUSD = 0.1234
+
+	status := stripANSI(a.renderCompactStatus(statusBarInfo{
+		TokensIn:  a.tokensIn,
+		TokensOut: a.tokensOut,
+		CostUSD:   a.costUSD,
+	}, ""))
+
+	for _, want := range []string{"ctx 50%", "64.0K/128.0K", "tok 125.0K", "$0.1234"} {
+		if !strings.Contains(status, want) {
+			t.Fatalf("compact status missing %q:\n%s", want, status)
+		}
+	}
+}
+
 func TestTUIView_HelpCommand(t *testing.T) {
 	// Test /help text content directly (not via teatest — viewport scrolling
 	// makes captured output incomplete). This verifies the help text function.
@@ -1587,6 +1608,7 @@ func TestCCParity_FullHUD_AllFeatures(t *testing.T) {
 		"git branch":  "main*",
 		"context %":   "48%",
 		"context bar": "█",
+		"total usage": "tok 520.0K",
 		"cost":        "$1.2345",
 		"CLAUDE.md":   "2 CLAUDE.md",
 		"MCPs":        "4 MCPs",

@@ -176,9 +176,9 @@ func renderHUD(h hudState, info statusBarInfo, theme Theme, width int, vimMode b
 		} else {
 			rightParts = append(rightParts, bar+" "+dim.Render(pct))
 		}
-	} else if info.TokensIn+info.TokensOut > 0 {
-		rightParts = append(rightParts, dim.Render(fmt.Sprintf("%s in / %s out",
-			formatTokens(info.TokensIn), formatTokens(info.TokensOut))))
+	}
+	if total := info.TokensIn + info.TokensOut; total > 0 {
+		rightParts = append(rightParts, dim.Render("tok "+formatTokens(total)))
 	}
 
 	// Cache-hit chip (right): show prefix-cache effectiveness when the
