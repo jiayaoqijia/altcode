@@ -97,6 +97,7 @@ type App struct {
 	turnCostStart  float64          // cost at turn start (for delta)
 	turnTokenStart int64            // tokens at turn start (for delta)
 	cachedTokens   int64            // last turn's cached prompt tokens (HUD chip)
+	lastFrame      time.Time        // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
 	prevContentLen int              // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common
@@ -214,8 +215,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Re-render viewport while a tool is running so its
 			// elapsed time label actually ticks. Without this the
 			// tree freezes at "⟳ bash" until the next engine event.
-			if a.tools.HasRunning() {
+			//
+			// Frame rate limiter (DeepSeek-TUI parity): cap the
+			// re-render rate so the spinner ticking doesn't burn
+			// CPU at the spinner's natural ~10Hz cadence. ~30 FPS
+			// (33ms) is fast enough that the elapsed-time label
+			// looks live, slow enough to drop the per-tick render
+			// cost from a 1000-msg viewport rebuild to roughly
+			// 1/3 the cost.
+			if a.tools.HasRunning() && time.Since(a.lastFrame) > 33*time.Millisecond {
 				a.updateViewport()
+				a.lastFrame = time.Now()
 			}
 			return a, cmd
 		}

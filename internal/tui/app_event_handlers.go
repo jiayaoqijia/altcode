@@ -268,12 +268,24 @@ func (a *App) onDone() (tea.Model, tea.Cmd) {
 		a.streaming = ""
 	}
 	// Turn completion summary — compact line showing what happened
-	if summary := a.buildTurnSummary(); summary != "" {
+	turnSummary := a.buildTurnSummary()
+	if turnSummary != "" {
 		a.messages = append(a.messages, chatMessage{
-			role: roleInfo, content: summary,
+			role: roleInfo, content: turnSummary,
 		})
 	}
 	a.busy = false
+	// OSC 9 desktop notification when the turn ran past the visibility
+	// threshold (DeepSeek-TUI parity). Suppressed in headless mode and
+	// when ALTCODE_NOTIFY=0. 30-second user-visible cooldown stops a
+	// chain of medium-length turns from hammering the desktop.
+	if !a.turnStart.IsZero() {
+		elapsed := time.Since(a.turnStart)
+		if time.Since(a.lastBell) > 30*time.Second {
+			emitTurnNotification(elapsed, turnSummary)
+			a.lastBell = time.Now()
+		}
+	}
 	a.updateViewport()
 	return a, nil
 }
