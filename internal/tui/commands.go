@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/agent"
 	"github.com/jiayaoqijia/altcode/internal/compact"
 	"github.com/jiayaoqijia/altcode/internal/engine"
@@ -20,7 +21,6 @@ import (
 	"github.com/jiayaoqijia/altcode/internal/provider"
 	"github.com/jiayaoqijia/altcode/internal/workflow"
 	"github.com/jiayaoqijia/altcode/internal/workspace"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // handleBuiltinCommand checks if the input is a built-in slash command
@@ -1286,7 +1286,7 @@ func (a *App) builtinSkillsText() string {
 	}
 	skills := a.engine.Skills()
 	if len(skills) == 0 {
-		return "No skills discovered. Install skills under .claude/skills/, ~/.claude/skills/, or .agents/skills/."
+		return "No skills discovered. Install skills under project .agents/skills/, project .claude/skills/, or a global agent skills directory such as ~/.agents/skills or ~/.codex/skills."
 	}
 	sorted := make([]engine.Skill, len(skills))
 	copy(sorted, skills)
@@ -1492,7 +1492,7 @@ Add a team to your config.json:
 Or use OpenRouter for all models:
 
   {
-    "provider": {"openai": {"apiKey": "sk-or-...", "baseURL": "https://openrouter.ai/api"}},
+    "provider": {"openai": {"apiKey": "$OPENROUTER_API_KEY", "baseURL": "https://openrouter.ai/api"}},
     "team": {
       "models": {
         "architect":   {"model": "openai/anthropic/claude-sonnet-4"},

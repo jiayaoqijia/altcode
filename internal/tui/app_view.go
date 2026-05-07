@@ -142,7 +142,7 @@ func (a *App) buildHUDState() hudState {
 		CachedTokens:   a.cachedTokens,
 		ContextLimit:   ctxLimit,
 		SessionStart:   a.sessionStart,
-		SessionName:    a.sessionSlug,
+		SessionName:    a.sessionDisplayName(),
 		GitProject:     a.gitProject,
 		GitBranch:      a.gitBranch,
 		GitDirty:       a.gitDirty,
@@ -154,6 +154,13 @@ func (a *App) buildHUDState() hudState {
 		TasksDone:      a.tasksDone,
 		ActiveTaskName: a.activeTaskName,
 	}
+}
+
+func (a *App) sessionDisplayName() string {
+	if strings.TrimSpace(a.sessionTitle) != "" {
+		return a.sessionTitle
+	}
+	return a.sessionSlug
 }
 
 // renderStatusSection renders the HUD status bar.
