@@ -7,13 +7,14 @@ import (
 	"time"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 // agentPaneStatus tracks an external agent's display state.
 type agentPaneStatus int
 
 const (
-	paneRunning   agentPaneStatus = iota
+	paneRunning agentPaneStatus = iota
 	paneSucceeded
 	paneFailed
 	paneCancelled
@@ -161,9 +162,9 @@ func (tv *teamView) Render(theme Theme) string {
 		separators = n - 1
 		paneWidth = (totalWidth - separators) / n
 	}
-	paneHeight := tv.height - 2 // header + footer
-	if paneHeight < 5 {
-		paneHeight = 5
+	paneHeight := tv.height - 3 // renderPane adds border rows around content
+	if paneHeight < 1 {
+		paneHeight = 1
 	}
 
 	var rendered []string
@@ -230,20 +231,19 @@ func (tv *teamView) renderPane(p *agentPane, w, h int, theme Theme) string {
 		lines = lines[len(lines)-visibleLines:]
 	}
 
-	// Truncate long lines (rune-safe for UTF-8)
+	// Truncate long lines by display width and preserve ANSI escape state.
 	var body []string
 	maxW := w - 2
 	if maxW < 3 {
 		maxW = 3
 	}
 	for _, l := range lines {
-		runes := []rune(l)
-		if len(runes) > maxW {
+		if lipgloss.Width(l) > maxW {
 			cut := maxW - 3
 			if cut < 0 {
 				cut = 0
 			}
-			l = string(runes[:cut]) + "..."
+			l = ansi.Truncate(l, cut, "") + "..."
 		}
 		body = append(body, l)
 	}

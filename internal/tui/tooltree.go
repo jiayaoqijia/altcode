@@ -65,7 +65,7 @@ type toolEntry struct {
 // toolTree manages the list of tool calls for the current turn.
 type toolTree struct {
 	entries []toolEntry
-	active  int    // index of currently running tool, -1 if none
+	active  int // index of currently running tool, -1 if none
 	// projectRoot is captured by the App and used to absolutise file
 	// paths emitted in tool output, so the OSC-8 hyperlinks render
 	// correctly (file:// requires absolute paths).
@@ -88,6 +88,28 @@ func (t *toolTree) Start(id, name, detail string) {
 		startedAt: time.Now(),
 	})
 	t.active = len(t.entries) - 1
+}
+
+func (t *toolTree) UpdateDetail(id, detail string) bool {
+	if detail == "" {
+		return false
+	}
+	idx := -1
+	if id != "" {
+		for i, e := range t.entries {
+			if e.status == "running" && e.id == id {
+				idx = i
+				break
+			}
+		}
+	} else {
+		idx = t.findRunning()
+	}
+	if idx < 0 {
+		return false
+	}
+	t.entries[idx].detail = detail
+	return true
 }
 
 // Done marks the matching running tool as complete. It first tries to
@@ -295,6 +317,157 @@ func (t *toolTree) Render(theme Theme, width int) string {
 	return t.renderItems(items, theme, width, false /*persisted*/)
 }
 
+// RenderCompact returns a persisted final trace for completed turns.
+// It keeps routine reads/searches one-line and only expands output that
+// helps explain the result.
+func (t *toolTree) RenderCompact(theme Theme, width int) string {
+	if len(t.entries) == 0 {
+		return ""
+	}
+	var sb strings.Builder
+	for _, item := range collapseCompactEntries(t.entries) {
+		if group, ok := item.(collapsedGroup); ok {
+			line := lipgloss.NewStyle().Foreground(theme.Border).Render("• ") +
+				lipgloss.NewStyle().Foreground(theme.Success).Render("✓") + " " +
+				lipgloss.NewStyle().Foreground(theme.Muted).Render(toolSummaryNoun(group.name, group.count))
+			if group.elapsed > 0 {
+				line += lipgloss.NewStyle().Foreground(theme.Muted).Render(" " + formatToolDuration(group.elapsed))
+			}
+			sb.WriteString(line)
+			sb.WriteByte('\n')
+			continue
+		}
+		e, ok := item.(toolEntry)
+		if !ok {
+			continue
+		}
+		if e.status == "running" {
+			continue
+		}
+		icon := "✓"
+		iconColor := theme.Success
+		if e.status == "error" {
+			icon = "✗"
+			iconColor = theme.Error
+		}
+		nameText := compactToolName(e, width)
+		line := lipgloss.NewStyle().Foreground(theme.Border).Render("• ") +
+			lipgloss.NewStyle().Foreground(iconColor).Render(icon) + " " +
+			lipgloss.NewStyle().Foreground(theme.Muted).Render(nameText)
+		if e.elapsed > 0 {
+			line += lipgloss.NewStyle().Foreground(theme.Muted).Render(" " + formatToolDuration(e.elapsed))
+		}
+		sb.WriteString(line)
+		sb.WriteByte('\n')
+
+		for _, ol := range compactToolOutput(e, theme, max(10, width-6), t.projectRoot) {
+			connColor := theme.Border
+			if e.status == "error" {
+				connColor = theme.Error
+			}
+			sb.WriteString("  " + lipgloss.NewStyle().Foreground(connColor).Render("⎿") + " " + ol + "\n")
+		}
+	}
+	return sb.String()
+}
+
+func collapseCompactEntries(entries []toolEntry) []any {
+	var result []any
+	i := 0
+	for i < len(entries) {
+		e := entries[i]
+		if e.status != "done" || !isRoutineCompactTool(e.name) {
+			result = append(result, e)
+			i++
+			continue
+		}
+		j := i + 1
+		totalElapsed := e.elapsed
+		for j < len(entries) &&
+			entries[j].status == "done" &&
+			strings.EqualFold(entries[j].name, e.name) {
+			totalElapsed += entries[j].elapsed
+			j++
+		}
+		if count := j - i; count >= 3 {
+			result = append(result, collapsedGroup{name: e.name, count: count, elapsed: totalElapsed})
+		} else {
+			for k := i; k < j; k++ {
+				result = append(result, entries[k])
+			}
+		}
+		i = j
+	}
+	return result
+}
+
+func isRoutineCompactTool(name string) bool {
+	switch strings.ToLower(name) {
+	case "read", "glob", "grep":
+		return true
+	default:
+		return false
+	}
+}
+
+func compactToolName(e toolEntry, width int) string {
+	detail := e.detail
+	lowerDetail := strings.ToLower(detail)
+	lowerName := strings.ToLower(e.name)
+	if strings.HasPrefix(lowerDetail, lowerName+" ") {
+		detail = strings.TrimSpace(detail[len(e.name)+1:])
+	} else if strings.HasPrefix(lowerDetail, lowerName+":") {
+		detail = strings.TrimSpace(detail[len(e.name)+1:])
+	}
+	if detail == "" {
+		return e.name
+	}
+	avail := width - lipgloss.Width(e.name) - 10
+	if avail < 12 {
+		avail = 12
+	}
+	return e.name + "(" + smartTruncate(detail, avail) + ")"
+}
+
+func compactToolOutput(e toolEntry, theme Theme, maxWidth int, projectRoot string) []string {
+	if e.output == "" {
+		return nil
+	}
+	lower := strings.ToLower(e.name)
+	if e.status != "error" {
+		switch lower {
+		case "read", "glob", "grep":
+			return nil
+		case "bash":
+			lines := nonEmptyOutputLines(e.output)
+			return formatBashOutput(lines, theme, maxWidth, 4, projectRoot)
+		case "edit", "write", "apply_patch":
+			return formatDiffOutput(strings.Split(strings.TrimRight(e.output, "\n"), "\n"), theme, maxWidth, 4)
+		default:
+			return nil
+		}
+	}
+	lines := nonEmptyOutputLines(e.output)
+	if len(lines) == 0 {
+		return nil
+	}
+	if len(lines) > 4 {
+		lines = append(lines[:4], fmt.Sprintf("… +%d lines", len(lines)-4))
+	}
+	return formatGenericOutput(lines, theme, maxWidth, 5, projectRoot)
+}
+
+func nonEmptyOutputLines(s string) []string {
+	var out []string
+	for _, line := range strings.Split(strings.TrimRight(s, "\n"), "\n") {
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		out = append(out, line)
+	}
+	return out
+}
+
 func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) string {
 	var sb strings.Builder
 	for i, item := range items {
@@ -350,18 +523,11 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 			}
 
 			nameText := e.name
-			if e.detail != "" {
+			detail := cleanedToolDetail(e.name, e.detail)
+			if detail != "" && e.status != "running" {
 				// Tool titles sometimes repeat the tool name (e.g. "read /path").
 				// Strip the duplicate prefix — case-insensitive — so we don't
 				// render "read(read /path)" or "Read(Read /path)".
-				detail := e.detail
-				lowerDetail := strings.ToLower(detail)
-				lowerName := strings.ToLower(e.name)
-				if strings.HasPrefix(lowerDetail, lowerName+" ") {
-					detail = strings.TrimSpace(detail[len(e.name)+1:])
-				} else if strings.HasPrefix(lowerDetail, lowerName+":") {
-					detail = strings.TrimSpace(detail[len(e.name)+1:])
-				}
 				// Width math must use display columns, not bytes —
 				// `lipgloss.Width("├─")` is 2 (cells) but `len("├─")`
 				// is 6 (bytes), and Unicode tool names like
@@ -376,12 +542,13 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 				nameText = e.name + "(" + det + ")"
 			}
 			nameRendered := lipgloss.NewStyle().Foreground(nameColor).Bold(e.status == "running").Render(nameText)
-			detailRendered := "" // detail is now inside the name parens
 
 			timing := ""
+			timingText := ""
 			if e.status == "done" && e.elapsed > 0 {
+				timingText = formatToolDuration(e.elapsed)
 				timing = lipgloss.NewStyle().Foreground(theme.Muted).
-					Render(" " + formatToolDuration(e.elapsed))
+					Render(" " + timingText)
 			}
 			// Running tool: show elapsed time only. We intentionally don't
 			// advertise the tool's max timeout here — users were reading
@@ -389,13 +556,23 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 			if e.status == "running" && !e.startedAt.IsZero() {
 				runElapsed := time.Since(e.startedAt)
 				if runElapsed >= time.Second {
+					timingText = formatToolDuration(runElapsed)
 					timing = lipgloss.NewStyle().Foreground(theme.Warning).
-						Render(" " + formatToolDuration(runElapsed))
+						Render(" " + timingText)
 				}
+			}
+			detailRendered := ""
+			if detail != "" && e.status == "running" {
+				avail := width - lipgloss.Width(prefix) - lipgloss.Width(e.name) - lipgloss.Width(timingText) - 10
+				if avail < 12 {
+					avail = 12
+				}
+				detailRendered = lipgloss.NewStyle().Foreground(theme.Muted).
+					Render(" · " + smartTruncate(detail, avail))
 			}
 
 			line := lipgloss.NewStyle().Foreground(theme.Border).
-				Render(prefix+" ") + iconRendered + " " + nameRendered + detailRendered + timing
+				Render(prefix+" ") + iconRendered + " " + nameRendered + timing + detailRendered
 			sb.WriteString(line)
 			sb.WriteByte('\n')
 
@@ -418,6 +595,22 @@ func (t *toolTree) renderItems(items []any, theme Theme, width int, tree bool) s
 		}
 	}
 	return sb.String()
+}
+
+func cleanedToolDetail(name, detail string) string {
+	detail = strings.TrimSpace(detail)
+	if detail == "" {
+		return ""
+	}
+	lowerDetail := strings.ToLower(detail)
+	lowerName := strings.ToLower(name)
+	if strings.HasPrefix(lowerDetail, lowerName+" ") {
+		return strings.TrimSpace(detail[len(name)+1:])
+	}
+	if strings.HasPrefix(lowerDetail, lowerName+":") {
+		return strings.TrimSpace(detail[len(name)+1:])
+	}
+	return detail
 }
 
 // formatToolOutput formats tool result output for display below the tool entry.

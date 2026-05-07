@@ -1,10 +1,12 @@
 package tui
 
 import (
+	"path/filepath"
+	"sort"
 	"strings"
 
-	"github.com/jiayaoqijia/altcode/internal/completions"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jiayaoqijia/altcode/internal/completions"
 )
 
 const filePopupMaxVisible = 8
@@ -64,10 +66,15 @@ func (a *App) updateFilePopup() {
 		a.filePopup.visible = false
 		return
 	}
+	prevQuery := a.filePopup.query
+	prevCursor := a.filePopup.cursor
 	a.filePopup.query = query
 	a.filePopup.matches = completions.Complete(root, query, 10)
 	a.filePopup.visible = len(a.filePopup.matches) > 0
 	a.filePopup.cursor = 0
+	if a.filePopup.visible && query == prevQuery && prevCursor < len(a.filePopup.matches) {
+		a.filePopup.cursor = prevCursor
+	}
 }
 
 // acceptFileCompletion replaces @query with the selected path,
@@ -95,10 +102,64 @@ func (a *App) acceptFileCompletion() bool {
 	replacement := selected.Path
 	newText := text[:idx] + replacement + text[end:]
 	a.input.SetValue(newText)
+	a.rememberFileMention(selected.Path)
 	a.filePopup.visible = false
 	a.filePopup.matches = nil
 	a.filePopup.cursor = 0
 	return true
+}
+
+func (a *App) rememberFileMention(path string) {
+	if path == "" {
+		return
+	}
+	for _, existing := range a.fileMentions {
+		if existing == path {
+			return
+		}
+	}
+	a.fileMentions = append(a.fileMentions, path)
+}
+
+func (a *App) fileMentionPathsForDisplay(text string) []string {
+	if text == "" || len(a.fileMentions) == 0 {
+		return nil
+	}
+	paths := make([]string, 0, len(a.fileMentions))
+	seen := make(map[string]struct{}, len(a.fileMentions))
+	for _, path := range a.fileMentions {
+		if _, ok := seen[path]; ok || !strings.Contains(text, path) {
+			continue
+		}
+		seen[path] = struct{}{}
+		paths = append(paths, path)
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		return len(paths[i]) > len(paths[j])
+	})
+	return paths
+}
+
+func (a *App) renderFileMentionChips(view string) string {
+	for _, path := range a.fileMentionPathsForDisplay(a.input.Value()) {
+		view = strings.ReplaceAll(view, path, a.fileMentionChip(path))
+	}
+	return view
+}
+
+func (a *App) fileMentionChip(path string) string {
+	name := filepath.Base(strings.TrimRight(path, "/"))
+	if name == "." || name == string(filepath.Separator) || name == "" {
+		name = path
+	}
+	icon := lipgloss.NewStyle().
+		Foreground(a.theme.Secondary).
+		Bold(true).
+		Render("▧")
+	label := lipgloss.NewStyle().
+		Foreground(a.theme.Foreground).
+		Render(name)
+	return icon + " " + label
 }
 
 // dismissFilePopup hides the popup without accepting.
@@ -113,12 +174,20 @@ func (a *App) filePopupView() string {
 	if !a.filePopup.visible || len(a.filePopup.matches) == 0 {
 		return ""
 	}
+	width := a.mainBodyWidth()
+	if width <= 0 {
+		width = a.width
+	}
+	popupWidth := min(max(1, width-6), 60)
+	if popupWidth < 24 {
+		popupWidth = max(1, width)
+	}
 
 	border := lipgloss.NewStyle().
 		Border(lipgloss.RoundedBorder()).
 		BorderForeground(a.theme.Secondary).
 		Padding(0, 1).
-		Width(min(a.width-4, 60))
+		Width(popupWidth)
 
 	var sb strings.Builder
 	headerStyle := lipgloss.NewStyle().
@@ -143,7 +212,74 @@ func (a *App) filePopupView() string {
 		sb.WriteString(pathStyle.Render(label) + "\n")
 	}
 
-	return border.Render(sb.String())
+	return border.Render(strings.TrimRight(sb.String(), "\n"))
+}
+
+func (a *App) overlayFilePopup(body string) string {
+	popup := a.filePopupView()
+	if popup == "" {
+		return body
+	}
+	width := a.mainBodyWidth()
+	if width <= 0 {
+		width = a.width
+	}
+	if width <= 0 {
+		return body
+	}
+	height := a.bodyHeight()
+	if height <= 0 {
+		return body
+	}
+
+	lines := strings.Split(strings.TrimRight(body, "\n"), "\n")
+	if len(lines) == 1 && lines[0] == "" {
+		lines = nil
+	}
+	for len(lines) < height {
+		lines = append(lines, strings.Repeat(" ", width))
+	}
+	if len(lines) > height {
+		lines = lines[:height]
+	}
+
+	popupLines := strings.Split(strings.TrimRight(popup, "\n"), "\n")
+	if len(popupLines) > height {
+		popupLines = popupLines[:height]
+	}
+	top := height - len(popupLines) - 1
+	if top < 0 {
+		top = 0
+	}
+	left := 2
+	if width < 16 {
+		left = 0
+	}
+	for i, line := range popupLines {
+		target := top + i
+		if target >= len(lines) {
+			break
+		}
+		lines[target] = overlayFilePopupLine(line, left, width)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func overlayFilePopupLine(line string, left, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if left < 0 {
+		left = 0
+	}
+	if left >= width {
+		left = 0
+	}
+	rendered := strings.Repeat(" ", left) + line
+	if lipgloss.Width(rendered) > width {
+		return truncateStr(rendered, width)
+	}
+	return rendered + strings.Repeat(" ", width-lipgloss.Width(rendered))
 }
 
 // filePopupMoveDown moves the popup cursor down by one.

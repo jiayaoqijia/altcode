@@ -15,6 +15,7 @@ const paletteMaxVisible = 10
 type PaletteCommand struct {
 	Name        string
 	Description string
+	Group       string
 	Action      func() string
 }
 
@@ -52,6 +53,13 @@ func (p *Palette) Show() {
 	p.input.Focus()
 	p.input.Reset()
 	p.filtered = p.commands
+}
+
+// ShowWithQuery opens the palette with an initial filter.
+func (p *Palette) ShowWithQuery(query string) {
+	p.Show()
+	p.input.SetValue(query)
+	p.filter(query)
 }
 
 // Hide closes the palette and blurs the input.
@@ -224,6 +232,17 @@ func (p *Palette) View() string {
 	}
 	for i := p.offset; i < end; i++ {
 		cmd := p.filtered[i]
+		if i == p.offset || cmd.Group != p.filtered[i-1].Group {
+			group := cmd.Group
+			if group == "" {
+				group = "Commands"
+			}
+			sb.WriteString(lipgloss.NewStyle().
+				Foreground(p.theme.Muted).
+				Bold(true).
+				Render(group))
+			sb.WriteByte('\n')
+		}
 		nameStyle := lipgloss.NewStyle().Foreground(p.theme.Primary).Bold(true)
 		descStyle := lipgloss.NewStyle().Foreground(p.theme.Muted)
 		if i == p.cursor {

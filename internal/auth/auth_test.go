@@ -179,6 +179,35 @@ func TestCredentialSource(t *testing.T) {
 	}
 }
 
+func TestCredentialSourceForModelDeepSeekIgnoresOpenAI(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("OPENAI_API_KEY", "")
+	t.Setenv("DEEPSEEK_API_KEY", "")
+
+	cfg := config.Default()
+	cfg.Model = "deepseek/deepseek-chat"
+	cfg.Provider["openai"] = config.ProviderConfig{APIKey: "openai-key"}
+	cfg.Provider["deepseek"] = config.ProviderConfig{APIKey: "deepseek-key"}
+
+	got := auth.CredentialSourceForModel(cfg, cfg.Model)
+	if got != "config file" {
+		t.Fatalf("CredentialSourceForModel() = %q, want config file", got)
+	}
+}
+
+func TestCredentialSourceForModelDeepSeekEnv(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("DEEPSEEK_API_KEY", "env-key")
+
+	cfg := config.Default()
+	cfg.Model = "deepseek-v3"
+
+	got := auth.CredentialSourceForModel(cfg, cfg.Model)
+	if got != "DEEPSEEK_API_KEY env" {
+		t.Fatalf("CredentialSourceForModel() = %q, want DEEPSEEK_API_KEY env", got)
+	}
+}
+
 func TestMissingCredentialPromptAnthropic(t *testing.T) {
 	cfg := config.Default()
 	cfg.Model = "anthropic/claude-sonnet-4-20250514"

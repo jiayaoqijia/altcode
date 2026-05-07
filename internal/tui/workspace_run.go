@@ -6,10 +6,10 @@ import (
 	"strings"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/agent"
 	"github.com/jiayaoqijia/altcode/internal/workspace"
 	"github.com/jiayaoqijia/altcode/internal/workspace/backends"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // agentSpec is a user-specified backend:role pair for workspace agent selection.
@@ -273,8 +273,8 @@ func (a *App) spawnAdditionalAgent(role, backendName string) tea.Cmd {
 // and begins periodic polling.
 func (a *App) StartWorkspace(sess *workspace.WorkspaceSession) tea.Cmd {
 	a.wsView = NewWorkspaceView(sess)
-	a.wsView.SetSize(a.width, max(1, a.height-6))
 	a.busy = true
+	a.applyLayout(false)
 	return a.workspacePollTick()
 }
 

@@ -1,8 +1,12 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/jiayaoqijia/altcode/internal/completions"
 )
 
@@ -100,6 +104,47 @@ func TestApp_FilePopupMoveDown_FewerMatchesThanCap(t *testing.T) {
 	}
 }
 
+func TestApp_UpdateFilePopup_PreservesCursorForSameQuery(t *testing.T) {
+	root := t.TempDir()
+	for _, name := range []string{"alpha.go", "beta.go", "gamma.go"} {
+		if err := os.WriteFile(filepath.Join(root, name), []byte("x"), 0o600); err != nil {
+			t.Fatalf("write fixture %s: %v", name, err)
+		}
+	}
+
+	a := testApp()
+	a.projectRoot = root
+	a.input.SetValue("@")
+	a.updateFilePopup()
+	a.filePopupMoveDown()
+	if a.filePopup.cursor != 1 {
+		t.Fatalf("cursor after move = %d, want 1", a.filePopup.cursor)
+	}
+
+	a.updateFilePopup()
+
+	if a.filePopup.cursor != 1 {
+		t.Fatalf("same-query popup refresh reset cursor to %d, want 1", a.filePopup.cursor)
+	}
+}
+
+func TestApp_FilePopupDoesNotIncreaseViewHeight(t *testing.T) {
+	a := testApp()
+	model, _ := a.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	a = model.(*App)
+	a.filePopup.visible = true
+	a.filePopup.query = ""
+	a.filePopup.matches = []completions.Match{
+		{Path: "AGENTS.md"},
+		{Path: "CHANGELOG.md"},
+		{Path: "CLAUDE.md"},
+	}
+
+	if got := renderedLineCount(a.View()); got > a.height {
+		t.Fatalf("file popup should float without increasing view height: got %d lines, want <= %d\n%s", got, a.height, stripANSI(a.View()))
+	}
+}
+
 // TestMin covers the local int helper.
 func TestMin(t *testing.T) {
 	cases := []struct{ a, b, want int }{
@@ -190,5 +235,34 @@ func TestAcceptFileCompletion_PreservesTrailingText(t *testing.T) {
 				t.Fatal("popup should be hidden after accept")
 			}
 		})
+	}
+}
+
+func TestAcceptFileCompletion_RendersFileChipWithoutChangingInputValue(t *testing.T) {
+	app := New(nil, DefaultTheme, "test", "")
+	app.Update(tea.WindowSizeMsg{Width: 100, Height: 24})
+	app.input.SetValue("review @hero")
+	app.filePopup.visible = true
+	app.filePopup.matches = []completions.Match{{Path: "internal/assets/altcode-hero.png"}}
+	app.filePopup.cursor = 0
+
+	if !app.acceptFileCompletion() {
+		t.Fatal("acceptFileCompletion returned false")
+	}
+
+	const fullPath = "review internal/assets/altcode-hero.png"
+	if got := app.input.Value(); got != fullPath {
+		t.Fatalf("input value = %q, want %q", got, fullPath)
+	}
+
+	plainComposer := stripANSI(app.renderComposerText())
+	if !strings.Contains(plainComposer, "▧ altcode-hero.png") {
+		t.Fatalf("composer should render compact file chip, got:\n%s", plainComposer)
+	}
+	if strings.Contains(plainComposer, "internal/assets/altcode-hero.png") {
+		t.Fatalf("composer leaked full path instead of compact chip:\n%s", plainComposer)
+	}
+	if got := app.input.Value(); got != fullPath {
+		t.Fatalf("render changed input value = %q, want %q", got, fullPath)
 	}
 }

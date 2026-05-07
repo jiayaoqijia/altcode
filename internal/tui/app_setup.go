@@ -2,11 +2,12 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jiayaoqijia/altcode/internal/auth"
 	"github.com/jiayaoqijia/altcode/internal/engine"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func (a *App) startRecommendedSetup() {
@@ -108,10 +109,6 @@ func (a *App) refreshEngine() error {
 }
 
 func (a *App) welcomeView() string {
-	logoStyle := lipgloss.NewStyle().
-		Foreground(a.theme.Primary).
-		Bold(true)
-
 	titleStyle := lipgloss.NewStyle().
 		Foreground(a.theme.Secondary).
 		Bold(true)
@@ -123,12 +120,7 @@ func (a *App) welcomeView() string {
 		Foreground(a.theme.Warning).
 		Bold(true)
 
-	version := a.version
-	if strings.TrimSpace(version) == "" {
-		version = "dev"
-	}
-
-	lines := a.welcomeHeader(logoStyle, mutedStyle, version)
+	var lines []string
 
 	if a.setupSuccess != "" {
 		successStyle := lipgloss.NewStyle().
@@ -147,15 +139,12 @@ func (a *App) welcomeView() string {
 	if a.setupProvider != "" {
 		provider := a.setupProvider
 		lines = append(lines,
-			"",
-			titleStyle.Render("Set "+providerLabel(provider)+" API key"),
-			mutedStyle.Render("Current model: ")+codeStyle.Render(a.activeModel()),
-			mutedStyle.Render("Paste the key below. It will be masked and saved to ")+codeStyle.Render(auth.UserConfigPath()),
-			mutedStyle.Render("• Press ")+codeStyle.Render("Enter")+mutedStyle.Render(" to save the key"),
-			mutedStyle.Render("• Press ")+codeStyle.Render("Esc")+mutedStyle.Render(" to go back"),
-			mutedStyle.Render("• altcode can also auto-detect ")+codeStyle.Render(providerLoginLabel(provider))+mutedStyle.Render(" on restart"),
+			titleStyle.Render("◆ Connect "+providerLabel(provider)),
+			mutedStyle.Render("model ")+codeStyle.Render(a.activeModel()),
+			mutedStyle.Render("saved to ")+codeStyle.Render(auth.UserConfigPath()),
+			mutedStyle.Render(codeStyle.Render("Enter")+" save  "+dotSep()+codeStyle.Render("Esc")+" back"),
 		)
-		return strings.Join(lines, "\n")
+		return a.centerWelcome(lines)
 	}
 
 	if strings.TrimSpace(a.startupPrompt) != "" {
@@ -164,30 +153,102 @@ func (a *App) welcomeView() string {
 			Bold(true)
 		provider := a.recommendedSetupProvider()
 		lines = append(lines,
-			"",
-			titleStyle.Render("Let's get altcode connected"),
-			warningStyle.Render("Current model: "+a.activeModel()),
+			titleStyle.Render("◆ Let's get altcode connected"),
+			warningStyle.Render("model "+a.activeModel()),
 			"",
 			titleStyle.Render("Recommended next step"),
-			mutedStyle.Render("• Press ")+codeStyle.Render("Enter")+mutedStyle.Render(" to add your ")+codeStyle.Render(providerLabel(provider)+" API key"),
-			mutedStyle.Render("• Your key is masked while typing and saved to ")+codeStyle.Render(auth.UserConfigPath()),
-			mutedStyle.Render("• Already signed into ")+codeStyle.Render(providerLoginLabel(provider))+mutedStyle.Render("? Restart altcode and it will auto-detect it"),
+			mutedStyle.Render(codeStyle.Render("Enter")+" add "+codeStyle.Render(providerLabel(provider))+" API key "+dotSep()+codeStyle.Render("Esc")+" back"),
+			mutedStyle.Render("saved to ")+codeStyle.Render(auth.UserConfigPath())+mutedStyle.Render(" "+dotSep()+" typed keys are masked"),
 			"",
 			titleStyle.Render("Other paths"),
-			mutedStyle.Render("• Press ")+codeStyle.Render("A")+mutedStyle.Render(" to save an Anthropic key manually"),
-			mutedStyle.Render("• Press ")+codeStyle.Render("O")+mutedStyle.Render(" to save an OpenAI key manually"),
-			mutedStyle.Render("• Want local models instead? Relaunch with ")+codeStyle.Render("--model ollama/<model>")+mutedStyle.Render(" or ")+codeStyle.Render("--model lmstudio/<model>"),
+			mutedStyle.Render(codeStyle.Render("A")+" Anthropic "+dotSep()+codeStyle.Render("O")+" OpenAI "+dotSep()+" signed into "+providerLoginLabel(provider)+"? restart"),
 		)
 	}
 
-	lines = append(lines,
-		"",
-		codeStyle.Render("Enter")+mutedStyle.Render(" send  ")+
-			codeStyle.Render("Ctrl+K")+mutedStyle.Render(" commands  ")+
-			codeStyle.Render("/help")+mutedStyle.Render(" all shortcuts"),
-	)
+	if strings.TrimSpace(a.startupPrompt) == "" {
+		project := a.gitProject
+		if project == "" {
+			project = a.projectRoot
+		}
+		if project == "" {
+			project = "project"
+		}
+		if a.mainBodyWidth() > 0 && a.mainBodyWidth() < 56 {
+			project = filepath.Base(project)
+		}
+		model := a.activeModel()
+		if a.mainBodyWidth() > 0 && a.mainBodyWidth() < 56 {
+			model = shortModelName(model)
+		}
+		lines = append(lines,
+			titleStyle.Render("◆ altcode ready"),
+			mutedStyle.Render("project ")+codeStyle.Render(project)+mutedStyle.Render(" "+dotSep()+" model ")+codeStyle.Render(model),
+		)
+		if !a.projectHasAgentContext() {
+			lines = append(lines, mutedStyle.Render(codeStyle.Render("/init")+" recommended "+dotSep()+" add project instructions"))
+		}
+		lines = append(lines,
+			mutedStyle.Render(codeStyle.Render("@file")+" attach context "+dotSep()+codeStyle.Render("Ctrl+K")+" commands"),
+		)
+	}
 
+	return a.centerWelcome(lines)
+}
+
+func dotSep() string {
+	return " · "
+}
+
+func (a *App) centerWelcome(lines []string) string {
+	content := strings.TrimRight(strings.Join(lines, "\n"), "\n")
+	width := a.mainBodyWidth()
+	if width <= 0 {
+		width = a.width
+	}
+	if width <= 0 {
+		return content
+	}
+	boxWidth := 64
+	if width < boxWidth+8 {
+		boxWidth = width - 4
+	}
+	if boxWidth < 24 {
+		boxWidth = width
+	}
+	content = lipgloss.NewStyle().
+		Width(boxWidth).
+		Align(lipgloss.Left).
+		Render(truncateWelcomeLines(content, boxWidth))
+	if width > boxWidth {
+		content = lipgloss.PlaceHorizontal(width, lipgloss.Center, content)
+	}
+	height := a.viewport.Height
+	if height <= 0 {
+		return content
+	}
+	if rows := countRenderedLines(content); rows < height {
+		content = lipgloss.PlaceVertical(height, lipgloss.Center, content)
+	}
+	return content
+}
+
+func truncateWelcomeLines(content string, width int) string {
+	if width <= 0 {
+		return content
+	}
+	lines := strings.Split(content, "\n")
+	for i, line := range lines {
+		lines[i] = truncateStr(line, width)
+	}
 	return strings.Join(lines, "\n")
+}
+
+func countRenderedLines(s string) int {
+	s = strings.TrimRight(s, "\n")
+	if s == "" {
+		return 0
+	}
+	return strings.Count(s, "\n") + 1
 }
 
 func (a *App) repromptForAPIKey(provider string) {

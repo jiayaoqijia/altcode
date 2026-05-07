@@ -2,6 +2,7 @@ package tui
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/jiayaoqijia/altcode/internal/config"
@@ -19,6 +20,50 @@ func normalInputPlaceholder(startupPrompt string) string {
 		}
 	}
 	return "Ask anything... (Enter to submit, Ctrl+J newline, Esc to quit)"
+}
+
+func (a *App) updateInputPlaceholder() {
+	if strings.TrimSpace(a.startupPrompt) != "" {
+		a.input.Placeholder = normalInputPlaceholder(a.startupPrompt)
+		return
+	}
+	if a.busy {
+		a.input.Placeholder = "Draft your next message while running, or type /stop"
+		return
+	}
+	if a.wsView != nil && a.wsView.IsActive() {
+		a.input.Placeholder = "Type /send to message the workspace"
+		return
+	}
+	if !a.projectHasAgentContext() {
+		a.input.Placeholder = "Ask anything, or run /init to add project instructions"
+		return
+	}
+	a.input.Placeholder = "Ask anything, mention @file, or press Ctrl+K"
+}
+
+func (a *App) projectHasAgentContext() bool {
+	root := strings.TrimSpace(a.projectRoot)
+	if root == "" {
+		return false
+	}
+	for _, name := range []string{"AGENTS.md", "CLAUDE.md"} {
+		if _, err := os.Stat(filepath.Join(root, name)); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
+func shortModelName(model string) string {
+	model = strings.TrimSpace(model)
+	if model == "" {
+		return ""
+	}
+	if i := strings.LastIndex(model, "/"); i >= 0 {
+		model = model[i+1:]
+	}
+	return model
 }
 
 func displayVersion(version string) string {
@@ -147,4 +192,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-

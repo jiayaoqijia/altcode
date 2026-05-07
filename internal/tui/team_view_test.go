@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // TestTeamView_NewIsInactive verifies the constructor's zero state.
@@ -193,6 +195,60 @@ func TestTeamView_Render_NarrowClampsPaneCount(t *testing.T) {
 	out := tv.Render(DefaultTheme)
 	if out == "" {
 		t.Error("narrow render should still produce output")
+	}
+}
+
+func TestTeamView_VisualLanguageStillShowsStatusAndOutput(t *testing.T) {
+	tv := newTeamView()
+	tv.SetSize(120, 18)
+	tv.Start([]teamRole{
+		{Role: "architect", Backend: "claude"},
+		{Role: "implementer", Backend: "codex"},
+		{Role: "reviewer", Backend: "claude"},
+	})
+	tv.AppendLine("architect", "mapped the terminal density cases")
+	tv.AppendLine("implementer", "focused tests are running")
+	tv.AppendLine("reviewer", "waiting for command output")
+	tv.MarkDone("architect", 25*time.Millisecond, "")
+	tv.MarkDone("reviewer", 40*time.Millisecond, "blocked on missing evidence")
+
+	plain := stripANSI(tv.Render(DefaultTheme))
+	for _, want := range []string{
+		"architect",
+		"implementer",
+		"reviewer",
+		"claude",
+		"codex",
+		"✓",
+		"⟳",
+		"✗",
+		"mapped the terminal density cases",
+		"focused tests are running",
+		"err: blocked on missing evidence",
+	} {
+		if !strings.Contains(plain, want) {
+			t.Fatalf("team visual language missing %q:\n%s", want, plain)
+		}
+	}
+}
+
+func TestTeamView_RenderPane_TruncatesWideRuneOutputByDisplayWidth(t *testing.T) {
+	tv := newTeamView()
+	p := &agentPane{
+		Role:    "tester",
+		Backend: "codex",
+		Status:  paneRunning,
+		Lines:   []string{strings.Repeat("界", 8)},
+	}
+
+	plain := stripANSI(tv.renderPane(p, 16, 4, DefaultTheme))
+	if !strings.Contains(plain, "...") {
+		t.Fatalf("wide-rune output should be visibly truncated:\n%s", plain)
+	}
+	for i, line := range strings.Split(plain, "\n") {
+		if got := lipgloss.Width(line); got > 18 {
+			t.Fatalf("line %d width = %d, want <= 18: %q\n%s", i, got, line, plain)
+		}
 	}
 }
 

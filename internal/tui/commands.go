@@ -69,6 +69,8 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.appendInfo(a.builtinQueueText(parts))
 	case "/clear":
 		a.builtinClear()
+	case "/metadata":
+		a.appendInfo(a.builtinMetadataText(parts))
 	case "/tools":
 		a.appendInfo(a.builtinToolsText())
 	case "/skills":
@@ -260,12 +262,7 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		// Stop the in-flight engine turn without quitting altcode.
 		// Equivalent to Ctrl+C on the prompt but accessible via the
 		// slash menu so users with mouse-only access can use it.
-		if a.cancel != nil {
-			a.cancel()
-			a.appendInfo("[stop] cancellation signal sent.")
-		} else {
-			a.appendInfo("[stop] nothing in flight.")
-		}
+		a.builtinStop()
 	case "/theme":
 		// Print available themes and the current selection.
 		a.appendInfo(a.builtinThemeText(parts))
@@ -294,7 +291,7 @@ func (a *App) appendInfo(text string) {
 func (a *App) slashCommandNames() []string {
 	builtins := []string{
 		"/help", "/status", "/context", "/model", "/clear", "/tools",
-		"/skills", "/mcp", "/plugins",
+		"/metadata", "/skills", "/mcp", "/plugins",
 		"/cost", "/history", "/diff", "/compact", "/sessions", "/memory",
 		"/version", "/stats", "/tasks", "/agents", "/team", "/workflow",
 		"/backends", "/undo", "/redo", "/search",
@@ -411,85 +408,87 @@ func longestCommonPrefix(a, b string) string {
 
 func builtinHelpText() string {
 	type row struct{ cmd, desc string }
-	commands := []row{
-		{"/help", "show this help"},
-		{"/status", "model, session, tokens"},
-		{"/model", "current model"},
-		{"/clear", "clear conversation"},
-		{"/tools", "list tools"},
-		{"/skills", "list discovered skills"},
-		{"/mcp", "list MCP servers"},
-		{"/plugins", "show plugin warnings + search paths"},
-		{"/cost", "cost breakdown"},
-		{"/history", "file changes this session"},
-		{"/diff", "diff of changed files"},
-		{"/compact", "trigger context compaction"},
-		{"/search", "search in output"},
-		{"/sessions", "list sessions"},
-		{"/memory", "loaded memories"},
-		{"/version", "version info"},
-		{"/stats", "status + cost + history"},
-		{"/tasks", "background tasks"},
-		{"/agents", "agent + context overview"},
-		{"/wf-status", "workflow state"},
-		{"/wf-pause", "pause workflows"},
-		{"/wf-resume", "resume workflows"},
-		{"/wf-cancel", "clear workflow state"},
-		{"/workspace", "start workspace [backend:role ...]"},
-		{"/spawn", "add agent mid-run: /spawn role backend"},
-		{"/workflow", "run phased workflow"},
-		{"/team", "multi-AI team config"},
-		{"/backends", "detected CLI backends"},
-		{"/init", "generate CLAUDE.md from codebase"},
-		{"/doctor", "check environment health"},
-		{"/compare", "A/B test prompt across models"},
-		{"/rollback", "rollback to turn N"},
-		{"/send", "send msg to agent"},
-		{"/context", "token breakdown"},
-		{"/plan", "show plan"},
-		{"/undo", "git-backed undo"},
-		{"/redo", "restore undo"},
+	groups := []struct {
+		name string
+		rows []row
+	}{
+		{"Chat", []row{
+			{"/help", "show this help"},
+			{"/clear", "clear conversation"},
+			{"/new", "start a fresh session"},
+			{"/copy", "copy last assistant response"},
+			{"/metadata", "show or toggle message metadata"},
+			{"/search", "search conversation output"},
+		}},
+		{"Project", []row{
+			{"/init", "generate CLAUDE.md from codebase"},
+			{"/context", "token breakdown"},
+			{"/diff", "diff of changed files"},
+			{"/history", "file changes this session"},
+			{"/plan", "show plan"},
+			{"/review", "review current diff"},
+		}},
+		{"Inspect", []row{
+			{"/status", "model, session, tokens"},
+			{"/model", "current model"},
+			{"/tools", "list tools"},
+			{"/skills", "list discovered skills"},
+			{"/mcp", "list MCP servers"},
+			{"/plugins", "plugin warnings + search paths"},
+			{"/cost", "cost breakdown"},
+			{"/stats", "status + cost + history"},
+			{"/version", "version info"},
+		}},
+		{"Workspace", []row{
+			{"/workspace", "start workspace [backend:role ...]"},
+			{"/spawn", "add agent mid-run"},
+			{"/send", "send message to focused agent"},
+			{"/workflow", "run phased workflow"},
+			{"/team", "multi-AI team config"},
+			{"/backends", "detected CLI backends"},
+			{"/tasks", "background tasks"},
+			{"/wf-status", "workflow state"},
+			{"/wf-pause", "pause workflows"},
+			{"/wf-resume", "resume workflows"},
+			{"/wf-cancel", "clear workflow state"},
+		}},
+		{"Recovery", []row{
+			{"/stop", "cancel in-flight turn"},
+			{"/compact", "trigger context compaction"},
+			{"/undo", "git-backed undo"},
+			{"/redo", "restore last undo"},
+			{"/rollback", "rollback to turn N"},
+			{"/doctor", "check environment health"},
+		}},
+		{"Config/Session", []row{
+			{"/sessions", "list sessions"},
+			{"/resume", "resume previous session"},
+			{"/fork", "fork session under a new id"},
+			{"/rename", "rename current session"},
+			{"/share", "export conversation"},
+			{"/memory", "loaded memories"},
+			{"/keymap", "keyboard shortcuts"},
+			{"/theme", "show / pick UI theme"},
+			{"/title", "set terminal title"},
+			{"/vim", "toggle vim-modal editing"},
+			{"/compare", "A/B test prompt across models"},
+			{"/quit", "quit altcode"},
+		}},
 	}
-	keys := []row{
-		{"Enter", "send prompt"},
-		{"Ctrl+J", "newline"},
-		{"Tab", "complete /command (or cycle focus)"},
-		{"Ctrl+K", "command palette"},
-		{"Ctrl+A", "switch sessions"},
-		{"Ctrl+G", "edit prompt in $EDITOR"},
-		{"@file", "file completion"},
-		{"Up/Down", "browse prompt history"},
-		{"Ctrl+C", "cancel (busy) / copy last response (idle)"},
-		{"Ctrl+L", "clear screen"},
-		{"Ctrl+R", "retry last prompt"},
-		{"Esc", "cancel / clear input / vim mode"},
-		{"Ctrl+D", "quit"},
-	}
-	wsKeys := []row{
-		{"Ctrl+Z", "pause workspace/workflow"},
-		{"Ctrl+R", "resume after pause"},
-		{"Ctrl+Q", "abort workspace/workflow"},
-		{"Ctrl+S", "send to focused agent"},
-		{"Tab", "cycle agent focus"},
-		{"Ctrl+1/2/3", "focus agent pane"},
-	}
-
+	keys := builtinKeymapRows()
 	var sb strings.Builder
-	sb.WriteString("```\n")
 	sb.WriteString("Commands\n")
-	for _, r := range commands {
-		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
+	for _, group := range groups {
+		sb.WriteString("\n" + group.name + "\n")
+		for _, r := range group.rows {
+			sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
+		}
 	}
 	sb.WriteString("\nShortcuts\n")
 	for _, r := range keys {
 		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
 	}
-	sb.WriteString("\nWorkspace Mode\n")
-	for _, r := range wsKeys {
-		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
-	}
-	sb.WriteString("```")
-	return sb.String()
+	return strings.TrimRight(sb.String(), "\n")
 }
 
 func (a *App) builtinStatusText() string {
@@ -700,6 +699,47 @@ func (a *App) knownModels() []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+func (a *App) builtinMetadataText(parts []string) string {
+	usage := "Usage: /metadata on|off"
+	if len(parts) < 2 {
+		state := "off"
+		if a.showMessageMeta {
+			state = "on"
+		}
+		return fmt.Sprintf("Message metadata is %s. %s", state, usage)
+	}
+	switch strings.ToLower(parts[1]) {
+	case "on":
+		a.showMessageMeta = true
+		a.renderCache = ""
+		a.renderCacheLen = 0
+		return "Message metadata is on."
+	case "off":
+		a.showMessageMeta = false
+		a.renderCache = ""
+		a.renderCacheLen = 0
+		return "Message metadata is off."
+	default:
+		return usage
+	}
+}
+
+func (a *App) builtinStop() {
+	hadCancel := a.cancel != nil
+	if hadCancel {
+		a.cancel()
+	}
+	a.busy = false
+	a.streaming = ""
+	a.resetTurnTransientState()
+	a.applyLayout(false)
+	if hadCancel {
+		a.appendInfo("[stop] cancellation signal sent.")
+		return
+	}
+	a.appendInfo("[stop] nothing in flight.")
 }
 
 func (a *App) builtinClear() {
@@ -1598,6 +1638,8 @@ func (a *App) builtinSearchText(query string) string {
 				role = "assistant"
 			case roleTool:
 				role = "tool"
+			case roleTrace:
+				role = "trace"
 			case roleInfo:
 				role = "info"
 			}
@@ -1997,17 +2039,34 @@ func (a *App) builtinCopyText() string {
 // builtinKeymapText prints just the keyboard shortcut section so
 // users wanting only the key reference don't have to scroll /help.
 func builtinKeymapText() string {
-	return "# Keyboard shortcuts\n\n" +
-		"Enter         submit prompt\n" +
-		"Ctrl+J         insert newline in prompt\n" +
-		"Ctrl+K         open command palette\n" +
-		"Ctrl+L         clear screen redraw\n" +
-		"PgUp / PgDn    scroll viewport\n" +
-		"Ctrl+Up/Down   line-by-line scroll\n" +
-		"Up / Down      cycle prompt history\n" +
-		"Tab            complete slash command / file path\n" +
-		"Ctrl+C         cancel in-flight engine turn\n" +
-		"Esc            quit (TUI)\n"
+	var sb strings.Builder
+	sb.WriteString("Keyboard shortcuts\n\n")
+	for _, r := range builtinKeymapRows() {
+		sb.WriteString(fmt.Sprintf("  %-14s %s\n", r.cmd, r.desc))
+	}
+	return strings.TrimRight(sb.String(), "\n")
+}
+
+func builtinKeymapRows() []struct{ cmd, desc string } {
+	return []struct{ cmd, desc string }{
+		{"Enter", "send prompt"},
+		{"Ctrl+J", "newline"},
+		{"Tab", "complete /command or cycle focus"},
+		{"Ctrl+K", "command palette"},
+		{"Ctrl+A", "switch sessions"},
+		{"Ctrl+G", "edit prompt in $EDITOR"},
+		{"@file", "file completion"},
+		{"Up/Down", "browse prompt history"},
+		{"Ctrl+C", "cancel busy turn / quit idle"},
+		{"Ctrl+L", "clear screen"},
+		{"Ctrl+R", "retry or resume"},
+		{"Esc", "cancel / clear input / vim mode"},
+		{"Ctrl+D", "quit"},
+		{"Ctrl+Z", "pause workspace/workflow"},
+		{"Ctrl+Q", "abort workspace/workflow"},
+		{"Ctrl+S", "send to focused agent"},
+		{"Ctrl+1/2/3", "focus agent pane"},
+	}
 }
 
 // builtinReviewText emits a structured review prompt the engine can

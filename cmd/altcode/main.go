@@ -46,11 +46,12 @@ var (
 )
 
 // versionString produces a multi-line --version output:
-//   altcode v0.10.1
-//   commit:    abc1234
-//   built:     2026-05-07T10:00:00Z
-//   go:        go1.26.0
-//   platform:  linux/amd64
+//
+//	altcode v0.10.1
+//	commit:    abc1234
+//	built:     2026-05-07T10:00:00Z
+//	go:        go1.26.0
+//	platform:  linux/amd64
 func versionString() string {
 	commit := BuildCommit
 	// Fall back to debug.ReadBuildInfo for `go install` paths that
@@ -705,7 +706,7 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 			JSON:                 flags.jsonMode,
 			Quiet:                flags.quiet,
 			Model:                cfg.Model,
-			Auth:                 auth.CredentialSource(cfg),
+			Auth:                 auth.CredentialSourceForModel(cfg, cfg.Model),
 			OutputFormat:         flags.outputFormat,
 			Verbose:              flags.verbose,
 			PrintCost:            flags.printCost,
@@ -882,7 +883,7 @@ func runExec(ep exec.Params) error {
 		ep.Model = ep.EngineParams.Config.Model
 	}
 	if ep.Auth == "" && ep.EngineParams.Config != nil {
-		ep.Auth = auth.CredentialSource(ep.EngineParams.Config)
+		ep.Auth = auth.CredentialSourceForModel(ep.EngineParams.Config, ep.Model)
 	}
 
 	return exec.Run(ctx, ep)

@@ -31,10 +31,18 @@ func (a *App) togglePalette() {
 		a.palette.Hide()
 		a.input.Focus()
 	} else {
-		a.palette.SetWidth(a.width)
-		a.palette.Show()
-		a.input.Blur()
+		a.showPaletteWithQuery("")
 	}
+}
+
+func (a *App) showPaletteWithQuery(query string) {
+	a.palette.SetWidth(a.mainBodyWidth())
+	if query == "" {
+		a.palette.Show()
+	} else {
+		a.palette.ShowWithQuery(query)
+	}
+	a.input.Blur()
 }
 
 // toggleSessionSwitcher opens or closes the session switcher.
@@ -193,58 +201,62 @@ func buildPaletteCommands(
 	// entries here mean Ctrl+K palette can't find commands that
 	// otherwise work via direct typing — discovered hands-on when
 	// 'doctor' filter returned no matches despite /doctor working.
+	pc := func(group, name, desc string) PaletteCommand {
+		return PaletteCommand{Name: name, Description: desc, Group: group}
+	}
 	builtins := []PaletteCommand{
-		{Name: "/help", Description: "show help"},
-		{Name: "/status", Description: "model, session, tokens"},
-		{Name: "/context", Description: "context size breakdown"},
-		{Name: "/model", Description: "show current model"},
-		{Name: "/clear", Description: "clear conversation"},
-		{Name: "/tools", Description: "list available tools"},
-		{Name: "/skills", Description: "list discovered skills"},
-		{Name: "/mcp", Description: "list MCP servers + tools"},
-		{Name: "/plugins", Description: "show plugin warnings + search paths"},
-		{Name: "/sessions", Description: "list recent sessions"},
-		{Name: "/memory", Description: "show loaded memories"},
-		{Name: "/version", Description: "show altcode version"},
-		{Name: "/cost", Description: "cost breakdown per turn"},
-		{Name: "/history", Description: "file change history"},
-		{Name: "/compact", Description: "trigger context compaction"},
-		{Name: "/diff", Description: "files changed this session"},
-		{Name: "/plan", Description: "enter plan mode"},
-		{Name: "/stats", Description: "combined status + cost"},
-		{Name: "/tasks", Description: "list background tasks"},
-		{Name: "/wf-status", Description: "show active workflow state"},
-		{Name: "/wf-cancel", Description: "clear workflow state"},
-		{Name: "/agents", Description: "agent + context overview"},
-		{Name: "/wf-pause", Description: "pause running workflows"},
-		{Name: "/wf-resume", Description: "resume paused workflows"},
-		{Name: "/team", Description: "multi-AI team config"},
-		{Name: "/backends", Description: "detect coding backends"},
-		{Name: "/undo", Description: "git-backed undo (stash)"},
-		{Name: "/redo", Description: "restore last undo"},
-		{Name: "/doctor", Description: "check environment health"},
-		{Name: "/init", Description: "generate CLAUDE.md from codebase"},
-		{Name: "/compare", Description: "A/B test prompt across models"},
-		{Name: "/workspace", Description: "start multi-agent workspace"},
-		{Name: "/spawn", Description: "add agent to active workspace"},
-		{Name: "/send", Description: "annotate agent pane (operator note)"},
-		{Name: "/rollback", Description: "rollback to turn N"},
-		{Name: "/search", Description: "search messages in conversation"},
-		{Name: "/workflow", Description: "run phased workflow"},
+		pc("Chat", "/help", "show help"),
+		pc("Chat", "/clear", "clear conversation"),
+		pc("Chat", "/metadata", "show or toggle message metadata"),
+		pc("Chat", "/search", "search messages in conversation"),
+		pc("Inspect", "/status", "model, session, tokens"),
+		pc("Inspect", "/context", "context size breakdown"),
+		pc("Inspect", "/model", "show current model"),
+		pc("Inspect", "/tools", "list available tools"),
+		pc("Inspect", "/skills", "list discovered skills"),
+		pc("Inspect", "/mcp", "list MCP servers + tools"),
+		pc("Inspect", "/plugins", "show plugin warnings + search paths"),
+		pc("Inspect", "/version", "show altcode version"),
+		pc("Inspect", "/cost", "cost breakdown per turn"),
+		pc("Inspect", "/stats", "combined status + cost"),
+		pc("Project", "/history", "file change history"),
+		pc("Project", "/diff", "files changed this session"),
+		pc("Project", "/plan", "enter plan mode"),
+		pc("Project", "/agents", "agent + context overview"),
+		pc("Project", "/doctor", "check environment health"),
+		pc("Project", "/init", "generate CLAUDE.md from codebase"),
+		pc("Workspace", "/tasks", "list background tasks"),
+		pc("Workspace", "/wf-status", "show active workflow state"),
+		pc("Workspace", "/wf-cancel", "clear workflow state"),
+		pc("Workspace", "/wf-pause", "pause running workflows"),
+		pc("Workspace", "/wf-resume", "resume paused workflows"),
+		pc("Workspace", "/team", "multi-AI team config"),
+		pc("Workspace", "/backends", "detect coding backends"),
+		pc("Workspace", "/compare", "A/B test prompt across models"),
+		pc("Workspace", "/workspace", "start multi-agent workspace"),
+		pc("Workspace", "/spawn", "add agent to active workspace"),
+		pc("Workspace", "/send", "annotate agent pane (operator note)"),
+		pc("Workspace", "/workflow", "run phased workflow"),
+		pc("Recovery", "/compact", "trigger context compaction"),
+		pc("Recovery", "/undo", "git-backed undo (stash)"),
+		pc("Recovery", "/redo", "restore last undo"),
+		pc("Recovery", "/rollback", "rollback to turn N"),
 		// Iter-1 parity (claude-code + codex + opencode):
-		{Name: "/resume", Description: "resume a previous session"},
-		{Name: "/new", Description: "start a fresh session"},
-		{Name: "/fork", Description: "fork session under a new id"},
-		{Name: "/copy", Description: "copy last response to clipboard"},
-		{Name: "/keymap", Description: "show keyboard shortcut reference"},
-		{Name: "/review", Description: "structured review of current diff"},
-		{Name: "/rename", Description: "rename current session display title"},
-		{Name: "/share", Description: "export conversation as markdown"},
-		{Name: "/stop", Description: "cancel in-flight engine turn"},
-		{Name: "/theme", Description: "show / pick UI theme"},
-		{Name: "/title", Description: "set terminal window title"},
-		{Name: "/vim", Description: "toggle vim-modal editing"},
-		{Name: "/quit", Description: "quit altcode"},
+		pc("Config/Session", "/resume", "resume a previous session"),
+		pc("Chat", "/new", "start a fresh session"),
+		pc("Config/Session", "/fork", "fork session under a new id"),
+		pc("Chat", "/copy", "copy last response to clipboard"),
+		pc("Config/Session", "/keymap", "show keyboard shortcut reference"),
+		pc("Project", "/review", "structured review of current diff"),
+		pc("Config/Session", "/rename", "rename current session display title"),
+		pc("Config/Session", "/share", "export conversation as markdown"),
+		pc("Recovery", "/stop", "cancel in-flight engine turn"),
+		pc("Config/Session", "/theme", "show / pick UI theme"),
+		pc("Config/Session", "/title", "set terminal window title"),
+		pc("Config/Session", "/vim", "toggle vim-modal editing"),
+		pc("Config/Session", "/sessions", "list recent sessions"),
+		pc("Config/Session", "/memory", "show loaded memories"),
+		pc("Config/Session", "/quit", "quit altcode"),
 	}
 	// Assign actions that return the command name (submitted by the app).
 	for i := range builtins {
@@ -262,6 +274,7 @@ func buildPaletteCommands(
 		builtins = append(builtins, PaletteCommand{
 			Name:        name,
 			Description: desc,
+			Group:       "Config/Session",
 			Action: func() string {
 				return "> " + name
 			},

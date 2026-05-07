@@ -9,10 +9,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiayaoqijia/altcode/internal/event"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jiayaoqijia/altcode/internal/event"
 )
-
 
 // handleEvent and all event handlers are in app_event_handlers.go
 
@@ -98,10 +97,6 @@ func extractToolTarget(tc *event.ToolCall) string {
 		if v, ok := input["command"]; ok {
 			json.Unmarshal(v, &s)
 		}
-		// Rune-safe: byte-indexed truncation would split CJK / emoji
-		// codepoints. Iter-9 migrated this user-facing tool-target
-		// label to the shared truncateRunes helper.
-		s = truncateRunes(s, 30)
 	}
 	return s
 }

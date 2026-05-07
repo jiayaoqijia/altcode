@@ -6,28 +6,28 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jiayaoqijia/altcode/internal/command"
-	"github.com/jiayaoqijia/altcode/internal/engine"
-	"github.com/jiayaoqijia/altcode/internal/event"
-	"github.com/jiayaoqijia/altcode/internal/orchestra"
-	"github.com/jiayaoqijia/altcode/internal/workspace"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jiayaoqijia/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 type eventMsg event.Event
 type streamDoneMsg struct{}
-type wfEventMsg orchestra.PhaseEvent  // workflow phase event from orchestra
-type wfDoneMsg struct{}               // workflow completed
-type workspacePollMsg struct{}        // periodic workspace poll tick
-type workspaceTransitionMsg struct {  // workspace state machine transition
+type wfEventMsg orchestra.PhaseEvent // workflow phase event from orchestra
+type wfDoneMsg struct{}              // workflow completed
+type workspacePollMsg struct{}       // periodic workspace poll tick
+type workspaceTransitionMsg struct { // workspace state machine transition
 	Status workspace.WorkspaceStatus
 }
-type stuckToolMsg struct {            // tool running longer than threshold
+type stuckToolMsg struct { // tool running longer than threshold
 	name      string
 	startedAt time.Time
 }
@@ -53,54 +53,58 @@ type App struct {
 	projectRoot     string
 	mdRenderer      *MarkdownRenderer
 
-	filePopup    filePopup
-	vimMode      bool
-	vimPendingG  bool
-	sessionTitle string // Display label set by /rename
-	tools        *toolTree
-	toolStart   time.Time
-	spinner     spinner.Model
+	filePopup       filePopup
+	fileMentions    []string
+	toolInputDeltas map[string]string
+	vimMode         bool
+	vimPendingG     bool
+	sessionTitle    string // Display label set by /rename
+	tools           *toolTree
+	toolStart       time.Time
+	spinner         spinner.Model
 
-	messages         []chatMessage
-	streaming        string
-	busy             bool
-	thinking         bool
-	thinkingText     string
-	activeToolName   string // tool currently executing
-	activeToolDetail string // e.g. file path
-	turnStart        time.Time // when the current turn began (for response timing)
-	cancel           context.CancelFunc
-	events           <-chan event.Event
-	tokenInfo        string
+	messages             []chatMessage
+	streaming            string
+	showMessageMeta      bool
+	lastCompletion       string
+	busy                 bool
+	thinking             bool
+	thinkingText         string
+	activeToolName       string    // tool currently executing
+	activeToolDetail     string    // e.g. file path
+	turnStart            time.Time // when the current turn began (for response timing)
+	cancel               context.CancelFunc
+	events               <-chan event.Event
+	tokenInfo            string
 	tokensIn             int64
 	tokensOut            int64
 	currentContextTokens int64 // last-turn input (not cumulative)
 	costUSD              float64
-	sessionStart     time.Time
-	sessionSlug      string
-	toolCounts       map[string]int
-	gitProject       string
-	gitBranch        string
-	gitDirty         bool
+	sessionStart         time.Time
+	sessionSlug          string
+	toolCounts           map[string]int
+	gitProject           string
+	gitBranch            string
+	gitDirty             bool
 
-	teamView       *teamView        // split-pane view for team mode
-	wsView         *WorkspaceView   // workspace mode dashboard
-	lastBell       time.Time        // bell cooldown (30s between rings)
-	tasksTotal     int              // total tasks created
-	tasksDone      int              // tasks completed
-	activeTaskName string           // currently in-progress task name
-	turnToolCount  int              // tools used this turn (for summary)
-	turnWrites     int              // files written this turn
-	turnReads      int              // files read this turn
-	turnBashes     int              // commands run this turn
-	turnCostStart  float64          // cost at turn start (for delta)
-	turnTokenStart int64            // tokens at turn start (for delta)
-	cachedTokens   int64            // last turn's cached prompt tokens (HUD chip)
-	lastFrame      time.Time        // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
+	teamView       *teamView      // split-pane view for team mode
+	wsView         *WorkspaceView // workspace mode dashboard
+	lastBell       time.Time      // bell cooldown (30s between rings)
+	tasksTotal     int            // total tasks created
+	tasksDone      int            // tasks completed
+	activeTaskName string         // currently in-progress task name
+	turnToolCount  int            // tools used this turn (for summary)
+	turnWrites     int            // files written this turn
+	turnReads      int            // files read this turn
+	turnBashes     int            // commands run this turn
+	turnCostStart  float64        // cost at turn start (for delta)
+	turnTokenStart int64          // tokens at turn start (for delta)
+	cachedTokens   int64          // last turn's cached prompt tokens (HUD chip)
+	lastFrame      time.Time      // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
 	// queue is the type-ahead FIFO for prompts entered while the
 	// current turn is running. Drained by drainQueue() in onDone().
 	// DeepSeek-TUI parity for `/queue` workflow.
-	queue          []string
+	queue []string
 	// lastSubmittedText + lastSubmittedAt drive the 500ms double-submit
 	// dedup. tmux send-keys can replay the same prompt under bracketed-
 	// paste / TIOCSTI races, burning the user's cost on a duplicate turn.
@@ -112,7 +116,7 @@ type App struct {
 	// holds the response channel until the user picks y/n/a/!.
 	permDialog        *PermissionDialog
 	pendingPermission *event.PermReq
-	prevContentLen int              // viewport content length (kept for backward-compat with tests)
+	prevContentLen    int // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common
 	// case — see grep of `a.messages =` assignments) extend this
@@ -132,20 +136,30 @@ type App struct {
 	// loop: replaces the fragile content-length heuristic that could
 	// GotoTop mid-conversation when the tool tree collapsed.
 	userScrolledAway bool
-	inputHistory   *inputHistory    // prompt history for up/down recall
-	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
-	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
-	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
-	wfRunning      bool
+	inputHistory     *inputHistory               // prompt history for up/down recall
+	wfHeader         *workflowHeader             // phase breadcrumb for workflow mode
+	wfEvents         <-chan orchestra.PhaseEvent // workflow event stream
+	wfOverride       chan orchestra.OverrideCmd  // TUI → orchestra control
+	wfRunning        bool
 }
 
 // New creates a new App backed by the given engine and theme.
 func New(eng *engine.Engine, theme Theme, version, startupPrompt string, cmds ...*command.Command) *App {
 	ti := textarea.New()
 	ti.Placeholder = normalInputPlaceholder(startupPrompt)
+	ti.Prompt = ""
+	ti.Cursor.BlinkSpeed = 450 * time.Millisecond
 	ti.Focus()
-	ti.SetHeight(3)
+	ti.SetHeight(1)
+	ti.MaxHeight = 5
 	ti.ShowLineNumbers = false
+	inputTextStyle := lipgloss.NewStyle().Foreground(theme.Foreground)
+	ti.FocusedStyle.CursorLine = lipgloss.NewStyle().Background(lipgloss.NoColor{})
+	ti.FocusedStyle.Text = inputTextStyle
+	ti.FocusedStyle.Placeholder = lipgloss.NewStyle().Foreground(theme.Muted)
+	ti.BlurredStyle.CursorLine = lipgloss.NewStyle().Background(lipgloss.NoColor{})
+	ti.BlurredStyle.Text = inputTextStyle
+	ti.BlurredStyle.Placeholder = lipgloss.NewStyle().Foreground(theme.Muted)
 
 	setup := textinput.New()
 	setup.Placeholder = "Paste API key and press Enter"
@@ -266,26 +280,13 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if model, cmd, handled := a.handleKey(msg); handled {
+			a.applyLayout(false)
 			return model, cmd
 		}
 	case tea.WindowSizeMsg:
 		a.width = msg.Width
 		a.height = msg.Height
-		mainWidth := msg.Width
-		// Height: header(1) + sep(1) + body + HUD(2) + input(3) = 7 lines overhead
-		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
-		a.mdRenderer = NewMarkdownRenderer(max(10, mainWidth-4))
-		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
-		if a.wsView != nil {
-			a.wsView.SetSize(msg.Width, max(1, msg.Height-6))
-		}
-		if a.wfHeader != nil {
-			a.wfHeader.SetWidth(msg.Width)
-		}
-		a.input.SetWidth(max(1, msg.Width-2))
-		a.setupInput.Width = max(1, msg.Width-2)
-		a.palette.SetWidth(mainWidth)
-		a.sessionSwitcher.SetWidth(mainWidth)
+		a.applyLayout(true)
 		a.updateViewport()
 		return a, nil
 	case eventMsg:
@@ -326,18 +327,67 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	// even during workspace mode (a.busy=true). Only the engine-submit is
 	// blocked by busy, not the typing itself.
 	var cmd tea.Cmd
+	a.updateInputPlaceholder()
 	a.input, cmd = a.input.Update(msg)
+	a.applyLayout(false)
 	if !a.busy {
 		a.updateFilePopup()
 	}
 	return a, cmd
 }
 
+func (a *App) applyLayout(invalidateRenderCache bool) {
+	if a.width <= 0 || a.height <= 0 {
+		return
+	}
+	if invalidateRenderCache {
+		a.renderCache = ""
+		a.renderCacheLen = 0
+	}
+	mainWidth := a.width
+	a.updateInputPlaceholder()
+	a.input.SetHeight(a.composerTextHeight())
+	a.viewport.Width = mainWidth
+	bodyHeight := a.bodyHeight()
+	a.viewport.Height = bodyHeight
+	a.mdRenderer = NewMarkdownRenderer(max(10, mainWidth-4))
+	a.teamView.SetSize(a.width, a.teamBodyHeight())
+	if a.wsView != nil {
+		a.wsView.SetSize(a.width, bodyHeight)
+	}
+	if a.wfHeader != nil {
+		a.wfHeader.SetWidth(a.width)
+	}
+	a.input.SetWidth(max(1, mainWidth-8))
+	a.setupInput.Width = max(1, a.width-2)
+	// Overlays render into mainBody, which lives inside mainWidth.
+	a.palette.SetWidth(mainWidth)
+	a.sessionSwitcher.SetWidth(mainWidth)
+}
+
+func (a *App) bodyHeight() int {
+	return max(1, a.height-a.chromeHeight()-a.statusHeight()-a.composerHeight())
+}
+
+func (a *App) teamBodyHeight() int {
+	return max(1, a.bodyHeight()-a.workflowHeaderHeight())
+}
+
+func (a *App) workflowHeaderHeight() int {
+	if !a.wfRunning || a.wfHeader == nil {
+		return 0
+	}
+	a.wfHeader.mu.RLock()
+	defer a.wfHeader.mu.RUnlock()
+	if len(a.wfHeader.phases) == 0 {
+		return 0
+	}
+	return 1
+}
 
 // handleKey, handleSetupKey, handleWorkspaceKey, handleWorkflowKey,
 // handleGlobalKey, handleEscKey, handleEnterKey, handleCtrlCKey
 // are all in app_keys.go
-
 
 // handleFilePopupKey routes keys when the file completion popup is visible.
 func (a *App) handleFilePopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
@@ -397,16 +447,13 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-
 // Setup, welcome, auth functions are in app_setup.go
 // Event handling is in app_events.go
 
 // handleEvent is in app_events.go
 
-
 // View, renderHeader, renderInputArea, renderMainBody, buildToolActive,
 // buildHUDState, renderStatusSection are all in app_view.go
-
 
 func (a *App) submit() tea.Cmd {
 	text := strings.TrimSpace(a.input.Value())

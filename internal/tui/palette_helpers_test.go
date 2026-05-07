@@ -142,6 +142,70 @@ func TestPalette_ViewVisibleRendersBox(t *testing.T) {
 	}
 }
 
+func TestPalette_ViewRendersGroupLabelsWithoutSelectingThem(t *testing.T) {
+	cmds := []PaletteCommand{
+		{Name: "/help", Description: "show help", Group: "Chat"},
+		{Name: "/workspace", Description: "start workspace", Group: "Workspace"},
+	}
+	p := NewPalette(DefaultTheme, cmds)
+	p.SetWidth(80)
+	p.Show()
+
+	out := stripANSI(p.View())
+	for _, want := range []string{"Chat", "Workspace", "/help", "/workspace"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("palette missing %q:\n%s", want, out)
+		}
+	}
+	if got, ok := p.Selected(); !ok || got.Name != "/help" {
+		t.Fatalf("selected command = (%q, %v), want /help true", got.Name, ok)
+	}
+	p.UpdateKey(tea.KeyMsg{Type: tea.KeyDown})
+	if got, ok := p.Selected(); !ok || got.Name != "/workspace" {
+		t.Fatalf("cursor should move command-to-command, got (%q, %v)", got.Name, ok)
+	}
+}
+
+func TestPalette_FilterKeepsGroupLabelsAndCursorOnCommands(t *testing.T) {
+	cmds := []PaletteCommand{
+		{Name: "/help", Description: "show help", Group: "Chat"},
+		{Name: "/model", Description: "show model", Group: "Config"},
+		{Name: "/metadata", Description: "show or toggle message metadata", Group: "Config"},
+		{Name: "/memory", Description: "manage memory", Group: "Config"},
+	}
+	p := NewPalette(DefaultTheme, cmds)
+	p.SetWidth(80)
+	p.Show()
+
+	p.filter("met")
+	out := stripANSI(p.View())
+	if !strings.Contains(out, "Config") || strings.Contains(out, "Chat") {
+		t.Fatalf("filtered palette should show only matching group labels:\n%s", out)
+	}
+	if got, ok := p.Selected(); !ok || got.Name != "/metadata" {
+		t.Fatalf("filtered selected command = (%q, %v), want /metadata true", got.Name, ok)
+	}
+
+	p.UpdateKey(tea.KeyMsg{Type: tea.KeyDown})
+	if got, ok := p.Selected(); !ok || got.Name != "/metadata" {
+		t.Fatalf("cursor should stay on command rows after filtered down, got (%q, %v)", got.Name, ok)
+	}
+}
+
+func TestPaletteBuiltins_HaveGroupsAndMetadata(t *testing.T) {
+	cmds := buildPaletteCommands(nil)
+	seen := map[string]PaletteCommand{}
+	for _, cmd := range cmds {
+		seen[cmd.Name] = cmd
+		if cmd.Group == "" {
+			t.Fatalf("palette command %s is missing a group", cmd.Name)
+		}
+	}
+	if seen["/metadata"].Name == "" {
+		t.Fatalf("palette missing /metadata")
+	}
+}
+
 // TestPalette_ViewEmptyShowsNoMatches covers the no-matches branch.
 func TestPalette_ViewEmptyShowsNoMatches(t *testing.T) {
 	p := NewPalette(DefaultTheme, []PaletteCommand{{Name: "/a"}})
@@ -160,11 +224,11 @@ func TestPalette_ViewEmptyShowsNoMatches(t *testing.T) {
 func TestCollapseWhitespace_TrimsRunsAndNewlines(t *testing.T) {
 	cases := map[string]string{
 		"  hello\n\nworld  ":             "hello world",
-		"a\tb\tc":                          "a b c",
-		"  ":                               "",
-		"\n\r\nfoo\n":                      "foo",
-		"already clean":                    "already clean",
-		"multiple   internal     spaces":   "multiple internal spaces",
+		"a\tb\tc":                        "a b c",
+		"  ":                             "",
+		"\n\r\nfoo\n":                    "foo",
+		"already clean":                  "already clean",
+		"multiple   internal     spaces": "multiple internal spaces",
 	}
 	for in, want := range cases {
 		if got := collapseWhitespace(in); got != want {
@@ -181,12 +245,12 @@ func TestTruncateRunes_HandlesUnicodeAndEdgeCases(t *testing.T) {
 		max  int
 		want string
 	}{
-		{"hello", 10, "hello"},   // shorter than max
-		{"hello", 5, "hello"},    // exactly max
+		{"hello", 10, "hello"}, // shorter than max
+		{"hello", 5, "hello"},  // exactly max
 		{"hello world", 6, "hello…"},
 		{"中文测试", 3, "中文…"},
-		{"x", 0, ""},             // max=0 → empty
-		{"x", -1, ""},            // negative max
+		{"x", 0, ""},  // max=0 → empty
+		{"x", -1, ""}, // negative max
 	}
 	for _, c := range cases {
 		if got := truncateRunes(c.in, c.max); got != c.want {
