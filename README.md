@@ -474,6 +474,22 @@ altcode is not alone in the open-multi-provider quadrant, and we'd be dishonest 
 
 altcode's distinctive choices: a single statically-linked Go binary, the [four-role daemon](#advanced) for self-hosting, deliberate parity with Claude Code's user-facing surface.
 
+## Risk & disclaimer
+
+**altcode is a community-developed open-source project, distributed under the [MIT License](LICENSE) "AS IS, WITHOUT WARRANTY OF ANY KIND." Use at your own risk.**
+
+Before pointing altcode at code you care about, understand the operational realities:
+
+- **No vendor support contract.** altcode is not a commercial product. There is no SLA, no on-call rotation, no support team. Issues get fixed when maintainers and contributors have time. For teams whose risk model assumes vendor support, this is the wrong tool — pay Anthropic for Claude Code instead.
+- **Subprocess and shell-execution risk.** altcode spawns model-controlled CLIs (codex, claude, altcode, custom backends) as subprocesses with the user's environment. The permission system gates **tool calls**, not **process scope** — a model that talks the harness into a destructive shell command will succeed unless a human or the auto-deny rule intervenes. **Operating altcode against an untrusted model, or in CI, requires sandboxing the harness itself.** That's your responsibility today (containers, gVisor, restricted shell users, ephemeral worktrees), not altcode's.
+- **Credential exposure.** altcode reads credentials from environment variables, `~/.codex/auth.json`, `~/.claude/.credentials.json`, and `~/.altcode/config.json`. Subagents inherit the parent process environment. Review your config and env before running against an untrusted prompt or codebase. Don't pipe `altcode` output into other tools without considering whether it could leak.
+- **Tool calls can damage your repository.** Edit, Write, Patch, and Bash tools modify files and run shell commands. Run in `--permission-mode plan` first if you're unsure. Use `--dry-run` for a preview. Commit before letting the agent loose. `git reset --hard` is not a recovery plan; backups and branches are.
+- **Provider quirks the harness can't hide.** Different providers handle tool-use, rate limits, streaming chunks, and structured-output reliability differently. altcode's normalisation layer is good but not magical. A model that returns malformed tool calls under load will still confuse the harness. Community-tracked failure modes change every month.
+- **No data/PII guarantees.** Your prompts, code, and tool outputs are sent to whichever provider you've configured. altcode does not run, host, or proxy any model — it's a client. Read your provider's terms (Anthropic, OpenAI, DeepSeek, MiniMax, etc.) for what they retain, log, and train on. If you need on-prem inference, use the `ollama/` or `lmstudio/` provider prefix and never configure a remote provider.
+- **Pre-1.0 software.** Behaviour, flags, config schema, and event types are still evolving. Pin to a release (`go install …@v0.10.5`) or a commit hash if you need stability across rebuilds. The MIT license disclaims liability either way; pinning gives you a fighting chance to reproduce a working state.
+
+If any of the above is a deal-breaker for your use case, please don't ship it to production behind altcode. The honest recommendation is **Claude Code on Claude** for a vendor-supported relationship, or [self-hosted OpenHands](https://github.com/All-Hands-AI/OpenHands) if you need a more containerised execution model than altcode's subprocess approach.
+
 ## The verdict
 
 The case for altcode is **not** that it beats Claude Code on Claude. The case is that the coding-harness category should not stay a vendor privilege. Every model that wants to be taken seriously as a coding partner needs the same multi-turn loop, permission system, context compaction, multi-agent orchestration and persistent memory that Claude Code popularised for one model. altcode is one open-source attempt at exactly that.

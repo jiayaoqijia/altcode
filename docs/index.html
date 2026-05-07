@@ -284,6 +284,26 @@ altcode --model ollama/llama3  "explain this error"     <span style="color:var(-
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
+    <!-- Risk & disclaimer -->
+    <h2>Risk &amp; disclaimer</h2>
+    <p style="font-size:13px">
+      <b style="color:var(--rust,#e07b6e)">altcode is community-developed open-source software, distributed under the MIT License "AS IS, WITHOUT WARRANTY OF ANY KIND." Use at your own risk.</b>
+    </p>
+    <p style="font-size:12px;color:var(--dim);line-height:1.7">
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>No vendor support contract.</b> No SLA, no on-call, no support team. For teams whose risk model assumes vendor support — pay Anthropic for Claude Code instead.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>Subprocess + shell execution risk.</b> altcode spawns model-controlled CLIs as subprocesses with the user's environment. The permission system gates <b>tool calls</b>, not <b>process scope</b>. Operating against an untrusted model, or in CI, requires sandboxing the harness itself (containers, gVisor, restricted shell users, ephemeral worktrees). That's your responsibility today.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>Credential exposure.</b> Subagents inherit the parent process environment. Review your config and env before running against untrusted prompts.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>Tool calls can damage your repository.</b> Edit, Write, Patch, Bash modify files and run shell commands. Use <code style="color:var(--green)">--permission-mode plan</code> or <code style="color:var(--green)">--dry-run</code> first. Commit before letting the agent loose.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>Provider quirks the harness can't hide.</b> Tool-use, rate limits, streaming, structured-output reliability vary. altcode normalises but isn't magical.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>No data/PII guarantees.</b> Prompts and code go to whichever provider you've configured. Read their terms. For on-prem, use <code style="color:var(--green)">ollama/</code> or <code style="color:var(--green)">lmstudio/</code> and don't configure a remote provider.<br>
+      <span style="color:var(--rust,#e07b6e)">●</span> <b>Pre-1.0 software.</b> Behaviour, flags, config schema and event types still evolving. Pin to a release if you need stability across rebuilds.
+    </p>
+    <p style="font-size:12px;color:var(--dim);margin-top:10px">
+      If any of the above is a deal-breaker, don't ship it to production behind altcode. <b style="color:var(--cyan)">Claude Code on Claude</b> for a vendor-supported relationship, or <a href="https://github.com/All-Hands-AI/OpenHands">self-hosted OpenHands</a> if you need a more containerised execution model than altcode's subprocess approach.
+    </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
     <!-- Verdict -->
     <h2>The verdict</h2>
     <p style="font-size:13px">
