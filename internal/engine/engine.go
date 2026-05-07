@@ -274,7 +274,7 @@ func New(params EngineParams) (*Engine, error) {
 		hooksRunner = hooks.NewRunner(nil)
 	}
 
-	return &Engine{
+	e := &Engine{
 		cfg:               cfg,
 		provider:          p,
 		tools:             registry,
@@ -295,7 +295,12 @@ func New(params EngineParams) (*Engine, error) {
 		tokenBudget:       params.TokenBudget,
 		costBudget:        params.CostBudget,
 		maxTurns:          params.MaxTurns,
-	}, nil
+	}
+	// Hydrate disk-persisted anchors so a `altcode` restart inherits
+	// the user's "always remember…" facts. Best-effort — no error
+	// when the file is missing.
+	e.LoadAnchors()
+	return e, nil
 }
 
 // Skills returns the discovered skills.
@@ -464,33 +469,42 @@ func (e *Engine) Config() *config.Config {
 // we use that; otherwise we keep the current provider and only swap
 // the model suffix.
 func (e *Engine) SwitchModel(newModel string) error {
+	// Read the current provider/cfg under the lock just long enough
+	// to capture what we need. We INTENTIONALLY do not hold the
+	// mutex across createProvider — that call may dial a remote
+	// validation endpoint and would otherwise block any concurrent
+	// streaming-loop reader holding msgMu (CC review finding).
 	e.msgMu.Lock()
-	defer e.msgMu.Unlock()
 	currentProvider, _ := parseModel(e.cfg.Model)
+	cfgCopy := *e.cfg
+	e.msgMu.Unlock()
+
 	newProvider, newSuffix := parseModel(newModel)
-	// If the new spec doesn't include a provider prefix, reuse current.
 	target := newModel
 	if !strings.Contains(newModel, "/") {
 		target = currentProvider + "/" + newModel
 		newProvider = currentProvider
 		newSuffix = newModel
 	}
-	if _, ok := e.cfg.Provider[newProvider]; !ok {
+	if _, ok := cfgCopy.Provider[newProvider]; !ok {
 		return fmt.Errorf("provider %q not configured (set apiKey in altcode config)", newProvider)
 	}
-	// Build a new provider client. We DON'T mutate cfg.Model until the
-	// client constructs successfully — half-swapped state would leave
-	// the engine pointed at one model with a different client.
-	tmpCfg := *e.cfg
-	tmpCfg.Model = target
-	p, err := createProvider(newProvider, &tmpCfg)
+	// Build a new provider client OUTSIDE the lock. We don't mutate
+	// the engine until createProvider succeeds — half-swapped state
+	// would leave the engine pointed at one model with a different
+	// client.
+	cfgCopy.Model = target
+	p, err := createProvider(newProvider, &cfgCopy)
 	if err != nil {
 		return fmt.Errorf("switch to %s: %w", target, err)
 	}
+
+	// Final pointer swap under the lock — short critical section.
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
 	e.cfg.Model = target
 	e.model = newSuffix
 	e.provider = p
-	// Drop cached context-window size — the new model may differ.
 	e.cachedContextWindow = 0
 	return nil
 }
@@ -577,23 +591,35 @@ func (e *Engine) Compact() int {
 	before := len(e.messages)
 	mc := compact.NewMicrocompactor(20)
 	e.messages = mc.Apply(e.messages)
+	// Compaction-only delta — measure BEFORE re-injecting anchors so
+	// the return value reflects the compactor's work, not anchor
+	// bookkeeping. Anchor reinjection adds one synthetic message
+	// independent of what the compactor did.
+	dropped := before - len(e.messages)
+	if dropped < 0 {
+		dropped = 0
+	}
 	// Re-inject anchored facts at the head so they survive the
 	// compaction. Anchors live OUTSIDE the message list so they
 	// can't be summarised away. DeepSeek-TUI #anchor parity.
 	e.reinjectAnchors()
-	return before - len(e.messages)
+	return dropped
 }
 
-// SetAnchor stores a free-form fact that survives every compaction.
-// Anchors are re-injected into the message list as a leading user
-// message immediately after Compact() and are persisted alongside
-// the session in SQLite. Useful for "always remember the user is on
-// macOS", "the GitHub repo is jiayaoqijia/altcode", etc.
+// SetAnchor stores a free-form fact that survives every compaction
+// AND restart. Anchors are re-injected into the message list as a
+// leading user message immediately after Compact() and persisted to
+// ~/.altcode/anchors.json so they survive `altcode` restarts. Useful
+// for "always remember the user is on macOS", "the GitHub repo is
+// jiayaoqijia/altcode", etc.
 //
 // Pass an empty value to clear the anchor with the given key.
+//
+// Disk persistence is best-effort — failures are logged to stderr but
+// don't fail the in-memory update. Anchors survive even if the disk
+// write fails (until next restart).
 func (e *Engine) SetAnchor(key, value string) {
 	e.msgMu.Lock()
-	defer e.msgMu.Unlock()
 	if e.anchors == nil {
 		e.anchors = make(map[string]string)
 	}
@@ -602,6 +628,71 @@ func (e *Engine) SetAnchor(key, value string) {
 	} else {
 		e.anchors[key] = value
 	}
+	snapshot := make(map[string]string, len(e.anchors))
+	for k, v := range e.anchors {
+		snapshot[k] = v
+	}
+	e.msgMu.Unlock()
+	saveAnchors(snapshot)
+}
+
+// LoadAnchors reads ~/.altcode/anchors.json and merges its entries
+// into the engine's in-memory anchor map. Called at engine startup
+// so a `altcode` restart picks up the anchors from the previous
+// session. Missing file is not an error.
+func (e *Engine) LoadAnchors() {
+	disk := loadAnchors()
+	if len(disk) == 0 {
+		return
+	}
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	if e.anchors == nil {
+		e.anchors = make(map[string]string)
+	}
+	for k, v := range disk {
+		// Don't overwrite anchors set programmatically before load.
+		if _, exists := e.anchors[k]; !exists {
+			e.anchors[k] = v
+		}
+	}
+}
+
+func anchorPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".altcode", "anchors.json")
+}
+
+func saveAnchors(m map[string]string) {
+	path := anchorPath()
+	if path == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return
+	}
+	body, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(path, body, 0o600)
+}
+
+func loadAnchors() map[string]string {
+	path := anchorPath()
+	if path == "" {
+		return nil
+	}
+	body, err := os.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	out := map[string]string{}
+	_ = json.Unmarshal(body, &out)
+	return out
 }
 
 // Anchors returns a snapshot copy of the current anchor map.
