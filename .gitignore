@@ -163,3 +163,35 @@ internal/example_*.go
 .altcode/workspace/
 ,
 ", "
+
+# OSS hygiene (added during open-source cleanup):
+# - Auto-memory directory (per-conversation state, never relevant in commits)
+# - Playwright MCP cache directory
+# - Repo-root binary builds (Makefile already builds to dist/)
+# - Backup / disabled files left behind by editors and revert flows
+.claude/memory/
+.playwright-mcp/
+/altcode
+/hello
+*.bak
+*.bak2
+*.bak3
+*.disabled
+# Benchmark detritus that has bitten us repeatedly — pin the names so
+# `go test ./...` from a re-run can't sneak them back in.
+internal/binarysearch.go
+internal/cache/
+internal/fib/
+internal/generics/
+internal/math/
+internal/mathutil/
+internal/prime/
+internal/util/
+internal/COUNTER_FIX.md
+MIDDLEWARE_GUIDE.md
+/cli/
+/cmd/cli/
+/cmd/cli-example/
+/cmd/flagcli/
+/cmd/hello/
+/pkg/middleware/
