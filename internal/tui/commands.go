@@ -39,10 +39,19 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		a.appendInfo(a.builtinContextText())
 	case "/model":
 		if len(parts) > 1 {
-			a.appendInfo(fmt.Sprintf(
-				"Current model: %s\n\n/model %s — mid-session model switching isn't supported yet; restart altcode with --model %s or set 'model' in your config.",
-				a.activeModel(), parts[1], parts[1],
-			))
+			if a.engine == nil {
+				a.appendInfo("[model] engine not initialised — restart altcode with --model " + parts[1])
+			} else {
+				prev := a.engine.Config().Model
+				if err := a.engine.SwitchModel(parts[1]); err != nil {
+					a.appendInfo(fmt.Sprintf("[model] switch failed: %v", err))
+				} else {
+					a.builtinClear()
+					a.appendInfo(fmt.Sprintf(
+						"[model] switched %s → %s (history cleared so the new model starts fresh)",
+						prev, a.engine.Config().Model))
+				}
+			}
 		} else {
 			a.appendInfo(a.builtinModelText())
 		}

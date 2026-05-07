@@ -444,6 +444,51 @@ func (e *Engine) Config() *config.Config {
 	return e.cfg
 }
 
+// SwitchModel hot-swaps the engine's active model mid-session. Returns
+// an error if the new model can't be parsed or its provider isn't
+// configured. Successful swap clears the cached context-window size
+// (the new model may have a different limit) and replaces the active
+// provider client. Conversation history is preserved — the next turn
+// will be sent to the new model with the existing context.
+//
+// Used by the TUI's /model <name> command. DS-TUI parity for the
+// runtime model picker that altcode previously printed "not supported"
+// for. Implementation aims for the simple-and-correct case: if the
+// caller passes a fully-qualified provider/model string ("openai/foo")
+// we use that; otherwise we keep the current provider and only swap
+// the model suffix.
+func (e *Engine) SwitchModel(newModel string) error {
+	e.msgMu.Lock()
+	defer e.msgMu.Unlock()
+	currentProvider, _ := parseModel(e.cfg.Model)
+	newProvider, newSuffix := parseModel(newModel)
+	// If the new spec doesn't include a provider prefix, reuse current.
+	target := newModel
+	if !strings.Contains(newModel, "/") {
+		target = currentProvider + "/" + newModel
+		newProvider = currentProvider
+		newSuffix = newModel
+	}
+	if _, ok := e.cfg.Provider[newProvider]; !ok {
+		return fmt.Errorf("provider %q not configured (set apiKey in altcode config)", newProvider)
+	}
+	// Build a new provider client. We DON'T mutate cfg.Model until the
+	// client constructs successfully — half-swapped state would leave
+	// the engine pointed at one model with a different client.
+	tmpCfg := *e.cfg
+	tmpCfg.Model = target
+	p, err := createProvider(newProvider, &tmpCfg)
+	if err != nil {
+		return fmt.Errorf("switch to %s: %w", target, err)
+	}
+	e.cfg.Model = target
+	e.model = newSuffix
+	e.provider = p
+	// Drop cached context-window size — the new model may differ.
+	e.cachedContextWindow = 0
+	return nil
+}
+
 // PermissionEvaluator returns the engine's permission evaluator.
 func (e *Engine) PermissionEvaluator() *permission.Evaluator {
 	return e.perm
