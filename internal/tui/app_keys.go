@@ -223,12 +223,12 @@ func (a *App) handleGlobalKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 		}
 		return a, nil, true
 	case "ctrl+d":
-		// Ctrl+D = quit. Cancel any in-flight engine context first so
-		// tool subprocesses get SIGTERM and don't leak as zombies.
-		if a.cancel != nil {
-			a.cancel()
-		}
-		return a, tea.Quit, true
+		// Ctrl+D no-op in the global handler — primary quit is Ctrl+C.
+		// Kept as a case (instead of falling through to default text
+		// input handling) so accidental Ctrl+D doesn't insert a stray
+		// EOT character into the textarea or get interpreted as
+		// "delete forward" on a future bubbletea update.
+		return a, nil, true
 	case "ctrl+g":
 		// Ctrl+G = open current input in $EDITOR (CC parity).
 		// Useful for composing long prompts with proper editing.
@@ -338,7 +338,15 @@ func (a *App) handleEnterKey() (tea.Model, tea.Cmd, bool) {
 	return a, nil, true
 }
 
-// handleCtrlCKey cancels generation or copies last response.
+// handleCtrlCKey is the primary quit shortcut.
+//
+// First press while busy: cancel the in-flight turn (graceful interrupt).
+// Second press (or any press while idle): quit. Cancels any remaining
+// engine context first so tool subprocesses don't leak as zombies.
+//
+// Earlier behaviour copied the last assistant reply to clipboard on
+// Ctrl+C — non-standard, surprising, and made it impossible to actually
+// quit while a reply was on screen. Removed; copy lives on /copy.
 func (a *App) handleCtrlCKey() (tea.Model, tea.Cmd, bool) {
 	if a.busy {
 		if a.cancel != nil {
@@ -348,16 +356,9 @@ func (a *App) handleCtrlCKey() (tea.Model, tea.Cmd, bool) {
 		a.streaming = ""
 		// Same stale-HUD fix as handleEscKey — see comment there.
 		a.resetTurnTransientState()
-		a.appendInfo("[cancelled]")
+		a.appendInfo("[cancelled — Ctrl+C again to quit]")
 		return a, nil, true
 	}
-	if last := a.lastAssistantMessage(); last != "" {
-		copyToClipboard(last)
-		a.appendInfo("[copied last response to clipboard]")
-		return a, nil, true
-	}
-	// Cancel any in-flight engine context before quitting so tool
-	// subprocesses don't leak.
 	if a.cancel != nil {
 		a.cancel()
 	}

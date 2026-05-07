@@ -261,8 +261,12 @@ func toolSummaryNoun(name string, count int) string {
 
 // RenderLive returns the tree during active execution — NO collapsing.
 // This prevents visual height jumping when consecutive tools complete.
-// Uses tree-branch chars (├─/└─) because the live tree is rendered
-// directly under the in-progress assistant turn (clear parent context).
+//
+// Uses ⏺ bullets (not tree-branch chars) so the live tree reads cleanly
+// even when no parent message is visible directly above it. The earlier
+// ├─/└─ rendering looked orphaned when intermediate assistant text or
+// info messages appeared between the user prompt and the tools — see
+// DeepSeek-TUI's flatter "stream of bullets" visual style.
 func (t *toolTree) RenderLive(theme Theme, width int) string {
 	if len(t.entries) == 0 {
 		return ""
@@ -272,7 +276,7 @@ func (t *toolTree) RenderLive(theme Theme, width int) string {
 	for i, e := range t.entries {
 		items[i] = e
 	}
-	return t.renderItems(items, theme, width, true /*tree*/)
+	return t.renderItems(items, theme, width, false /*flat bullets, not tree*/)
 }
 
 // Render returns the tool tree with collapsed groups (for final display

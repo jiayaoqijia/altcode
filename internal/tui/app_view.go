@@ -126,13 +126,19 @@ func (a *App) buildHUDState() hudState {
 			hooksCount += len(matchers)
 		}
 	}
+	// Context-tokens fallback: prefer currentContextTokens (the last
+	// turn's prompt token count, which is what the model actually saw),
+	// but fall back to cumulative tokensIn when usage events haven't
+	// arrived yet — some providers (notably OpenRouter forwarding
+	// DeepSeek) emit prompt_tokens only at end-of-stream, leaving the
+	// HUD stuck at 0/N for the entire first turn. tokensIn is at least
+	// directionally correct even before the final usage chunk.
+	contextTokens := a.currentContextTokens
+	if contextTokens == 0 && a.tokensIn > 0 {
+		contextTokens = a.tokensIn
+	}
 	return hudState{
-		// Use currentContextTokens (last turn's input = the
-		// conversation history sent to the model) instead of
-		// cumulative tokensIn+tokensOut which double-counts the
-		// history on every turn and makes the HUD bar grow past
-		// 100% after a few turns.
-		ContextTokens:  a.currentContextTokens,
+		ContextTokens:  contextTokens,
 		ContextLimit:   ctxLimit,
 		SessionStart:   a.sessionStart,
 		SessionName:    a.sessionSlug,
