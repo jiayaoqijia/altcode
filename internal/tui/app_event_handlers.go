@@ -57,35 +57,38 @@ func (a *App) onPermissionRequest(ev event.Event) (tea.Model, tea.Cmd) {
 	if ev.Permission == nil || ev.Permission.Response == nil {
 		return a, a.waitForEvent()
 	}
-	// Modal flow (opt-in via ALTCODE_REQUIRE_APPROVAL=1): pop the
-	// approval dialog and stash the response channel until the user
-	// picks y/n/a/!. The TUI key handler in handleKey() routes the
-	// keystroke to handlePermDialogKey when permDialog.IsVisible().
-	// DS-TUI parity for the modal-driven approval flow.
-	if os.Getenv("ALTCODE_REQUIRE_APPROVAL") == "1" {
+	// Permission policy resolution:
+	//   ALTCODE_AUTO_APPROVE=1     → silent auto-allow (YOLO mode)
+	//   ALTCODE_REQUIRE_APPROVAL=1 → modal (explicit on; same as default)
+	//   neither set                → MODAL by default (CC parity)
+	//
+	// Round-4 CC review flagged "modal is opt-in" as the biggest
+	// remaining UI gap vs DS-TUI/CC. Flipping the default to modal-on
+	// brings altcode in line with CC's interactive behaviour. Users
+	// who want the old auto-allow-fast experience set
+	// ALTCODE_AUTO_APPROVE=1 to opt back out.
+	autoApprove := os.Getenv("ALTCODE_AUTO_APPROVE") == "1"
+	if !autoApprove {
 		a.pendingPermission = ev.Permission
 		if a.permDialog == nil {
 			a.permDialog = NewPermissionDialog(a.theme)
 		}
-		a.permDialog.SetWidth(a.width)
+		a.permDialog.SetWidth(a.mainBodyWidth())
 		a.permDialog.Show(ev.Permission.ToolName, ev.Permission.Pattern)
 		a.updateViewport()
 		return a, a.waitForEvent()
 	}
-	// Default flow: auto-allow with a one-time-per-tool info note.
-	// A 6-bash-call turn used to print the same line 6 times, drowning
-	// the actual tool tree in repeated boilerplate.
+	// Auto-allow flow: surface a one-time-per-tool note so users
+	// see WHICH tools the agent is exercising.
 	if a.autoAllowSeen == nil {
 		a.autoAllowSeen = make(map[string]bool)
 	}
 	if !a.autoAllowSeen[ev.Permission.ToolName] {
 		a.autoAllowSeen[ev.Permission.ToolName] = true
-		a.appendInfo(fmt.Sprintf("[auto-allow] %s — to deny next time, set permission rules in altcode.json or set ALTCODE_REQUIRE_APPROVAL=1 for a modal",
+		a.appendInfo(fmt.Sprintf(
+			"[auto-allow] %s — ALTCODE_AUTO_APPROVE=1 active. Unset to get the modal back.",
 			ev.Permission.ToolName))
 	}
-	// Non-blocking send: respCh has cap=1 (set in engine.askPermission),
-	// so the first send always succeeds. Default branch is defensive
-	// against a future change to channel capacity.
 	select {
 	case ev.Permission.Response <- event.PermResponse{Action: event.Allow}:
 	default:

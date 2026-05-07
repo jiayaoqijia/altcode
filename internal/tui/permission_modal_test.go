@@ -7,12 +7,15 @@ import (
 	"github.com/jiayaoqijia/altcode/internal/event"
 )
 
-// TestOnPermissionRequest_RequireApprovalShowsDialog verifies the
-// modal flow when ALTCODE_REQUIRE_APPROVAL=1 is set: the response
-// channel is NOT auto-written, the dialog becomes visible, and the
-// pending request is stashed for the key handler.
-func TestOnPermissionRequest_RequireApprovalShowsDialog(t *testing.T) {
-	t.Setenv("ALTCODE_REQUIRE_APPROVAL", "1")
+// TestOnPermissionRequest_DefaultShowsDialog verifies the modal is
+// the DEFAULT flow (round-4 CC fix). The response channel must not
+// auto-write; the dialog becomes visible; the pending request is
+// stashed for the key handler.
+func TestOnPermissionRequest_DefaultShowsDialog(t *testing.T) {
+	// Explicitly clear any opt-out env var inherited from the user
+	// environment. We rely on default behaviour (no env vars set)
+	// to surface the modal.
+	t.Setenv("ALTCODE_AUTO_APPROVE", "")
 	a := testApp()
 
 	respCh := make(chan event.PermResponse, 1)
@@ -27,7 +30,7 @@ func TestOnPermissionRequest_RequireApprovalShowsDialog(t *testing.T) {
 	a.handleEvent(ev)
 
 	if a.permDialog == nil || !a.permDialog.IsVisible() {
-		t.Error("modal should be visible when ALTCODE_REQUIRE_APPROVAL=1")
+		t.Error("modal should be visible by default (CC parity)")
 	}
 	if a.pendingPermission == nil {
 		t.Error("pendingPermission should hold the request channel")
@@ -134,5 +137,36 @@ func TestHandlePermDialogKey_UnknownKeyFallsThrough(t *testing.T) {
 		t.Error("unknown key should not write a response")
 	default:
 		// expected
+	}
+}
+
+// TestOnPermissionRequest_AutoApproveSkipsDialog verifies the explicit
+// opt-out: ALTCODE_AUTO_APPROVE=1 → silent auto-allow + info note,
+// no modal. Round-4 default-flip preserves YOLO mode for users who
+// want it.
+func TestOnPermissionRequest_AutoApproveSkipsDialog(t *testing.T) {
+	t.Setenv("ALTCODE_AUTO_APPROVE", "1")
+	a := testApp()
+	respCh := make(chan event.PermResponse, 1)
+	ev := event.Event{
+		Type: event.PermissionRequest,
+		Permission: &event.PermReq{
+			ToolName: "bash",
+			Pattern:  "bash:ls",
+			Response: respCh,
+		},
+	}
+	a.handleEvent(ev)
+
+	if a.permDialog != nil && a.permDialog.IsVisible() {
+		t.Error("ALTCODE_AUTO_APPROVE=1 should suppress the modal")
+	}
+	select {
+	case resp := <-respCh:
+		if resp.Action != event.Allow {
+			t.Errorf("auto-approve should send Allow, got %v", resp.Action)
+		}
+	case <-time.After(50 * time.Millisecond):
+		t.Error("auto-approve should write response immediately")
 	}
 }

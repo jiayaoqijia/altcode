@@ -13,7 +13,11 @@ import (
 // askPermission emitted a PermissionRequest event whose Response
 // channel was never written by the TUI — every ActionAsk tool call
 // deadlocked the agent loop forever.
+//
+// Round 4 flipped the default to modal-on, so this test explicitly
+// opts into the auto-allow branch via ALTCODE_AUTO_APPROVE=1.
 func TestOnPermissionRequest_AutoAllowsAndSurfacesInfo(t *testing.T) {
+	t.Setenv("ALTCODE_AUTO_APPROVE", "1")
 	a := testApp()
 
 	respCh := make(chan event.PermResponse, 1)
@@ -84,7 +88,12 @@ func TestOnPermissionRequest_NilResponseChannelNoOps(t *testing.T) {
 // info-message spam regression: a 6-bash-call turn was producing 6
 // identical "[auto-allow] bash" lines that drowned the actual tool
 // tree. The handler now tracks per-tool-name and surfaces ONCE.
+//
+// As of round 4 the default flow is modal, so this test explicitly
+// opts INTO the auto-allow path via ALTCODE_AUTO_APPROVE=1 — the
+// dedup invariant is specific to that branch.
 func TestOnPermissionRequest_InfoEmittedOncePerTool(t *testing.T) {
+	t.Setenv("ALTCODE_AUTO_APPROVE", "1")
 	a := testApp()
 
 	for i := 0; i < 5; i++ {
