@@ -199,6 +199,10 @@ td.num{color:var(--yellow);font-family:var(--font)}
       <span style="color:var(--green)">●</span> Multi-turn agent loop with <b>LoopGuard</b> — blocks runaway tool repeats (3) and consecutive errors (8)<br>
       <span style="color:var(--green)">●</span> 11 tools: read, write, edit, glob, grep, ls, bash, patch, web, agent, tasks<br>
       <span style="color:var(--green)">●</span> MCP client (stdio + SSE) · 13 hook events · 53 slash commands · plugin marketplace<br>
+      <span style="color:var(--green)">●</span> <b>Full-width chat body</b> — every column of the terminal goes to the conversation, no side panels stealing real estate<br>
+      <span style="color:var(--green)">●</span> <b>500ms double-submit debounce</b> — paste-and-Enter races no longer fire the same prompt twice<br>
+      <span style="color:var(--green)">●</span> <b>No-sudo install</b> — defaults to <code style="color:var(--green)">~/.local/bin</code> + OS-version preflight (glibc / macOS major)<br>
+      <span style="color:var(--green)">●</span> <b>macOS Terminal HUD fix</b> — auto-skips the dark background that rendered as solid black<br>
       <span style="color:var(--green)">●</span> <b>Type-ahead /queue</b> — prompts buffered while a turn runs, drained on completion<br>
       <span style="color:var(--green)">●</span> <b>/anchor facts</b> — survive compaction AND restart (saved to ~/.altcode/anchors.json)<br>
       <span style="color:var(--green)">●</span> <b>Runtime /model swap</b> — fuzzy substring match, hot-swaps mid-session (no restart)<br>
@@ -246,7 +250,7 @@ td.num{color:var(--yellow);font-family:var(--font)}
     <div class="status">
       <div class="left">● ready</div>
       <div style="color:var(--dim)">Enter send · Esc quit</div>
-      <div class="right">v0.9.1</div>
+      <div class="right">v0.10.4</div>
     </div>
 
     <p style="color:var(--dim);font-size:11px;text-align:center;margin-top:12px">

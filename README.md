@@ -14,6 +14,13 @@ type-ahead /queue · runtime /model swap · OSC-8 hyperlinks · CC-parity permis
 
 ## What's new (May 2026)
 
+- **Full-width chat body** — Files sidebar removed; the conversation now uses every column of the terminal.
+- **500ms double-submit debounce** — paste-and-Enter races no longer fire the same prompt twice (caught in 3-way live testing).
+- **No-sudo install** — defaults to `~/.local/bin`, sudos only if you opt into a system path interactively.
+- **OS-version preflight** — installer warns on glibc < 2.17 / macOS < 10.15 (or 11 for arm64) before downloading the wrong binary.
+- **macOS Terminal HUD fix** — auto-detects `Apple_Terminal` and skips the dark-mode background that rendered as solid black.
+- **Mouse-selection escape** — `ALTCODE_NO_MOUSE=1` disables Bubbletea mouse capture so you can drag-select with the OS terminal.
+- **Rich `--version`** — prints commit, build date, Go version, and platform.
 - **`/queue` type-ahead** — type prompts while a turn is running; FIFO drain on completion. Visible `▶ N queued` chip in HUD.
 - **Runtime `/model` switcher** — fuzzy substring match against the disk-cached model list. `/model haiku` → `anthropic/claude-haiku-4-5`; ambiguous queries list candidates.
 - **`/anchor` facts** — survive compaction AND restart. Stored in `~/.altcode/anchors.json`.
@@ -427,7 +434,6 @@ Keys: `Ctrl+Z` pause, `Ctrl+R` resume, `Ctrl+Q` abort, `Ctrl+S` send, `Tab` cycl
 | `Ctrl+C` | Cancel (busy) / copy last response (idle) |
 | `Ctrl+L` | Clear screen |
 | `Ctrl+R` | Retry last prompt |
-| File sidebar | Tracks changed files with +/-N counts |
 | Focused pane | `▸` marker + bright border on focused workspace pane |
 | No flicker | Viewport stays stable during tool execution |
 
