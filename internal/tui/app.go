@@ -102,6 +102,11 @@ type App struct {
 	// current turn is running. Drained by drainQueue() in onDone().
 	// DeepSeek-TUI parity for `/queue` workflow.
 	queue          []string
+	// lastSubmittedText + lastSubmittedAt drive the 500ms double-submit
+	// dedup. tmux send-keys can replay the same prompt under bracketed-
+	// paste / TIOCSTI races, burning the user's cost on a duplicate turn.
+	lastSubmittedText string
+	lastSubmittedAt   time.Time
 	// permDialog shows a modal asking the user to approve a tool call.
 	// Wired only when ALTCODE_REQUIRE_APPROVAL=1 is set; otherwise the
 	// existing auto-allow path stays. DS-TUI parity. The pending PermReq
@@ -424,6 +429,23 @@ func (a *App) submit() tea.Cmd {
 	a.input.Reset()
 	a.inputHistory.Add(text)
 	a.inputHistory.Reset()
+
+	// Double-submit guard: dedup the same text fired within 500ms of
+	// the previous submit. Surfaced by a 3-way live comparison
+	// (CC vs altcode vs Codex) — bracketed-paste replay or tmux
+	// TIOCSTI race could fire submit() twice with identical text and
+	// burn the user's cost on a duplicate turn. Slash commands and
+	// empty-text submits skip the guard so /clear /clear behaves
+	// normally and idle-Enter doesn't get suppressed.
+	if text != "" && !strings.HasPrefix(text, "/") {
+		if a.lastSubmittedText == text && time.Since(a.lastSubmittedAt) < 500*time.Millisecond {
+			a.appendInfo("[debounce] dropped duplicate submit within 500ms")
+			a.updateViewport()
+			return nil
+		}
+		a.lastSubmittedText = text
+		a.lastSubmittedAt = time.Now()
+	}
 
 	// Type-ahead queue (DeepSeek-TUI parity): if a turn is already
 	// running, push this prompt onto a FIFO queue and surface a
