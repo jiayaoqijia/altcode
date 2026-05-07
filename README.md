@@ -2,15 +2,48 @@
 
 **[altcode.io](https://altcode.io)** · [Install](#install) · [Benchmarks](#benchmarks) · [Releases](https://github.com/jiayaoqijia/altcode/releases) · [Full docs](docs/README.full.md)
 
-**The universal agent harness for coding.** Orchestrate Claude Code, Codex, OpenCode, Aider, OpenClaw — or any CLI agent — from one terminal. Git-native coordination with worktrees, CI auto-fix, and a split-pane TUI.
+> **The harness is the product. The model is the engine. Pick the engine you want.**
+
+**altcode** is the open-source coding **harness** that gives every model — DeepSeek, GPT, AltLLM, MiniMax, GLM, Kimi, Qwen, Llama, anything self-hosted — the same multi-turn agent loop, permission system, context compaction, and multi-agent orchestration that Claude Code popularised for one model family. **One binary. Thirteen providers. No vendor lock-in.**
 
 ```
 5ms startup · 17MB binary · 13 providers · 100+ models · 11 tools · 53 slash commands
 type-ahead /queue · runtime /model swap · OSC-8 hyperlinks · CC-parity permission modal
 ```
 
+### If you only have 30 seconds
+
+| | |
+|---|---|
+| **13** | providers · one binary · one configuration |
+| **100+** | models reachable through one `--model` flag |
+| **7 / 7** | backends ship working code on the same task ([benchmark](docs/benchmark-multi-model.md)) |
+| **0** | vendor lock-in — swap engine with one flag |
+| **MIT** | open-source, owned by no model vendor |
+
+> Claude Code is the polished coding CLI of the moment, on Anthropic's own SWE-bench Verified scores — but it only runs Claude. altcode runs the same agentic loop against 13 providers and 100+ models, including AltLLM, DeepSeek, GPT and local Llama/Qwen. On a small benchmark it shipped working code from every backend tested. `altcode --model altllm-basic "fix the failing tests"` is the AltLLM-paired one-liner; the same flag swaps any other provider in.
+
+### Two stacks. One coupled, one open.
+
+```
+       Vendor-locked stack                 Open stack
+       (Claude Code shape)                 (altcode shape)
+       ───────────────────                 ──────────────
+        Your application                  Your application
+              │                                  │
+              ▼                                  ▼
+    Harness (closed, vendor-shipped)    Harness (open, vendor-neutral)
+              │                                  │
+              ▼                                  ▼
+       One model family            Any of 100+ models · swap with one flag
+```
+
+The harness layer is doing real work. The question is **who owns it** and whether the model underneath is interchangeable.
+
 > **Independent dual-reviewer scoring (round 5)** — altcode TUI vs [DeepSeek-TUI](https://github.com/Hmbown/DeepSeek-TUI):
 > Features **9.15** vs 8.5 · UI **8.30** vs 8.5 · Stability **7.70** vs 7.0. *altcode leads 2 of 3 unanimously.*
+
+Long-form positioning piece: **["Why DeepSeek and GPT need AltCode to beat Claude Code"](https://altcode.io/article/v8.html)** (April 2026).
 
 ## Quick start
 
@@ -66,20 +99,35 @@ altcode --model altllm/altllm-basic "review security"
 
 </details>
 
-## Why a harness, not just a CLI?
+## CLI vs harness: the engineering distinction
 
-A coding CLI sends prompts and prints responses. A coding **harness** gives you the infrastructure to make AI agents reliable.
+A coding CLI sends a prompt and prints a response. A coding **harness** gives the agent the surrounding scaffolding it needs to do useful work across many turns: token budgets, permission gates, automatic compaction, post-edit verification, multi-agent orchestration, persistent memory. The right column below is what a competent coding harness looks like in 2026 — Claude Code has it for one model family, Codex CLI has a leaner version for another. **altcode generalises it: the same surface, against thirteen providers, behind one binary.**
 
-| | Coding CLI | altcode (Harness) |
+| | Coding CLI | altcode-class harness |
 |---|---|---|
 | Agent loop | Run once | Multi-turn with verification gates + 50-iter cap |
 | Context | Send and hope | Token tracking, auto-compact at 90%, LLM summarization |
 | Tools | Call and pray | Permission system, pre/post hooks, auto-verify (`go build`) |
 | Agents | Single model | Multi-agent: cc+opus, codex+gpt, altcode+minimax/glm/kimi |
 | Workflow | Ad-hoc | Interview → plan → persistent execution (ralph) |
-| Quality | Trust output | Generator/evaluator loop, Codex adversarial review |
+| Quality | Trust output | Generator/evaluator loop, adversarial review |
 | Memory | Session-only | Cross-session persistent memory with `MEMORY.md` index |
 | Providers | One vendor | 13 providers, any model, existing subscriptions |
+
+## The credential trick — one harness, many subscriptions
+
+Anthropic's Claude Code usage policy restricts re-wrapping CC subscriptions through third-party tooling — read as a practical bar on a single CLI proxying many users' Claude sessions. altcode's design sidesteps that question entirely: **each subagent uses its own credentials against its own provider on its own subscription, with no proxying**.
+
+```
+altcode (main: GPT / MiniMax / GLM / Kimi)
+  ├── Agent(claude)     → uses Claude Code subscription (Opus)
+  ├── Agent(codex)      → uses Codex subscription (GPT)
+  ├── Agent(altcode, model=minimax/MiniMax-M2.7) → uses MiniMax API key
+  ├── Agent(altcode, model=kimi/kimi-k2)         → uses Kimi coding plan
+  └── Agent(altcode, model=zhipu/glm-4.7)        → uses GLM coding plan
+```
+
+A team that wants Claude for the architect role, GPT for the implementer, Kimi for the reviewer, and DeepSeek for cost-sensitive batch tasks runs all four through one binary, with one configuration, one permission model, one log stream. Each agent maintains its own paid relationship to the underlying provider. **If the harness layer stays a vendor privilege, model choice becomes a vendor privilege too. That's the whole argument.**
 
 ## Benchmarks
 
@@ -403,6 +451,36 @@ internal/
 - **LoopGuard** — blocks runaway tool repeats (3 same-input) and consecutive errors (8) so the agent can't burn cost on flaky paths.
 
 </details>
+
+## Where altcode still trails Claude Code
+
+Honesty is the editorial test. The cases where altcode falls short are the ones a sophisticated buyer should look at first:
+
+- **Native model fluency.** Claude Code is co-designed with Claude. The agent prompt, tool definitions, failure recovery and streaming behaviour are tuned together. altcode is a third-party harness; it inherits the model's behaviour, it doesn't shape it. On Claude itself, Claude Code will continue to lead.
+- **Stretch-test coverage.** The 7-model benchmark above shows altcode trailing on the secondary test count even when correctness is matched. Real gap; will narrow as the harness matures and open-source models close the capability gap.
+- **Polish + onboarding.** Claude Code is a productised commercial offering with polished installer, docs, error messages. altcode's gap is closing fast (curl-pipeable installer, OAuth login, OSC-8 hyperlinks, permission modal at parity in May 2026), but a non-technical buyer will still notice.
+- **Single-vendor support relationship.** Anthropic is on the line for Claude Code uptime. altcode is a community project. For teams whose budget includes vendor support contracts, that asymmetry matters.
+- **Subprocess + credential risk.** The harness spawns model-controlled CLIs as subprocesses with the user's environment. The permission system gates tool calls but doesn't isolate process scope. Operating altcode against an untrusted model or in CI requires sandboxing the harness itself — your responsibility today.
+- **Provider quirks the harness can't hide.** Different providers handle tool-use, rate limits, streaming chunks and structured-output reliability differently. altcode's normalisation layer is good but not magical.
+
+## The category is plural — peers worth comparing
+
+altcode is not alone in the open-multi-provider quadrant, and we'd be dishonest to pretend otherwise. Evaluate two or three of these together before standardising:
+
+- **[Aider](https://github.com/Aider-AI/aider)** — longest-running open-source coding-agent CLI, provider-flexible, extremely good for git-aware single-repo edits. No multi-agent workspace or daemon yet.
+- **[OpenHands](https://github.com/All-Hands-AI/OpenHands)** (formerly OpenDevin) — closest spiritual peer. Open-source agent platform with multi-provider support and a strong research line. More ambitious in scope than altcode, currently less focused on terminal ergonomics.
+- **[Codex CLI](https://github.com/openai/codex)** — OpenAI's first-party harness. Provider-locked to OpenAI, very polished.
+- **[Continue](https://github.com/continuedev/continue), [Aichat](https://github.com/sigoden/aichat), [OpenCode](https://github.com/opencode-ai/opencode)** — adjacent slices of the surface.
+
+altcode's distinctive choices: a single statically-linked Go binary, the [four-role daemon](#advanced) for self-hosting, deliberate parity with Claude Code's user-facing surface.
+
+## The verdict
+
+The case for altcode is **not** that it beats Claude Code on Claude. The case is that the coding-harness category should not stay a vendor privilege. Every model that wants to be taken seriously as a coding partner needs the same multi-turn loop, permission system, context compaction, multi-agent orchestration and persistent memory that Claude Code popularised for one model. altcode is one open-source attempt at exactly that.
+
+For a team that has standardised on Claude and is comfortable paying Anthropic, **Claude Code remains the right tool**. For a team that wants to keep its model choice open — for cost, sovereignty, on-prem inference, or simple optionality — **altcode is one publicly developed answer that doesn't require rebuilding the harness in-house**. It is not the only such project, and the race is not over.
+
+> *In 2026 the buyer has real model choice for the first time. That changes which tooling layer matters most.*
 
 ## Development
 

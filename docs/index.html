@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>altcode — AI coding CLI</title>
+<title>altcode — the open coding harness · 13 providers · no vendor lock-in</title>
 <meta name="description" content="Multi-provider AI coding harness. 5ms startup. 51 slash commands. Runs Claude, GPT, DeepSeek, Qwen, Ollama, and 8 more — same plugins, same hooks.">
 <meta property="og:title" content="altcode — universal AI coding harness">
 <meta property="og:description" content="5ms startup. 17MB. 51 slash commands. 13 providers. 117 skills. AltFix daemon. Claude Code-compatible.">
@@ -91,8 +91,42 @@ td.num{color:var(--yellow);font-family:var(--font)}
 
     <!-- Header -->
     <div class="logo">alt<span>code</span></div>
-    <div class="subtitle">The universal agent harness for coding</div>
-    <div class="tagline">17MB binary · 13 providers · 100+ models · 11 tools · 53 slash commands · 117 skills · type-ahead /queue · runtime /model swap · OSC-8 hyperlinks · permission modal</div>
+    <div class="subtitle">The harness is the product. The model is the engine. Pick the engine you want.</div>
+    <div class="tagline">17MB binary · 13 providers · 100+ models · MIT-licensed · 0 vendor lock-in</div>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- 30-second pitch -->
+    <h2>If you only have 30 seconds</h2>
+    <p style="font-size:13px">
+      <span style="color:var(--cyan)">●</span> <b>Claude Code is great</b> — but it only runs Claude.<br>
+      <span style="color:var(--cyan)">●</span> <b>altcode runs the same agentic loop</b> against 13 providers and 100+ models.<br>
+      <span style="color:var(--cyan)">●</span> Including <b>AltLLM, DeepSeek, GPT, MiniMax, GLM, Kimi, Qwen, Llama, Ollama</b>.<br>
+      <span style="color:var(--cyan)">●</span> <b>One binary. One configuration. One flag swaps the engine.</b>
+    </p>
+    <pre style="background:#0a0e14;border:1px solid var(--border);padding:14px 18px;border-radius:6px;font-size:12px;color:var(--green);overflow-x:auto;margin:12px 0"><code>altcode --model altllm-basic   "fix the failing tests"   <span style="color:var(--dim)"># AltLLM one-liner</span>
+altcode --model deepseek-v3    "add rate limiting"      <span style="color:var(--dim"># swap to DeepSeek</span>
+altcode --model kimi-k2        "write tests"            <span style="color:var(--dim)"># swap to Kimi</span>
+altcode --model ollama/llama3  "explain this error"     <span style="color:var(--dim)"># local, no key</span></code></pre>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Two-stack diagram -->
+    <h2>Two stacks. One coupled, one open.</h2>
+    <pre style="background:#0a0e14;border:1px solid var(--border);padding:18px 22px;border-radius:6px;font-size:12px;line-height:1.5;color:var(--fg);overflow-x:auto;margin:12px 0">
+       <span style="color:var(--rust,#e07b6e)">Vendor-locked stack</span>             <span style="color:var(--cyan)">Open stack</span>
+       (Claude Code shape)             (altcode shape)
+       ───────────────────             ───────────────
+        Your application              Your application
+              <span style="color:var(--dim)">│</span>                              <span style="color:var(--dim)">│</span>
+              <span style="color:var(--dim)">▼</span>                              <span style="color:var(--dim)">▼</span>
+    Harness <span style="color:var(--rust,#e07b6e)">(closed, vendor)</span>      Harness <span style="color:var(--cyan)">(open, neutral)</span>
+              <span style="color:var(--dim)">│</span>                              <span style="color:var(--dim)">│</span>
+              <span style="color:var(--dim)">▼</span>                              <span style="color:var(--dim)">▼</span>
+       <span style="color:var(--rust,#e07b6e)">One model family</span>      <span style="color:var(--cyan)">100+ models · swap with one flag</span></pre>
+    <p style="color:var(--dim);font-size:12px;margin-top:6px">
+      The harness layer is doing real work. The question is <b>who owns it</b> and whether the model underneath is interchangeable.
+    </p>
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
@@ -233,13 +267,49 @@ td.num{color:var(--yellow);font-family:var(--font)}
 
     <div class="sep">────────────────────────────────────────────────────────────────</div>
 
+    <!-- The category is plural -->
+    <h2>The category is plural — peers worth comparing</h2>
+    <p style="font-size:13px">
+      altcode is not alone in the open-multi-provider quadrant. Evaluate two or three together before standardising:
+    </p>
+    <p style="font-size:12px;color:var(--dim);line-height:1.7">
+      <span style="color:var(--cyan)">●</span> <a href="https://github.com/Aider-AI/aider">Aider</a> — longest-running open-source coding-agent CLI, extremely good for git-aware single-repo edits.<br>
+      <span style="color:var(--cyan)">●</span> <a href="https://github.com/All-Hands-AI/OpenHands">OpenHands</a> — closest spiritual peer, more ambitious in scope, currently less focused on terminal ergonomics.<br>
+      <span style="color:var(--cyan)">●</span> <a href="https://github.com/openai/codex">Codex CLI</a> — OpenAI's first-party harness, polished but provider-locked.<br>
+      <span style="color:var(--cyan)">●</span> Continue, Aichat, OpenCode — adjacent slices of the surface.
+    </p>
+    <p style="color:var(--dim);font-size:11px;margin-top:8px">
+      altcode's distinctive choices: a single statically-linked Go binary, the four-role daemon for self-hosting, deliberate parity with Claude Code's user-facing surface.
+    </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
+    <!-- Verdict -->
+    <h2>The verdict</h2>
+    <p style="font-size:13px">
+      The case for altcode is <b>not</b> that it beats Claude Code on Claude. The case is that the coding-harness category should not stay a vendor privilege.
+    </p>
+    <p style="font-size:13px">
+      For a team standardised on Claude and comfortable paying Anthropic, <b style="color:var(--cyan)">Claude Code remains the right tool</b>. For a team that wants to keep its model choice open — for cost, sovereignty, on-prem inference, or simple optionality — <b style="color:var(--green)">altcode is one publicly developed answer that doesn't require rebuilding the harness in-house</b>.
+    </p>
+    <p style="border-left:3px solid var(--cyan);padding:6px 0 6px 16px;margin:18px 0;font-size:14px;color:var(--fg);font-style:italic">
+      In 2026 the buyer has real model choice for the first time.<br>
+      That changes which tooling layer matters most.
+    </p>
+
+    <div class="sep">────────────────────────────────────────────────────────────────</div>
+
     <!-- Links -->
     <h2>Links</h2>
     <p style="font-size:13px">
       <a href="https://github.com/jiayaoqijia/altcode">GitHub</a> ·
       <a href="https://github.com/jiayaoqijia/altcode/releases">Releases</a> ·
-      <a href="https://github.com/jiayaoqijia/altcode/blob/main/README.md">Docs</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/blob/main/README.md">README</a> ·
+      <a href="https://github.com/jiayaoqijia/altcode/blob/main/docs/README.full.md">Full docs</a> ·
       <a href="https://github.com/jiayaoqijia/altcode/blob/main/LICENSE">License</a>
+    </p>
+    <p style="font-size:12px;color:var(--dim);margin-top:8px">
+      Long-form positioning piece: <b>"Why DeepSeek and GPT need AltCode to beat Claude Code"</b> (April 2026, 11 sections, ~3000 words).
     </p>
 
     <div style="margin-top:12px">
