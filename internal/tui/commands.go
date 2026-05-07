@@ -1014,24 +1014,49 @@ func (a *App) builtinDiffText() string {
 		strings.TrimSpace(untracked) == "" {
 		return "No changes against HEAD."
 	}
+
+	// Header: working-tree summary at the top so users can see what
+	// /diff is reporting before the file list scrolls past. Both
+	// dual-reviewer tests flagged the missing header as a daily-use
+	// papercut.
+	stagedCount := nonEmptyLines(staged)
+	trackedCount := nonEmptyLines(tracked)
+	untrackedCount := nonEmptyLines(untracked)
+	totalFiles := stagedCount + trackedCount + untrackedCount
+	branch := strings.TrimSpace(a.gitBranch)
+	if branch == "" {
+		branch = "(detached)"
+	}
+	fmt.Fprintf(&sb, "# Working tree (%s) — %d files: %d staged, %d unstaged, %d untracked\n\n",
+		branch, totalFiles, stagedCount, trackedCount, untrackedCount)
+
 	if strings.TrimSpace(staged) != "" {
-		sb.WriteString("# Staged\n")
+		sb.WriteString("## Staged\n")
 		sb.WriteString(staged)
 		sb.WriteByte('\n')
 	}
 	if strings.TrimSpace(tracked) != "" {
-		sb.WriteString("# Unstaged\n")
+		sb.WriteString("## Unstaged\n")
 		sb.WriteString(tracked)
 		sb.WriteByte('\n')
 	}
 	if strings.TrimSpace(untracked) != "" {
-		sb.WriteString("# Untracked\n")
-		for _, line := range strings.Split(strings.TrimSpace(untracked), "\n") {
+		sb.WriteString("## Untracked\n")
+		// Cap untracked list at 30 lines — long lists were burying the
+		// staged/unstaged hunks below. Show the count above for context.
+		lines := strings.Split(strings.TrimSpace(untracked), "\n")
+		max := 30
+		for i, line := range lines {
+			if i >= max {
+				fmt.Fprintf(&sb, "  … +%d more (use `git ls-files --others --exclude-standard` for the full list)\n",
+					len(lines)-max)
+				break
+			}
 			fmt.Fprintf(&sb, "  %s\n", line)
 		}
 	}
 	if strings.TrimSpace(hunks) != "" {
-		sb.WriteString("\n")
+		sb.WriteString("\n## Hunks\n")
 		// Cap hunks to ~120 lines to avoid flooding the viewport.
 		lines := strings.Split(hunks, "\n")
 		if len(lines) > 120 {
@@ -1042,6 +1067,18 @@ func (a *App) builtinDiffText() string {
 		sb.WriteString(strings.Join(lines, "\n"))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+// nonEmptyLines counts the non-blank lines in a multi-line string.
+// Used for the /diff header counts of staged/unstaged/untracked files.
+func nonEmptyLines(s string) int {
+	n := 0
+	for _, line := range strings.Split(strings.TrimSpace(s), "\n") {
+		if strings.TrimSpace(line) != "" {
+			n++
+		}
+	}
+	return n
 }
 
 // builtinDiffJournalFallback degrades to the previous behaviour when
