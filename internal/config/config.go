@@ -6,6 +6,7 @@ import (
 	"os"
 	"regexp"
 	"strings"
+	"sync"
 )
 
 const DefaultModel = "anthropic/claude-sonnet-4-20250514"
@@ -128,11 +129,30 @@ func LoadFile(path string) (*Config, error) {
 	return cfg, nil
 }
 
+// expandEnvRE matches both uppercase and lowercase env var names. POSIX
+// convention uses uppercase, but plenty of users have lowercase vars
+// for one-off keys (e.g. `$openai_key`) and the previous uppercase-only
+// regex silently dropped them with no warning.
+var expandEnvRE = regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
+
+// expandEnvWarned tracks which env-var names we've already warned about
+// across the entire process startup. Without this, every config file
+// that references the same unset variable produces a duplicate
+// warning — typical altcode startup loads ~/.altcode/config.json AND
+// $PWD/.altcode/config.json AND any legacy paths, so a single missing
+// $OPENROUTER warns 2-3 times. The map is process-global, mutex-
+// protected because parallel subagent spawning can cross-call
+// LoadFile concurrently.
+var (
+	expandEnvWarnedMu sync.Mutex
+	expandEnvWarned   = map[string]bool{}
+)
+
 // ExpandEnv replaces $VAR_NAME patterns with values from the environment.
-// Unset variables warn to stderr (because the alternative is silently
-// turning required-but-templated fields like API keys into empty
-// strings, then loading 'successfully' with broken auth) and still
-// expand to "" so the JSON remains valid.
+// Unset variables warn to stderr ONCE per process (because the
+// alternative is silently turning required-but-templated fields like
+// API keys into empty strings, then loading 'successfully' with
+// broken auth) and still expand to "" so the JSON remains valid.
 //
 // Substituted values are JSON-escaped before insertion. Without
 // escaping, an env var containing `"` or `\` (legitimate password
@@ -140,25 +160,34 @@ func LoadFile(path string) (*Config, error) {
 // would fail with a confusing parse error far from the offending
 // variable. The substitution happens on raw JSON source, so the
 // inserted string must be safe for the surrounding `"..."` context.
-//
-// Matches BOTH uppercase and lowercase env var names. Posix
-// convention uses uppercase, but plenty of users have lowercase
-// vars for one-off keys (e.g. `$openai_key`) and the previous
-// uppercase-only regex silently dropped them with no warning.
 func ExpandEnv(s string) string {
-	re := regexp.MustCompile(`\$([A-Za-z_][A-Za-z0-9_]*)`)
-	warned := map[string]bool{}
-	return re.ReplaceAllStringFunc(s, func(match string) string {
+	return expandEnvRE.ReplaceAllStringFunc(s, func(match string) string {
 		name := match[1:] // strip leading '$'
 		if val, ok := os.LookupEnv(name); ok {
 			return jsonStringContent(val)
 		}
-		if !warned[name] {
-			fmt.Fprintf(os.Stderr, "altcode: env var $%s referenced in config but not set; expanding to empty\n", name)
-			warned[name] = true
+		expandEnvWarnedMu.Lock()
+		first := !expandEnvWarned[name]
+		expandEnvWarned[name] = true
+		expandEnvWarnedMu.Unlock()
+		if first {
+			fmt.Fprintf(os.Stderr,
+				"altcode: $%s not set — leaving config field empty. "+
+					"Set the env var (e.g. `export %s=...`) or replace "+
+					"\"$%s\" with a literal value in your altcode config.\n",
+				name, name, name)
 		}
 		return ""
 	})
+}
+
+// resetExpandEnvWarnedForTest clears the package-level dedup map so
+// tests that exercise the warning path don't pollute each other.
+// Not exported — tests in this package call it directly.
+func resetExpandEnvWarnedForTest() {
+	expandEnvWarnedMu.Lock()
+	expandEnvWarned = map[string]bool{}
+	expandEnvWarnedMu.Unlock()
 }
 
 // jsonStringContent returns s ready to be embedded inside a JSON

@@ -1,8 +1,10 @@
 package config
 
 import (
+	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -87,6 +89,61 @@ func TestEnvVarExpansion(t *testing.T) {
 	result := ExpandEnv("value=$UNSET_VAR_XYZ end")
 	if result != "value= end" {
 		t.Errorf("unset var: got %q, want %q", result, "value= end")
+	}
+}
+
+// TestExpandEnvWarningDeduplicatedAcrossCalls covers the round-6 fix:
+// two separate config files referencing the same unset env var must
+// only emit one stderr warning total — typical altcode startup loads
+// ~/.altcode/config.json + $PWD/.altcode/config.json + legacy paths,
+// and a single missing var firing 2-3 duplicate warnings was real
+// noise in the user-reported case.
+func TestExpandEnvWarningDeduplicatedAcrossCalls(t *testing.T) {
+	resetExpandEnvWarnedForTest()
+	t.Cleanup(resetExpandEnvWarnedForTest)
+
+	const varName = "TEST_DEDUP_VAR_XYZ"
+	os.Unsetenv(varName)
+
+	// Capture stderr for the duration of the test. The warning path
+	// uses fmt.Fprintf(os.Stderr, ...) directly, so we redirect at the
+	// fd level via a pipe.
+	origStderr := os.Stderr
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stderr = w
+	defer func() { os.Stderr = origStderr }()
+
+	// Three separate ExpandEnv calls (mimicking three config files) on
+	// the SAME unset variable. Pre-fix: 3 warnings. Post-fix: 1.
+	_ = ExpandEnv("a=$" + varName)
+	_ = ExpandEnv("b=$" + varName)
+	_ = ExpandEnv("c=$" + varName)
+
+	w.Close()
+	os.Stderr = origStderr
+
+	captured, _ := io.ReadAll(r)
+	count := strings.Count(string(captured), "$"+varName+" not set")
+	if count != 1 {
+		t.Errorf("expected exactly 1 warning across 3 calls, got %d:\n%s",
+			count, string(captured))
+	}
+
+	// Different unset var should still produce its own warning. The
+	// dedup is per-name, not global.
+	const otherVar = "TEST_DEDUP_OTHER_XYZ"
+	os.Unsetenv(otherVar)
+	r2, w2, _ := os.Pipe()
+	os.Stderr = w2
+	_ = ExpandEnv("x=$" + otherVar)
+	w2.Close()
+	os.Stderr = origStderr
+	captured2, _ := io.ReadAll(r2)
+	if !strings.Contains(string(captured2), "$"+otherVar+" not set") {
+		t.Errorf("second var should still warn; stderr was: %q", string(captured2))
 	}
 }
 
