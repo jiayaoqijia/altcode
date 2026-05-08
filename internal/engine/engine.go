@@ -1347,12 +1347,28 @@ func (e *Engine) checkPermission(t tool.Tool, tc collectedToolCall) permission.A
 
 func (e *Engine) askPermission(ctx context.Context, tc collectedToolCall, out chan<- event.Event) tool.Result {
 	respCh := make(chan event.PermResponse, 1)
+
+	// Build the modal-display pattern from the tool's own
+	// PermissionPattern (e.g. "edit:/etc/passwd") instead of the raw
+	// JSON input. The raw form was a 200-char blob containing
+	// old_string + new_string fields that truncated mid-JSON in the
+	// modal and made "Allow always for this pattern" useless because
+	// the content always differed across retries (round-6 finding).
+	// Falls back to "tool:input" if the registry can't resolve the
+	// tool — preserves the old behaviour as a safety net.
+	pattern := tc.Name + ":" + string(tc.Input)
+	if t, ok := e.tools.Get(tc.Name); ok {
+		if compact := t.PermissionPattern(tc.Input); compact != "" {
+			pattern = compact
+		}
+	}
+
 	select {
 	case out <- event.Event{
 		Type: event.PermissionRequest,
 		Permission: &event.PermReq{
 			ToolName: tc.Name,
-			Pattern:  tc.Name + ":" + string(tc.Input),
+			Pattern:  pattern,
 			Response: respCh,
 		},
 	}:
