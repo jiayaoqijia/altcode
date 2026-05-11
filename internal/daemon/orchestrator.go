@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"strings"
+	"time"
 )
 
 // taskBudget is a lightweight per-task budget tracker. Constructed
@@ -242,12 +243,12 @@ func (o *Orchestrator) RunTask(ctx context.Context, task *Task, steerCh <-chan s
 				Args: []string{
 					"--model", implModel,
 					"--permission-mode", "auto",
-				"--allow-tool", "Read",
-				"--allow-tool", "Write",
-				"--allow-tool", "Edit",
-				"--allow-tool", "Bash",
-				"--allow-tool", "Glob",
-				"--allow-tool", "Grep",
+					"--allow-tool", "Read",
+					"--allow-tool", "Write",
+					"--allow-tool", "Edit",
+					"--allow-tool", "Bash",
+					"--allow-tool", "Glob",
+					"--allow-tool", "Grep",
 					step.Prompt,
 				},
 				Dir:  o.cfg.WorkDir,
@@ -398,7 +399,6 @@ func (o *Orchestrator) emitCost(taskID, phase, output string, budget *taskBudget
 	return nil
 }
 
-
 // taskEnv returns environment variables to inject into every agent
 // spawn for the given task. Always includes ALTFIX_REPO_URL.
 func (o *Orchestrator) taskEnv(task *Task) []string {
@@ -416,14 +416,31 @@ func (o *Orchestrator) drainSteer(ch <-chan string) string {
 		return ""
 	}
 	var msgs []string
+	timer := time.NewTimer(25 * time.Millisecond)
+	select {
+	case msg, ok := <-ch:
+		if !ok {
+			timer.Stop()
+			return ""
+		}
+		msgs = append(msgs, msg)
+	case <-timer.C:
+		return ""
+	}
+	if !timer.Stop() {
+		select {
+		case <-timer.C:
+		default:
+		}
+	}
 	for {
 		select {
-		case msg := <-ch:
+		case msg, ok := <-ch:
+			if !ok {
+				return "User guidance: " + strings.Join(msgs, "; ")
+			}
 			msgs = append(msgs, msg)
 		default:
-			if len(msgs) == 0 {
-				return ""
-			}
 			return "User guidance: " + strings.Join(msgs, "; ")
 		}
 	}

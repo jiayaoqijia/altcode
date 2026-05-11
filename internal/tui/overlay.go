@@ -142,6 +142,7 @@ func (a *App) switchToSession(sessionID string) {
 		Hooks:        a.engine.HooksRunner(),
 		Instructions: a.engine.Instructions(),
 		Memory:       a.engine.MemoryStore(),
+		ProjectRoot:  a.projectRoot,
 	})
 	if err != nil {
 		a.appendInfo(fmt.Sprintf("[error] switching session: %v", err))

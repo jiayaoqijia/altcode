@@ -54,6 +54,7 @@ type EngineParams struct {
 	Skills       []Skill               // discovered slash commands/skills
 	TokenBudget  *TokenBudget          // nil = unlimited (session-wide cap)
 	CostBudget   *CostBudget           // nil = unlimited USD cap
+	ProjectRoot  string                // scopes read-only file tools
 
 	// MaxTurns overrides the default per-run agent-loop cap
 	// (internal `maxIterations = 50`). 0 means "use default".
@@ -174,17 +175,18 @@ func (b *TokenBudget) Limit() int {
 
 // Engine orchestrates conversation turns between the user and an AI provider.
 type Engine struct {
-	cfg          *config.Config
-	provider     provider.Provider
-	tools        *tool.Registry
-	perm         *permission.Evaluator
-	hooks        *hooks.Runner
-	mem          *memory.Store
-	store        *store.DB
-	sandbox      *sandbox.Sandbox
-	taskQueue    *task.Queue
-	sessionID    string
-	model        string
+	cfg         *config.Config
+	provider    provider.Provider
+	tools       *tool.Registry
+	perm        *permission.Evaluator
+	hooks       *hooks.Runner
+	mem         *memory.Store
+	store       *store.DB
+	sandbox     *sandbox.Sandbox
+	projectRoot string
+	taskQueue   *task.Queue
+	sessionID   string
+	model       string
 	// msgMu serializes reads and writes to `messages`. Without it,
 	// the streaming loop appending to `messages` raced with /clear,
 	// /compact, and /rollback mutating the same slice — go test
@@ -213,13 +215,13 @@ type Engine struct {
 	anchors map[string]string
 	// maxTurns overrides the default agent-loop iteration cap.
 	// 0 = use the package-level maxIterations constant.
-	maxTurns          int
-	totalTokens       int // running token count
-	cost               *cost.Tracker
-	journal            *history.Journal
+	maxTurns            int
+	totalTokens         int // running token count
+	cost                *cost.Tracker
+	journal             *history.Journal
 	tokenBudget         *TokenBudget
-	cachedContextWindow int // cached from /v1/models API, 0 = not fetched
-	compactCount        int // consecutive compactions (thrash detection)
+	cachedContextWindow int  // cached from /v1/models API, 0 = not fetched
+	compactCount        int  // consecutive compactions (thrash detection)
 	titleSet            bool // true once the session title has been backfilled
 }
 
@@ -234,10 +236,10 @@ func New(params EngineParams) (*Engine, error) {
 	}
 
 	registry := tool.NewRegistry()
-	registry.Register(tool.NewReadTool())
-	registry.Register(tool.NewGlobTool())
-	registry.Register(tool.NewGrepTool())
-	registry.Register(tool.NewLsTool())
+	registry.Register(tool.NewReadTool(params.ProjectRoot))
+	registry.Register(tool.NewGlobTool(params.ProjectRoot))
+	registry.Register(tool.NewGrepTool(params.ProjectRoot))
+	registry.Register(tool.NewLsTool(params.ProjectRoot))
 	if params.Sandbox != nil {
 		registry.Register(tool.NewBashToolWithSandbox(params.Sandbox))
 	} else {
@@ -283,6 +285,7 @@ func New(params EngineParams) (*Engine, error) {
 		mem:               params.Memory,
 		store:             params.Store,
 		sandbox:           params.Sandbox,
+		projectRoot:       params.ProjectRoot,
 		taskQueue:         tq,
 		sessionID:         params.SessionID,
 		model:             modelName,
@@ -317,6 +320,22 @@ func (e *Engine) Sandbox() *sandbox.Sandbox {
 // TaskQueue returns the engine's task queue.
 func (e *Engine) TaskQueue() *task.Queue {
 	return e.taskQueue
+}
+
+// ProjectRoot returns the root used to scope read-only file tools.
+func (e *Engine) ProjectRoot() string { return e.projectRoot }
+
+// SetProjectRoot re-scopes read-only file tools while preserving conversation
+// state. It is used when a PR review moves into a dedicated checkout.
+func (e *Engine) SetProjectRoot(root string) {
+	e.msgMu.Lock()
+	e.projectRoot = root
+	e.msgMu.Unlock()
+
+	e.tools.Register(tool.NewReadTool(root))
+	e.tools.Register(tool.NewGlobTool(root))
+	e.tools.Register(tool.NewGrepTool(root))
+	e.tools.Register(tool.NewLsTool(root))
 }
 
 // Run sends user input to the provider and returns a channel of events.
@@ -803,6 +822,7 @@ func NewWithRegistry(params EngineParams, registry *tool.Registry) (*Engine, err
 		hooks:             hooksRunner,
 		mem:               params.Memory,
 		store:             params.Store,
+		projectRoot:       params.ProjectRoot,
 		sessionID:         params.SessionID,
 		model:             modelName,
 		messages:          msgs,

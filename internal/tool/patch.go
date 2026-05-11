@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 )
 
 type patchTool struct{}
@@ -51,6 +52,13 @@ func (t *patchTool) Execute(ctx context.Context, input json.RawMessage) (*Result
 			Error:  fmt.Errorf("patch is required"),
 		}, nil
 	}
+	if err := validatePatch(params.Patch); err != nil {
+		return &Result{
+			Output: fmt.Sprintf("Error parsing patch: %v", err),
+			Title:  "apply_patch",
+			Error:  fmt.Errorf("parse patch: %w", err),
+		}, nil
+	}
 
 	// Try system patch command first
 	if result := trySystemPatch(ctx, params.Patch); result != nil {
@@ -72,7 +80,10 @@ func trySystemPatch(ctx context.Context, patch string) *Result {
 		return nil // not available, use fallback
 	}
 
-	cmd := exec.CommandContext(ctx, patchBin, "-p1", "--no-backup-if-mismatch")
+	patchCtx, cancel := patchCommandContext(ctx)
+	defer cancel()
+
+	cmd := exec.CommandContext(patchCtx, patchBin, "-p1", "--batch", "--no-backup-if-mismatch")
 	cmd.Stdin = strings.NewReader(patch)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
@@ -90,6 +101,20 @@ func trySystemPatch(ctx context.Context, patch string) *Result {
 		Output: "Patch applied successfully.\n" + output,
 		Title:  "apply_patch",
 	}
+}
+
+const patchToolSystemTimeout = 30 * time.Second
+
+func patchCommandContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, patchToolSystemTimeout)
+}
+
+func validatePatch(patch string) error {
+	_, err := parsePatch(patch)
+	return err
 }
 
 func applyPatchManual(patch string) (*Result, error) {
@@ -246,26 +271,43 @@ func parseHunkHeader(line string) (*hunk, error) {
 	}
 
 	h := &hunk{}
-	old := strings.TrimPrefix(parts[0], "-")
-	neu := strings.TrimPrefix(parts[1], "+")
-
-	oldParts := strings.SplitN(old, ",", 2)
-	h.OldStart, _ = strconv.Atoi(oldParts[0])
-	if len(oldParts) > 1 {
-		h.OldCount, _ = strconv.Atoi(oldParts[1])
-	} else {
-		h.OldCount = 1
+	var err error
+	h.OldStart, h.OldCount, err = parseHunkRange(parts[0], '-')
+	if err != nil {
+		return nil, fmt.Errorf("old range: %w", err)
 	}
-
-	newParts := strings.SplitN(neu, ",", 2)
-	h.NewStart, _ = strconv.Atoi(newParts[0])
-	if len(newParts) > 1 {
-		h.NewCount, _ = strconv.Atoi(newParts[1])
-	} else {
-		h.NewCount = 1
+	h.NewStart, h.NewCount, err = parseHunkRange(parts[1], '+')
+	if err != nil {
+		return nil, fmt.Errorf("new range: %w", err)
 	}
 
 	return h, nil
+}
+
+func parseHunkRange(part string, prefix byte) (int, int, error) {
+	if part == "" || part[0] != prefix {
+		return 0, 0, fmt.Errorf("missing %c prefix in %q", prefix, part)
+	}
+	body := part[1:]
+	if body == "" {
+		return 0, 0, fmt.Errorf("missing start in %q", part)
+	}
+	pieces := strings.SplitN(body, ",", 2)
+	start, err := strconv.Atoi(pieces[0])
+	if err != nil {
+		return 0, 0, fmt.Errorf("invalid start %q", pieces[0])
+	}
+	count := 1
+	if len(pieces) > 1 {
+		count, err = strconv.Atoi(pieces[1])
+		if err != nil {
+			return 0, 0, fmt.Errorf("invalid count %q", pieces[1])
+		}
+	}
+	if start < 0 || count < 0 {
+		return 0, 0, fmt.Errorf("negative range in %q", part)
+	}
+	return start, count, nil
 }
 
 func applyFilePatch(pf patchFile) error {

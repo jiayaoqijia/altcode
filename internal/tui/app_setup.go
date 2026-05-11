@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/jiayaoqijia/altcode/internal/auth"
 	"github.com/jiayaoqijia/altcode/internal/engine"
-	"github.com/charmbracelet/lipgloss"
 )
 
 func (a *App) startRecommendedSetup() {
@@ -97,7 +97,8 @@ func (a *App) refreshEngine() error {
 	}
 	// Re-create the engine with the updated config to pick up new API keys.
 	refreshed, err := engine.New(engine.EngineParams{
-		Config: a.engine.Config(),
+		Config:      a.engine.Config(),
+		ProjectRoot: a.projectRoot,
 	})
 	if err != nil {
 		return err

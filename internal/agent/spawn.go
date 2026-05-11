@@ -95,6 +95,7 @@ func SpawnWithOptions(
 		Config:       &childCfg,
 		Instructions: instructions,
 		Messages:     messages,
+		ProjectRoot:  parent.ProjectRoot(),
 		TokenBudget:  parent.TokenBudget(),
 		// Phase 8: share the parent's USD budget with the child
 		// engine so subagent turns count toward --max-cost. Without
@@ -159,4 +160,3 @@ func resolveModel(cfg *config.Config, model string) {
 		cfg.Model = model
 	}
 }
-

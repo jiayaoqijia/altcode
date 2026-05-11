@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -1204,6 +1205,42 @@ func TestEngine_Accessors(t *testing.T) {
 	}
 }
 
+func TestEngine_SetProjectRootRescopesReadTools(t *testing.T) {
+	srv := mockAnthropicServer(t, []string{textOnlySSE("ok")})
+	defer srv.Close()
+
+	rootA := t.TempDir()
+	rootB := t.TempDir()
+	if err := os.WriteFile(filepath.Join(rootA, "README.md"), []byte("root A\n"), 0o644); err != nil {
+		t.Fatalf("write rootA: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(rootB, "README.md"), []byte("root B\n"), 0o644); err != nil {
+		t.Fatalf("write rootB: %v", err)
+	}
+
+	eng, err := engine.New(engine.EngineParams{
+		Config:      cfgWithServer(srv),
+		ProjectRoot: rootA,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	eng.SetProjectRoot(rootB)
+
+	readTool, ok := eng.Registry().Get("read")
+	if !ok {
+		t.Fatal("read tool missing")
+	}
+	input, _ := json.Marshal(map[string]any{"file_path": "README.md"})
+	result, err := readTool.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("read Execute: %v", err)
+	}
+	if !strings.Contains(result.Output, "root B") || strings.Contains(result.Output, "root A") {
+		t.Fatalf("read tool was not re-scoped to new project root:\n%s", result.Output)
+	}
+}
+
 // =============================================================================
 // TRUNCATION AUTO-CONTINUE
 // =============================================================================
@@ -1321,4 +1358,3 @@ func TestEngine_WithMemory(t *testing.T) {
 		t.Error("MemoryStore accessor should return the store")
 	}
 }
-

@@ -243,6 +243,26 @@ func TestSteerNilChannel(t *testing.T) {
 	}
 }
 
+func TestDrainSteerWaitsBrieflyForPostPlanGuidance(t *testing.T) {
+	store, err := NewStore(":memory:")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	orch := NewOrchestrator(store, OrchestratorConfig{})
+	steerCh := make(chan string, 1)
+	go func() {
+		time.Sleep(5 * time.Millisecond)
+		steerCh <- "focus on tests"
+	}()
+
+	got := orch.drainSteer(steerCh)
+	if !strings.Contains(got, "focus on tests") {
+		t.Fatalf("drainSteer missed near-boundary steer message: %q", got)
+	}
+}
+
 func TestSteerMultipleMessages(t *testing.T) {
 	store, err := NewStore(":memory:")
 	if err != nil {

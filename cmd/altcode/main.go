@@ -46,11 +46,12 @@ var (
 )
 
 // versionString produces a multi-line --version output:
-//   altcode v0.10.1
-//   commit:    abc1234
-//   built:     2026-05-07T10:00:00Z
-//   go:        go1.26.0
-//   platform:  linux/amd64
+//
+//	altcode v0.10.1
+//	commit:    abc1234
+//	built:     2026-05-07T10:00:00Z
+//	go:        go1.26.0
+//	platform:  linux/amd64
 func versionString() string {
 	commit := BuildCommit
 	// Fall back to debug.ReadBuildInfo for `go install` paths that
@@ -665,6 +666,7 @@ func run(cfg *config.Config, prompt string, flags cliFlags) error {
 		Hooks:        hooksRunner,
 		Skills:       skills,
 		Perm:         permEval,
+		ProjectRoot:  projectRoot,
 	}
 	// Phase 4: --fork-session copies messages from an existing
 	// session into a new one, then runs the new session. Takes
@@ -1234,6 +1236,7 @@ func runWorkflow(cfg *config.Config, prompt, modeFlag string, maxIter int) error
 		Memory:       memStore,
 		Hooks:        hooksRunner,
 		Skills:       skills,
+		ProjectRoot:  projectRoot,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
@@ -1265,7 +1268,9 @@ func runTeam(cfg *config.Config, prompt string) error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
 
-	session := orchestrator.NewSessionFromConfig(cfg.Team, cfg)
+	wd, _ := os.Getwd()
+	projectRoot := config.DetectProjectRoot(wd)
+	session := orchestrator.NewSessionFromConfig(cfg.Team, cfg, projectRoot)
 	fmt.Printf("Running team '%s' with %d models...\n\n", teamName(cfg.Team), len(cfg.Team.Models))
 
 	// Phase 1: parallel execution

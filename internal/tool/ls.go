@@ -8,12 +8,16 @@ import (
 	"strings"
 )
 
-type lsTool struct{}
+type lsTool struct {
+	paths pathPolicy
+}
 
 // NewLsTool creates a tool that lists directory contents.
-func NewLsTool() Tool { return &lsTool{} }
+func NewLsTool(root ...string) Tool {
+	return &lsTool{paths: newPathPolicy(firstRoot(root))}
+}
 
-func (t *lsTool) Name() string                               { return "ls" }
+func (t *lsTool) Name() string { return "ls" }
 func (t *lsTool) Description() string {
 	return "List directory contents with file sizes and types. Use to understand project structure before diving into specific files."
 }
@@ -27,7 +31,7 @@ func (t *lsTool) Parameters() json.RawMessage {
 		"properties": {
 			"path": {"type": "string", "description": "Directory path to list"}
 		},
-		"required": ["path"]
+		"required": []
 	}`)
 }
 
@@ -39,7 +43,17 @@ func (t *lsTool) Execute(_ context.Context, input json.RawMessage) (*Result, err
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
-	entries, err := os.ReadDir(params.Path)
+	cwd, _ := os.Getwd()
+	path, err := t.paths.resolve(params.Path, cwd)
+	if err != nil {
+		return &Result{
+			Output: fmt.Sprintf("Error: %v", err),
+			Title:  "ls",
+			Error:  err,
+		}, nil
+	}
+
+	entries, err := os.ReadDir(path)
 	if err != nil {
 		return &Result{
 			Output: fmt.Sprintf("Error: %v", err),
@@ -63,6 +77,6 @@ func (t *lsTool) Execute(_ context.Context, input json.RawMessage) (*Result, err
 
 	return &Result{
 		Output: sb.String(),
-		Title:  fmt.Sprintf("ls %s (%d entries)", params.Path, len(entries)),
+		Title:  fmt.Sprintf("ls %s (%d entries)", t.paths.display(path), len(entries)),
 	}, nil
 }

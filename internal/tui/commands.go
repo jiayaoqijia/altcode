@@ -239,6 +239,18 @@ func (a *App) handleBuiltinCommand(text string) (bool, tea.Cmd) {
 		// `/review` equivalent runs review logic; altcode's prior
 		// implementation only printed the suggested prompt — round-S
 		// adversarial finding closed it by actually submitting.
+		if len(parts) >= 2 {
+			if _, ok := parsePRReference(parts[1]); ok {
+				prompt, info, err := a.preparePRReviewPrompt(parts[1])
+				if err != nil {
+					a.appendInfo(fmt.Sprintf("[review] %v", err))
+					return true, nil
+				}
+				a.appendInfo(info)
+				a.input.SetValue(prompt)
+				return true, a.submit()
+			}
+		}
 		scope := "the current diff"
 		if len(parts) >= 2 {
 			scope = strings.Join(parts[1:], " ")
@@ -1854,9 +1866,9 @@ func (a *App) builtinSendText(parts []string) string {
 // builtinAnchorText sets / lists / clears anchored facts that survive
 // compaction. DeepSeek-TUI #anchor parity.
 //
-//   /anchor                    list current anchors
-//   /anchor key value...       set an anchor
-//   /anchor key                clear that anchor (no value supplied)
+//	/anchor                    list current anchors
+//	/anchor key value...       set an anchor
+//	/anchor key                clear that anchor (no value supplied)
 func (a *App) builtinAnchorText(parts []string) string {
 	if a.engine == nil {
 		return "[anchor] engine not initialised"
@@ -1887,9 +1899,9 @@ func (a *App) builtinAnchorText(parts []string) string {
 // builtinQueueText inspects/edits/clears the type-ahead prompt queue.
 // DeepSeek-TUI parity for `/queue list|clear|drop <n>`.
 //
-//   /queue                    list queued prompts (1-indexed)
-//   /queue clear              drop all queued prompts
-//   /queue drop <n>           drop the n-th queued prompt
+//	/queue                    list queued prompts (1-indexed)
+//	/queue clear              drop all queued prompts
+//	/queue drop <n>           drop the n-th queued prompt
 func (a *App) builtinQueueText(parts []string) string {
 	if len(parts) < 2 || parts[1] == "list" {
 		if len(a.queue) == 0 {
@@ -2043,8 +2055,9 @@ func (a *App) builtinRenameText(parts []string) string {
 // without picking a third-party host on the user's behalf.
 //
 // Optional second arg overrides the output path:
-//   /share                    → ~/.altcode/shares/<ts>-<slug>.md
-//   /share /tmp/transcript.md → /tmp/transcript.md
+//
+//	/share                    → ~/.altcode/shares/<ts>-<slug>.md
+//	/share /tmp/transcript.md → /tmp/transcript.md
 func (a *App) builtinShareText(parts []string) string {
 	count := 0
 	for _, m := range a.messages {
@@ -2087,11 +2100,12 @@ func (a *App) builtinShareText(parts []string) string {
 
 // buildSessionMarkdown serialises the visible conversation as a
 // portable markdown document. Roles map to:
-//   roleUser      → '## User' header
-//   roleAssistant → '## Assistant (model · duration)' header
-//   roleInfo      → block-quoted '> [info] ...' line (one per message)
-//   roleThinking  → fenced ```thinking block (collapsible in many viewers)
-//   roleTool      → fenced ```tool block
+//
+//	roleUser      → '## User' header
+//	roleAssistant → '## Assistant (model · duration)' header
+//	roleInfo      → block-quoted '> [info] ...' line (one per message)
+//	roleThinking  → fenced ```thinking block (collapsible in many viewers)
+//	roleTool      → fenced ```tool block
 //
 // Tool-tree info messages with embedded ANSI / lipgloss styling get
 // stripped to plain text via stripANSI so the markdown stays readable.

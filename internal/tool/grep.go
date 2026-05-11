@@ -4,16 +4,21 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
 
-type grepTool struct{}
+type grepTool struct {
+	paths pathPolicy
+}
 
 // NewGrepTool creates a tool that searches file contents using ripgrep or grep.
-func NewGrepTool() Tool { return &grepTool{} }
+func NewGrepTool(root ...string) Tool {
+	return &grepTool{paths: newPathPolicy(firstRoot(root))}
+}
 
-func (t *grepTool) Name() string                               { return "grep" }
+func (t *grepTool) Name() string { return "grep" }
 func (t *grepTool) Description() string {
 	return "Search file contents using regex patterns. Use this instead of bash grep — it's faster and provides better output. Results capped at 200 lines."
 }
@@ -45,9 +50,14 @@ func (t *grepTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
-	searchPath := params.Path
-	if searchPath == "" {
-		searchPath = "."
+	cwd, _ := os.Getwd()
+	searchPath, err := t.paths.resolve(params.Path, cwd)
+	if err != nil {
+		return &Result{
+			Output: fmt.Sprintf("Error: %v", err),
+			Title:  "grep " + params.Pattern,
+			Error:  err,
+		}, nil
 	}
 
 	bin, args := buildGrepArgs(params.Pattern, searchPath, params.Glob, params.CaseInsensitive)
@@ -103,6 +113,7 @@ func buildGrepArgs(pattern, path, glob string, caseInsensitive bool) (string, []
 		if glob != "" {
 			args = append(args, "--glob", glob)
 		}
+		args = append(args, grepExcludeDirArgs()...)
 		args = append(args, pattern, path)
 		return "rg", args
 	}
@@ -110,6 +121,13 @@ func buildGrepArgs(pattern, path, glob string, caseInsensitive bool) (string, []
 	args := []string{"-rn"}
 	if caseInsensitive {
 		args = append(args, "-i")
+	}
+	for _, dir := range []string{
+		".git", "node_modules", "vendor", ".cache",
+		"Library", "Music", "Pictures", "Movies",
+		"Desktop", "Documents", "Downloads", "Photos",
+	} {
+		args = append(args, "--exclude-dir="+dir)
 	}
 	args = append(args, pattern, path)
 	return "grep", args

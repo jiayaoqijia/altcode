@@ -43,10 +43,19 @@ func TestPatchToolEmptyPatch(t *testing.T) {
 	}
 }
 
+func mustReadFile(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("ReadFile(%s): %v", path, err)
+	}
+	return data
+}
+
 func TestPatchToolSimpleEdit(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "test.txt")
-	os.WriteFile(path, []byte("line1\nline2\nline3\n"), 0o644)
+	mustWriteFile(t, path, "line1\nline2\nline3\n")
 
 	patch := strings.Join([]string{
 		"--- a/" + path,
@@ -68,7 +77,7 @@ func TestPatchToolSimpleEdit(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", result.Output)
 	}
 
-	data, _ := os.ReadFile(path)
+	data := mustReadFile(t, path)
 	content := string(data)
 	if !strings.Contains(content, "line2_modified") {
 		t.Fatalf("Expected 'line2_modified', got %q", content)
@@ -81,7 +90,7 @@ func TestPatchToolSimpleEdit(t *testing.T) {
 func TestPatchToolAddLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "add.txt")
-	os.WriteFile(path, []byte("alpha\nbeta\n"), 0o644)
+	mustWriteFile(t, path, "alpha\nbeta\n")
 
 	patch := strings.Join([]string{
 		"--- a/" + path,
@@ -103,7 +112,7 @@ func TestPatchToolAddLines(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", result.Output)
 	}
 
-	data, _ := os.ReadFile(path)
+	data := mustReadFile(t, path)
 	content := string(data)
 	if !strings.Contains(content, "gamma") {
 		t.Fatalf("Expected 'gamma' in output, got %q", content)
@@ -116,7 +125,7 @@ func TestPatchToolAddLines(t *testing.T) {
 func TestPatchToolRemoveLines(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "remove.txt")
-	os.WriteFile(path, []byte("keep\nremove_me\nkeep_too\n"), 0o644)
+	mustWriteFile(t, path, "keep\nremove_me\nkeep_too\n")
 
 	patch := strings.Join([]string{
 		"--- a/" + path,
@@ -137,7 +146,7 @@ func TestPatchToolRemoveLines(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", result.Output)
 	}
 
-	data, _ := os.ReadFile(path)
+	data := mustReadFile(t, path)
 	content := string(data)
 	if strings.Contains(content, "remove_me") {
 		t.Fatalf("Line should be removed, got %q", content)
@@ -195,7 +204,7 @@ func TestPatchToolMultipleHunks(t *testing.T) {
 	for i := range lines {
 		lines[i] = "line" + strings.Repeat("_", i+1)
 	}
-	os.WriteFile(path, []byte(strings.Join(lines, "\n")+"\n"), 0o644)
+	mustWriteFile(t, path, strings.Join(lines, "\n")+"\n")
 
 	patch := strings.Join([]string{
 		"--- a/" + path,
@@ -217,7 +226,7 @@ func TestPatchToolMultipleHunks(t *testing.T) {
 		t.Fatalf("Unexpected error: %s", result.Output)
 	}
 
-	data, _ := os.ReadFile(path)
+	data := mustReadFile(t, path)
 	content := string(data)
 	if !strings.Contains(content, "FIRST") {
 		t.Fatalf("Expected 'FIRST', got %q", content)
@@ -225,10 +234,14 @@ func TestPatchToolMultipleHunks(t *testing.T) {
 }
 
 func TestPatchToolBadHunkHeader(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "bad-header.txt")
+	mustWriteFile(t, path, "line\n")
+
 	pt := tool.NewPatchTool()
 	patch := strings.Join([]string{
-		"--- a/foo.txt",
-		"+++ b/foo.txt",
+		"--- a/" + path,
+		"+++ b/" + path,
 		"@@ bad header @@",
 		"+line",
 	}, "\n")
@@ -238,6 +251,7 @@ func TestPatchToolBadHunkHeader(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Execute: %v", err)
 	}
-	// Should either handle gracefully or report error
-	t.Logf("Result: %s", result.Output)
+	if result.Error == nil {
+		t.Fatalf("expected bad hunk header to fail, got %q", result.Output)
+	}
 }

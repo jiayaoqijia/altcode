@@ -19,18 +19,19 @@ import (
 type Role string
 
 const (
-	RoleArchitect  Role = "architect"
+	RoleArchitect   Role = "architect"
 	RoleImplementer Role = "implementer"
-	RoleReviewer   Role = "reviewer"
-	RoleChallenger Role = "challenger"
-	RoleEvaluator  Role = "evaluator"
+	RoleReviewer    Role = "reviewer"
+	RoleChallenger  Role = "challenger"
+	RoleEvaluator   Role = "evaluator"
 )
 
 // ModelAssignment maps a role to a specific model.
 type ModelAssignment struct {
-	Role   Role
-	Model  string // e.g. "openai/gpt-5.4", "anthropic/claude-haiku-4-5-20251001"
-	Config *config.Config
+	Role        Role
+	Model       string // e.g. "openai/gpt-5.4", "anthropic/claude-haiku-4-5-20251001"
+	Config      *config.Config
+	ProjectRoot string
 }
 
 // Finding is a single observation from a model.
@@ -44,16 +45,17 @@ type Finding struct {
 
 // Verdict is the synthesized result from all models.
 type Verdict struct {
-	Decision    string    // "approve", "iterate", "reject"
-	Findings    []Finding
-	Agreement   float64   // 0-1, how much models agree
-	Summary     string
-	Timestamp   time.Time
+	Decision  string // "approve", "iterate", "reject"
+	Findings  []Finding
+	Agreement float64 // 0-1, how much models agree
+	Summary   string
+	Timestamp time.Time
 }
 
 // Session orchestrates a multi-model conversation.
 type Session struct {
 	assignments []ModelAssignment
+	projectRoot string
 	findings    []Finding
 	mu          sync.Mutex
 }
@@ -65,16 +67,20 @@ func NewSession(assignments []ModelAssignment) *Session {
 
 // NewSessionFromConfig creates a session from user configuration.
 // Resolves provider credentials from the parent config.
-func NewSessionFromConfig(teamCfg *config.TeamConfig, parentCfg *config.Config) *Session {
+func NewSessionFromConfig(teamCfg *config.TeamConfig, parentCfg *config.Config, projectRoot ...string) *Session {
 	var assignments []ModelAssignment
+	root := ""
+	if len(projectRoot) > 0 {
+		root = projectRoot[0]
+	}
 	for roleName, tm := range teamCfg.Models {
 		role := Role(roleName)
 		cfg := buildModelConfig(tm, parentCfg)
 		assignments = append(assignments, ModelAssignment{
-			Role: role, Model: tm.Model, Config: cfg,
+			Role: role, Model: tm.Model, Config: cfg, ProjectRoot: root,
 		})
 	}
-	return &Session{assignments: assignments}
+	return &Session{assignments: assignments, projectRoot: root}
 }
 
 func buildModelConfig(tm config.TeamModel, parent *config.Config) *config.Config {
@@ -133,7 +139,10 @@ func (s *Session) RunParallel(ctx context.Context, prompt string) ([]Finding, er
 			rolePrompt := roleSystemPrompt(assignment.Role)
 			fullPrompt := rolePrompt + "\n\n" + prompt
 
-			eng, err := engine.New(engine.EngineParams{Config: assignment.Config})
+			eng, err := engine.New(engine.EngineParams{
+				Config:      assignment.Config,
+				ProjectRoot: assignment.ProjectRoot,
+			})
 			if err != nil {
 				mu.Lock()
 				findings = append(findings, Finding{

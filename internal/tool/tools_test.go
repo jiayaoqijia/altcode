@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -14,11 +15,23 @@ import (
 func setupTestDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "hello.go"), []byte("package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n"), 0o644)
-	os.WriteFile(filepath.Join(dir, "README.md"), []byte("# Test\nThis is a test."), 0o644)
-	os.MkdirAll(filepath.Join(dir, "sub"), 0o755)
-	os.WriteFile(filepath.Join(dir, "sub", "data.txt"), []byte("line1\nline2\nline3\n"), 0o644)
+	mustWriteFile(t, filepath.Join(dir, "hello.go"), "package main\n\nfunc main() {\n\tfmt.Println(\"hello\")\n}\n")
+	mustWriteFile(t, filepath.Join(dir, "README.md"), "# Test\nThis is a test.")
+	if err := os.MkdirAll(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("MkdirAll: %v", err)
+	}
+	mustWriteFile(t, filepath.Join(dir, "sub", "data.txt"), "line1\nline2\nline3\n")
 	return dir
+}
+
+func mustWriteFile(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s): %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("WriteFile(%s): %v", path, err)
+	}
 }
 
 func TestReadTool(t *testing.T) {
@@ -75,10 +88,9 @@ func TestGlobTool(t *testing.T) {
 // pattern. With matchGlob the pattern must find the nested .txt file.
 func TestGlobTool_DoubleStar(t *testing.T) {
 	dir := t.TempDir()
-	os.WriteFile(filepath.Join(dir, "root.go"), []byte("package main"), 0o644)
-	os.MkdirAll(filepath.Join(dir, "pkg", "deep"), 0o755)
-	os.WriteFile(filepath.Join(dir, "pkg", "shallow.go"), []byte("package pkg"), 0o644)
-	os.WriteFile(filepath.Join(dir, "pkg", "deep", "buried.go"), []byte("package deep"), 0o644)
+	mustWriteFile(t, filepath.Join(dir, "root.go"), "package main")
+	mustWriteFile(t, filepath.Join(dir, "pkg", "shallow.go"), "package pkg")
+	mustWriteFile(t, filepath.Join(dir, "pkg", "deep", "buried.go"), "package deep")
 
 	tests := []struct {
 		name    string
@@ -107,6 +119,159 @@ func TestGlobTool_DoubleStar(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestScopedGlobEmptyPathUsesProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(home, "home.go"), "package home")
+	mustWriteFile(t, filepath.Join(root, "root.go"), "package root")
+	t.Setenv("HOME", home)
+	t.Chdir(home)
+
+	gt := tool.NewGlobTool(root)
+	input, _ := json.Marshal(map[string]any{"pattern": "*.go"})
+	result, err := gt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Output, "root.go") {
+		t.Fatalf("scoped glob output missing project file:\n%s", result.Output)
+	}
+	if strings.Contains(result.Output, "home.go") {
+		t.Fatalf("scoped glob leaked cwd/home file:\n%s", result.Output)
+	}
+}
+
+func TestScopedGlobRejectsHomeTraversalRoot(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	t.Setenv("HOME", home)
+
+	gt := tool.NewGlobTool(root)
+	input, _ := json.Marshal(map[string]any{
+		"pattern": "*.go",
+		"path":    home,
+	})
+	result, err := gt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error == nil {
+		t.Fatalf("expected home traversal to be rejected, got output:\n%s", result.Output)
+	}
+}
+
+func TestScopedGlobSkipsProtectedDirectories(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "safe.go"), "package safe")
+	mustWriteFile(t, filepath.Join(root, "Documents", "secret.go"), "package secret")
+	mustWriteFile(t, filepath.Join(root, "Library", "Mobile Documents", "icloud.go"), "package icloud")
+	mustWriteFile(t, filepath.Join(root, "node_modules", "pkg.go"), "package pkg")
+
+	gt := tool.NewGlobTool(root)
+	input, _ := json.Marshal(map[string]any{"pattern": "**/*.go"})
+	result, err := gt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Output, "safe.go") {
+		t.Fatalf("glob output missing safe file:\n%s", result.Output)
+	}
+	for _, forbidden := range []string{"secret.go", "icloud.go", "pkg.go"} {
+		if strings.Contains(result.Output, forbidden) {
+			t.Fatalf("glob output included protected/noisy file %q:\n%s", forbidden, result.Output)
+		}
+	}
+}
+
+func TestScopedGrepSkipsNestedProtectedDirectories(t *testing.T) {
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(root, "safe", "ok.txt"), "needle safe\n")
+	mustWriteFile(t, filepath.Join(root, "src", "Documents", "secret.txt"), "needle secret\n")
+
+	gt := tool.NewGrepTool(root)
+	input, _ := json.Marshal(map[string]any{"pattern": "needle"})
+	result, err := gt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if !strings.Contains(result.Output, "needle safe") {
+		t.Fatalf("grep output missing safe match:\n%s", result.Output)
+	}
+	if strings.Contains(result.Output, "needle secret") || strings.Contains(result.Output, "Documents") {
+		t.Fatalf("grep output included nested protected directory:\n%s", result.Output)
+	}
+}
+
+func TestScopedReadRejectsSymlinkEscape(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("symlink creation requires elevated privileges on Windows")
+	}
+	root := t.TempDir()
+	outside := t.TempDir()
+	mustWriteFile(t, filepath.Join(outside, "secret.txt"), "outside secret\n")
+	if err := os.Symlink(filepath.Join(outside, "secret.txt"), filepath.Join(root, "link.txt")); err != nil {
+		t.Skipf("symlink unavailable: %v", err)
+	}
+
+	rt := tool.NewReadTool(root)
+	input, _ := json.Marshal(map[string]any{"file_path": "link.txt"})
+	result, err := rt.Execute(context.Background(), input)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if result.Error == nil {
+		t.Fatalf("expected symlink escape to be rejected, got:\n%s", result.Output)
+	}
+}
+
+func TestScopedReadLsAndGrepUseProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	mustWriteFile(t, filepath.Join(home, "README.md"), "home needle\n")
+	mustWriteFile(t, filepath.Join(root, "README.md"), "root needle\n")
+	mustWriteFile(t, filepath.Join(root, "sub", "item.txt"), "sub item\n")
+	t.Chdir(home)
+
+	rt := tool.NewReadTool(root)
+	readInput, _ := json.Marshal(map[string]any{"file_path": "README.md"})
+	readResult, err := rt.Execute(context.Background(), readInput)
+	if err != nil {
+		t.Fatalf("read Execute: %v", err)
+	}
+	if !strings.Contains(readResult.Output, "root needle") || strings.Contains(readResult.Output, "home needle") {
+		t.Fatalf("read did not resolve relative path under root:\n%s", readResult.Output)
+	}
+
+	lt := tool.NewLsTool(root)
+	lsInput, _ := json.Marshal(map[string]any{"path": "sub"})
+	lsResult, err := lt.Execute(context.Background(), lsInput)
+	if err != nil {
+		t.Fatalf("ls Execute: %v", err)
+	}
+	if !strings.Contains(lsResult.Output, "item.txt") {
+		t.Fatalf("ls did not resolve relative path under root:\n%s", lsResult.Output)
+	}
+
+	gt := tool.NewGrepTool(root)
+	grepInput, _ := json.Marshal(map[string]any{"pattern": "needle"})
+	grepResult, err := gt.Execute(context.Background(), grepInput)
+	if err != nil {
+		t.Fatalf("grep Execute: %v", err)
+	}
+	if !strings.Contains(grepResult.Output, "root needle") || strings.Contains(grepResult.Output, "home needle") {
+		t.Fatalf("grep did not default to project root:\n%s", grepResult.Output)
 	}
 }
 
