@@ -3,31 +3,32 @@ package tui
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/jiayaoqijia/altcode/internal/command"
-	"github.com/jiayaoqijia/altcode/internal/engine"
-	"github.com/jiayaoqijia/altcode/internal/event"
-	"github.com/jiayaoqijia/altcode/internal/orchestra"
-	"github.com/jiayaoqijia/altcode/internal/workspace"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/jiayaoqijia/altcode/internal/command"
+	"github.com/jiayaoqijia/altcode/internal/engine"
+	"github.com/jiayaoqijia/altcode/internal/event"
+	"github.com/jiayaoqijia/altcode/internal/orchestra"
+	"github.com/jiayaoqijia/altcode/internal/workspace"
 )
 
 type eventMsg event.Event
 type streamDoneMsg struct{}
-type wfEventMsg orchestra.PhaseEvent  // workflow phase event from orchestra
-type wfDoneMsg struct{}               // workflow completed
-type workspacePollMsg struct{}        // periodic workspace poll tick
-type workspaceTransitionMsg struct {  // workspace state machine transition
+type wfEventMsg orchestra.PhaseEvent // workflow phase event from orchestra
+type wfDoneMsg struct{}              // workflow completed
+type workspacePollMsg struct{}       // periodic workspace poll tick
+type workspaceTransitionMsg struct { // workspace state machine transition
 	Status workspace.WorkspaceStatus
 }
-type stuckToolMsg struct {            // tool running longer than threshold
+type stuckToolMsg struct { // tool running longer than threshold
 	name      string
 	startedAt time.Time
 }
@@ -58,49 +59,49 @@ type App struct {
 	vimPendingG  bool
 	sessionTitle string // Display label set by /rename
 	tools        *toolTree
-	toolStart   time.Time
-	spinner     spinner.Model
+	toolStart    time.Time
+	spinner      spinner.Model
 
-	messages         []chatMessage
-	streaming        string
-	busy             bool
-	thinking         bool
-	thinkingText     string
-	activeToolName   string // tool currently executing
-	activeToolDetail string // e.g. file path
-	turnStart        time.Time // when the current turn began (for response timing)
-	cancel           context.CancelFunc
-	events           <-chan event.Event
-	tokenInfo        string
+	messages             []chatMessage
+	streaming            string
+	busy                 bool
+	thinking             bool
+	thinkingText         string
+	activeToolName       string    // tool currently executing
+	activeToolDetail     string    // e.g. file path
+	turnStart            time.Time // when the current turn began (for response timing)
+	cancel               context.CancelFunc
+	events               <-chan event.Event
+	tokenInfo            string
 	tokensIn             int64
 	tokensOut            int64
 	currentContextTokens int64 // last-turn input (not cumulative)
 	costUSD              float64
-	sessionStart     time.Time
-	sessionSlug      string
-	toolCounts       map[string]int
-	gitProject       string
-	gitBranch        string
-	gitDirty         bool
+	sessionStart         time.Time
+	sessionSlug          string
+	toolCounts           map[string]int
+	gitProject           string
+	gitBranch            string
+	gitDirty             bool
 
-	teamView       *teamView        // split-pane view for team mode
-	wsView         *WorkspaceView   // workspace mode dashboard
-	lastBell       time.Time        // bell cooldown (30s between rings)
-	tasksTotal     int              // total tasks created
-	tasksDone      int              // tasks completed
-	activeTaskName string           // currently in-progress task name
-	turnToolCount  int              // tools used this turn (for summary)
-	turnWrites     int              // files written this turn
-	turnReads      int              // files read this turn
-	turnBashes     int              // commands run this turn
-	turnCostStart  float64          // cost at turn start (for delta)
-	turnTokenStart int64            // tokens at turn start (for delta)
-	cachedTokens   int64            // last turn's cached prompt tokens (HUD chip)
-	lastFrame      time.Time        // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
+	teamView       *teamView      // split-pane view for team mode
+	wsView         *WorkspaceView // workspace mode dashboard
+	lastBell       time.Time      // bell cooldown (30s between rings)
+	tasksTotal     int            // total tasks created
+	tasksDone      int            // tasks completed
+	activeTaskName string         // currently in-progress task name
+	turnToolCount  int            // tools used this turn (for summary)
+	turnWrites     int            // files written this turn
+	turnReads      int            // files read this turn
+	turnBashes     int            // commands run this turn
+	turnCostStart  float64        // cost at turn start (for delta)
+	turnTokenStart int64          // tokens at turn start (for delta)
+	cachedTokens   int64          // last turn's cached prompt tokens (HUD chip)
+	lastFrame      time.Time      // last viewport-render timestamp (frame rate limiter — DS-TUI parity)
 	// queue is the type-ahead FIFO for prompts entered while the
 	// current turn is running. Drained by drainQueue() in onDone().
 	// DeepSeek-TUI parity for `/queue` workflow.
-	queue          []string
+	queue []string
 	// lastSubmittedText + lastSubmittedAt drive the 500ms double-submit
 	// dedup. tmux send-keys can replay the same prompt under bracketed-
 	// paste / TIOCSTI races, burning the user's cost on a duplicate turn.
@@ -112,7 +113,7 @@ type App struct {
 	// holds the response channel until the user picks y/n/a/!.
 	permDialog        *PermissionDialog
 	pendingPermission *event.PermReq
-	prevContentLen int              // viewport content length (kept for backward-compat with tests)
+	prevContentLen    int // viewport content length (kept for backward-compat with tests)
 	// renderCache holds the rendered string prefix for the first
 	// renderCacheLen messages. Append-only message lists (the common
 	// case — see grep of `a.messages =` assignments) extend this
@@ -132,11 +133,11 @@ type App struct {
 	// loop: replaces the fragile content-length heuristic that could
 	// GotoTop mid-conversation when the tool tree collapsed.
 	userScrolledAway bool
-	inputHistory   *inputHistory    // prompt history for up/down recall
-	wfHeader       *workflowHeader  // phase breadcrumb for workflow mode
-	wfEvents       <-chan orchestra.PhaseEvent // workflow event stream
-	wfOverride     chan orchestra.OverrideCmd  // TUI → orchestra control
-	wfRunning      bool
+	inputHistory     *inputHistory               // prompt history for up/down recall
+	wfHeader         *workflowHeader             // phase breadcrumb for workflow mode
+	wfEvents         <-chan orchestra.PhaseEvent // workflow event stream
+	wfOverride       chan orchestra.OverrideCmd  // TUI → orchestra control
+	wfRunning        bool
 }
 
 // New creates a new App backed by the given engine and theme.
@@ -275,6 +276,8 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Height: header(1) + sep(1) + body + HUD(2) + input(3) = 7 lines overhead
 		a.viewport = viewport.New(mainWidth, max(1, msg.Height-7))
 		a.mdRenderer = NewMarkdownRenderer(max(10, mainWidth-4))
+		a.renderCache = ""
+		a.renderCacheLen = 0
 		a.teamView.SetSize(msg.Width, max(1, msg.Height-6))
 		if a.wsView != nil {
 			a.wsView.SetSize(msg.Width, max(1, msg.Height-6))
@@ -333,11 +336,9 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
-
 // handleKey, handleSetupKey, handleWorkspaceKey, handleWorkflowKey,
 // handleGlobalKey, handleEscKey, handleEnterKey, handleCtrlCKey
 // are all in app_keys.go
-
 
 // handleFilePopupKey routes keys when the file completion popup is visible.
 func (a *App) handleFilePopupKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
@@ -397,16 +398,13 @@ func (a *App) handleVimModeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	}
 }
 
-
 // Setup, welcome, auth functions are in app_setup.go
 // Event handling is in app_events.go
 
 // handleEvent is in app_events.go
 
-
 // View, renderHeader, renderInputArea, renderMainBody, buildToolActive,
 // buildHUDState, renderStatusSection are all in app_view.go
-
 
 func (a *App) submit() tea.Cmd {
 	text := strings.TrimSpace(a.input.Value())
@@ -499,7 +497,14 @@ func (a *App) expandSlashCommand(text string) string {
 	if err != nil {
 		return text
 	}
+	if args != "" && isSkillCommandPath(cmd.Path) && !strings.Contains(cmd.Body, "$ARGUMENTS") {
+		expanded = strings.TrimSpace(expanded) + "\n\nUser request:\n" + args
+	}
 	return expanded
+}
+
+func isSkillCommandPath(path string) bool {
+	return strings.HasSuffix(filepath.ToSlash(path), "/SKILL.md")
 }
 
 func (a *App) waitForEvent() tea.Cmd {

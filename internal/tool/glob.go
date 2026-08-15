@@ -10,10 +10,14 @@ import (
 	"strings"
 )
 
-type globTool struct{}
+type globTool struct {
+	paths pathPolicy
+}
 
 // NewGlobTool creates a tool that finds files matching a glob pattern.
-func NewGlobTool() Tool { return &globTool{} }
+func NewGlobTool(root ...string) Tool {
+	return &globTool{paths: newPathPolicy(firstRoot(root))}
+}
 
 // matchGlob matches `rel` against `pattern` with support for `**`
 // (recursive segment wildcard). Without **, falls back to filepath.Match
@@ -77,13 +81,13 @@ func matchGlob(pattern, rel string) bool {
 	return false
 }
 
-func (t *globTool) Name() string                                  { return "glob" }
+func (t *globTool) Name() string { return "glob" }
 func (t *globTool) Description() string {
 	return "Find files by name pattern. Use this to locate files before creating new ones — check if similar files already exist. Supports patterns like *.go or *.ts."
 }
-func (t *globTool) IsConcurrencySafe() bool                       { return true }
-func (t *globTool) IsReadOnly() bool                              { return true }
-func (t *globTool) PermissionPattern(_ json.RawMessage) string    { return "glob:*" }
+func (t *globTool) IsConcurrencySafe() bool                    { return true }
+func (t *globTool) IsReadOnly() bool                           { return true }
+func (t *globTool) PermissionPattern(_ json.RawMessage) string { return "glob:*" }
 
 func (t *globTool) Parameters() json.RawMessage {
 	return json.RawMessage(`{
@@ -105,13 +109,18 @@ func (t *globTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 		return nil, fmt.Errorf("parse input: %w", err)
 	}
 
-	base := params.Path
-	if base == "" {
-		base, _ = os.Getwd()
+	cwd, _ := os.Getwd()
+	base, err := t.paths.resolve(params.Path, cwd)
+	if err != nil {
+		return &Result{
+			Output: fmt.Sprintf("Error: %v", err),
+			Title:  "glob",
+			Error:  err,
+		}, nil
 	}
 
 	var matches []string
-	err := filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
+	err = filepath.WalkDir(base, func(path string, d os.DirEntry, err error) error {
 		// Honor cancellation so a long walk doesn't outlive the user
 		// (Ctrl+C, session shutdown).
 		if cerr := ctx.Err(); cerr != nil {
@@ -121,6 +130,9 @@ func (t *globTool) Execute(ctx context.Context, input json.RawMessage) (*Result,
 			return nil
 		}
 		if d.IsDir() {
+			if shouldSkipWalkDir(base, path, d) {
+				return filepath.SkipDir
+			}
 			return nil
 		}
 		rel, _ := filepath.Rel(base, path)

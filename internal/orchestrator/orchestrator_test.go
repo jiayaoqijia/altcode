@@ -2,9 +2,14 @@ package orchestrator_test
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -17,6 +22,19 @@ func sseText(text string) string {
 	return fmt.Sprintf("event: content_block_start\ndata: %s\n\n", `{"index":0,"content_block":{"type":"text","text":""}}`) +
 		fmt.Sprintf("event: content_block_delta\ndata: %s\n\n", fmt.Sprintf(`{"delta":{"type":"text_delta","text":%q}}`, text)) +
 		"event: content_block_stop\ndata: {}\n\nevent: message_stop\ndata: {}\n\n"
+}
+
+func sseToolCall(toolID, toolName, input string) string {
+	return fmt.Sprintf(
+		"event: content_block_start\ndata: %s\n\n",
+		fmt.Sprintf(`{"index":0,"content_block":{"type":"tool_use","id":%q,"name":%q}}`, toolID, toolName),
+	) +
+		fmt.Sprintf(
+			"event: content_block_delta\ndata: %s\n\n",
+			fmt.Sprintf(`{"delta":{"type":"input_json_delta","partial_json":%q}}`, input),
+		) +
+		"event: content_block_stop\ndata: {}\n\n" +
+		"event: message_stop\ndata: {}\n\n"
 }
 
 func mockModel(t *testing.T, response string) *config.Config {
@@ -70,6 +88,72 @@ func TestRunParallel_MultipleModels(t *testing.T) {
 
 	if !roles[orchestrator.RoleArchitect] || !roles[orchestrator.RoleReviewer] || !roles[orchestrator.RoleChallenger] {
 		t.Error("Missing roles in findings")
+	}
+}
+
+func TestRunParallel_ScopesToolsToProjectRoot(t *testing.T) {
+	home := t.TempDir()
+	root := t.TempDir()
+	if err := os.WriteFile(filepath.Join(home, "README.md"), []byte("home marker\n"), 0o644); err != nil {
+		t.Fatalf("write home readme: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "README.md"), []byte("root marker\n"), 0o644); err != nil {
+		t.Fatalf("write root readme: %v", err)
+	}
+	t.Chdir(home)
+
+	var mu sync.Mutex
+	var requests [][]byte
+	responses := []string{
+		sseToolCall("read-1", "read", `{"file_path":"README.md"}`),
+		sseText("done"),
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, _ := io.ReadAll(r.Body)
+		mu.Lock()
+		requests = append(requests, body)
+		idx := len(requests) - 1
+		mu.Unlock()
+
+		if idx >= len(responses) {
+			t.Errorf("unexpected model request %d", idx)
+			w.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(responses[idx]))
+	}))
+	defer srv.Close()
+
+	parent := config.Default()
+	parent.Provider["anthropic"] = config.ProviderConfig{APIKey: "k", BaseURL: srv.URL}
+	team := &config.TeamConfig{
+		Models: map[string]config.TeamModel{
+			"reviewer": {Model: "anthropic/test"},
+		},
+	}
+	session := orchestrator.NewSessionFromConfig(team, parent, root)
+
+	if _, err := session.RunParallel(context.Background(), "read readme"); err != nil {
+		t.Fatal(err)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	if len(requests) < 2 {
+		t.Fatalf("expected second request with tool result, got %d requests", len(requests))
+	}
+	var second map[string]any
+	if err := json.Unmarshal(requests[1], &second); err != nil {
+		t.Fatalf("unmarshal second request: %v", err)
+	}
+	encoded := fmt.Sprint(second["messages"])
+	if !strings.Contains(encoded, "root marker") {
+		t.Fatalf("tool result did not include project-root file; request=%s", string(requests[1]))
+	}
+	if strings.Contains(encoded, "home marker") {
+		t.Fatalf("tool result leaked cwd/home file; request=%s", string(requests[1]))
 	}
 }
 

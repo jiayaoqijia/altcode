@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"testing"
+
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestLooksLikeDiff(t *testing.T) {
@@ -27,6 +29,27 @@ func TestLooksLikeDiff(t *testing.T) {
 	}
 }
 
+func TestAssistantMarkdownRerendersAfterRendererCreated(t *testing.T) {
+	a := testApp()
+	a.width = 80
+	a.height = 20
+	a.messages = append(a.messages, chatMessage{
+		role:    roleAssistant,
+		content: "I'm **altcode** in this environment.\n\n```md\n**literal**\n```",
+	})
+
+	a.updateViewport()
+	a.Update(tea.WindowSizeMsg{Width: 80, Height: 20})
+
+	plain := stripANSI(a.viewport.View())
+	if strings.Contains(plain, "**altcode**") {
+		t.Fatalf("assistant markdown emphasis leaked literal delimiters:\n%s", plain)
+	}
+	if !strings.Contains(plain, "**literal**") {
+		t.Fatalf("fenced code block should preserve literal markdown characters:\n%s", plain)
+	}
+}
+
 func TestParseProvider(t *testing.T) {
 	cases := map[string]string{
 		"":                       "anthropic",
@@ -46,10 +69,10 @@ func TestParseProvider(t *testing.T) {
 
 func TestProviderHelpers(t *testing.T) {
 	cases := []struct {
-		provider          string
-		setupPlaceholder  string
-		loginLabel        string
-		fmtLabel          string
+		provider         string
+		setupPlaceholder string
+		loginLabel       string
+		fmtLabel         string
 	}{
 		{"anthropic", "Paste your Anthropic API key and press Enter", "Claude Code", "Anthropic"},
 		{"openai", "Paste your OpenAI API key and press Enter", "Codex", "OpenAI"},
@@ -92,14 +115,14 @@ func TestDisplayVersion(t *testing.T) {
 	// so callers can always prepend a literal "v" without producing
 	// "vv0.10.4" when the build is tagged with -X main.Version=v0.10.4.
 	cases := map[string]string{
-		"":         "dev",
-		"   ":      "dev",
-		"v":        "dev", // pure-prefix collapses to dev
-		"v1.2.3":   "1.2.3",
-		"V1.2.3":   "1.2.3",
-		"vv1.2.3":  "1.2.3",
+		"":          "dev",
+		"   ":       "dev",
+		"v":         "dev", // pure-prefix collapses to dev
+		"v1.2.3":    "1.2.3",
+		"V1.2.3":    "1.2.3",
+		"vv1.2.3":   "1.2.3",
 		"  pinned ": "pinned",
-		"1.2.3":    "1.2.3",
+		"1.2.3":     "1.2.3",
 	}
 	for in, want := range cases {
 		if got := displayVersion(in); got != want {
@@ -118,7 +141,7 @@ func TestFormatUSD(t *testing.T) {
 		0:       "$0.0000",
 		0.0026:  "$0.0026", // sub-cent: 4-decimal preserves half-cents
 		0.0099:  "$0.0099",
-		0.01:    "$0.010",  // boundary: 3-decimal kicks in at exactly $0.01
+		0.01:    "$0.010", // boundary: 3-decimal kicks in at exactly $0.01
 		0.123:   "$0.123",
 		0.999:   "$0.999",
 		1.0:     "$1.00", // ≥ $1: 2-decimal
